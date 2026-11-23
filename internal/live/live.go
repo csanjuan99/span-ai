@@ -2,6 +2,7 @@
 package live
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -24,11 +25,93 @@ type Hub struct {
 	mu      sync.Mutex
 	subs    map[string]map[chan []byte]struct{}
 	flights map[string]Flight
+	stops   map[string]context.CancelFunc
+	closed  bool
 }
 
 // New returns an empty hub.
 func New() *Hub {
 	return &Hub{subs: map[string]map[chan []byte]struct{}{}}
+}
+
+// WatchStop registers how to cancel the flight of one run. Whoever launched it owns the
+// context; the hub only holds the handle.
+func (h *Hub) WatchStop(id string, cancel context.CancelFunc) {
+	if h == nil || cancel == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stops == nil {
+		h.stops = map[string]context.CancelFunc{}
+	}
+	h.stops[id] = cancel
+}
+
+// Fly runs work in a goroutine that Stop can cancel. The caller has already claimed id.
+// The stop handle is registered before the goroutine starts, so a Stop that arrives
+// the moment after Fly returns still finds the flight; registering it inside the
+// goroutine would leave a window where the stop button reports "nothing is running".
+// The claim is released when work returns.
+func (h *Hub) Fly(id string, work func(context.Context)) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h.WatchStop(id, cancel)
+	go func() {
+		defer h.EndFlight(id)
+		defer cancel()
+		work(ctx)
+	}()
+}
+
+// StopAll cancels every flight in this process and closes the hub: Claim refuses from
+// here on. Without that, a request that lands while the flights drain would start an
+// agent that the exiting process abandons.
+func (h *Hub) StopAll() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	h.closed = true
+	cancels := make([]context.CancelFunc, 0, len(h.stops))
+	for id, cancel := range h.stops {
+		cancels = append(cancels, cancel)
+		delete(h.stops, id)
+	}
+	h.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+}
+
+// Drain waits until no flight is claimed and reports whether that happened before the
+// deadline. A cancelled flight stays claimed until its worker returns.
+func (h *Hub) Drain(wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		if len(h.Flights()) == 0 {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Stop cancels the flight of one run and reports whether something was running.
+func (h *Hub) Stop(id string) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	cancel, ok := h.stops[id]
+	delete(h.stops, id)
+	h.mu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	return true
 }
 
 // Publish sends one event. A marshal or send failure does not fail the run.
@@ -57,6 +140,9 @@ func (h *Hub) Claim(id, stage string) bool {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.closed {
+		return false
+	}
 	if h.flights == nil {
 		h.flights = map[string]Flight{}
 	}
@@ -75,6 +161,7 @@ func (h *Hub) EndFlight(id string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	delete(h.flights, id)
+	delete(h.stops, id)
 }
 
 // Flight reports the worker reserved for id.
