@@ -864,6 +864,21 @@ another run or exists in git: two runs on one branch would fight over its checko
 answering, or reloading an isolated run always lands on its own worktree and reads the policy
 from the project.
 
+**`span run` on a busy checkout.** From the terminal, `span run --branch feat/x` does the same
+when another run holds the checkout: it prints `this checkout is busy (...): running feat/x in
+its own worktree at <path>` and goes on there, instead of holding. A free checkout is edited in
+place as before, and `--worktree` still forces a tree. Without `--branch` there is no name for
+a tree, so it refuses and tells you to pass one.
+
+**Capping parallel runs.** Many agents at once can exhaust the quota of their CLI.
+`span serve --max-parallel 4` drives at most four runs in that process; a launch or a wake past
+that is refused with `span serve is at its limit of 4 runs at once (--max-parallel 4): wait for
+a run to finish, or raise --max-parallel` (HTTP 409), and nothing is created for it. A slot is
+freed when a run ends, fails or is stopped. The default, `0`, is no limit. The cap counts the
+runs of one `span serve` process; `span run` and `span resume` from other terminals are not
+counted. Two launches that arrive in the same instant at the edge of the cap can both pass the
+early check; the second is then refused later and leaves a run in hold, which you resume.
+
 **Dependencies in a fresh worktree.** A new worktree has the code but not `node_modules`.
 Set a command in `span.yaml` and Span runs it once in the run's own worktree, before the
 baseline and the first build; it never runs in your own checkout:
