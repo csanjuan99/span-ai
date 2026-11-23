@@ -18,31 +18,56 @@ type Spec struct {
 	Marker string
 	// Needle is a phrase that must appear in Marker. Empty means presence is enough.
 	Needle string
+	// ModelFlag selects the model for one run. It is passed with the model as a separate
+	// argument, never joined, so a value cannot become a flag of its own.
+	ModelFlag string
 }
 
 // Specs is the registry and the order agent: any follows.
 var Specs = []Spec{
 	{
 		ID: "cursor", Label: "Cursor", Binary: "cursor-agent",
-		Args:   []string{"-p", "--trust", "--force"},
+		Args: []string{"-p", "--trust", "--force"}, ModelFlag: "--model",
 		Marker: ".cursor/rules/gentle-ai.mdc",
 	},
 	{
 		ID: "claude", Label: "Claude", Binary: "claude",
-		Args:   []string{"-p", "--dangerously-skip-permissions"},
+		Args: []string{"-p", "--dangerously-skip-permissions"}, ModelFlag: "--model",
 		Marker: ".claude/CLAUDE.md", Needle: "Organic Driven Development",
 	},
 	{
 		ID: "codex", Label: "Codex", Binary: "codex",
-		Args:   []string{"exec", "--approve-for-me"},
+		Args: []string{"exec", "--approve-for-me"}, ModelFlag: "--model",
 		Marker: ".codex/AGENTS.md", Needle: "Organic Driven Development",
 	},
 	{
 		// Pi runs once with --print and trusts project-local files with --approve.
 		ID: "pi", Label: "Pi", Binary: "pi",
-		Args:   []string{"--print", "--approve"},
+		Args: []string{"--print", "--approve"}, ModelFlag: "--model",
 		Marker: ".pi/agent/npm/node_modules/gentle-pi",
 	},
+}
+
+// MaxModel is the longest model name Span accepts.
+const MaxModel = 100
+
+// ValidModel reports whether value is safe to hand to a CLI as a model: a name made of
+// letters, digits and . _ : / @ + - that does not start with a dash (so it cannot be read
+// as a flag), with no spaces, quotes or line breaks. An empty value is not a model.
+func ValidModel(value string) bool {
+	if value == "" || len(value) > MaxModel {
+		return false
+	}
+	for i, r := range value {
+		alnum := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		if i == 0 && !alnum {
+			return false
+		}
+		if !alnum && !strings.ContainsRune("._:/@+-", r) {
+			return false
+		}
+	}
+	return true
 }
 
 // Home is where the harnesses keep their install for this user. Tests replace it.
@@ -60,6 +85,16 @@ type State struct {
 	Gentle    bool   `json:"gentle"`
 	Ready     bool   `json:"ready"`
 	Reason    string `json:"reason,omitempty"`
+}
+
+// IsID reports whether value is exactly the id of a CLI Span knows.
+func IsID(value string) bool {
+	for _, spec := range Specs {
+		if value == spec.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // Find resolves an id or a binary name. The binary name is accepted so an existing

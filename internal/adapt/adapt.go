@@ -559,7 +559,19 @@ func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
 // CLIAgents speaks to the selected agent binary.
 type CLIAgents struct {
 	Home string
-	sink io.Writer
+	// Models is the model chosen for each CLI id (see policy.File.Models). A CLI without an
+	// entry runs on the model Gentle AI configured.
+	Models map[string]string
+	sink   io.Writer
+}
+
+// model is the model chosen for the CLI that binary names, or "".
+func (c CLIAgents) model(binary string) string {
+	spec, ok := agent.Find(binary)
+	if !ok {
+		return ""
+	}
+	return c.Models[spec.ID]
 }
 
 // Bind copies later agent stdout to w.
@@ -574,7 +586,7 @@ func (c CLIAgents) Select(want string) (agent.Selection, error) {
 }
 
 func (c CLIAgents) Frame(ctx context.Context, name, workspace, text string) (engine.FrameDoc, error) {
-	out, err := agent.RunWriter(ctx, name, workspace, text, c.sink)
+	out, err := agent.RunModel(ctx, name, c.model(name), workspace, text, c.sink)
 	if err != nil {
 		return engine.FrameDoc{}, err
 	}
@@ -586,12 +598,12 @@ func (c CLIAgents) Frame(ctx context.Context, name, workspace, text string) (eng
 }
 
 func (c CLIAgents) Build(ctx context.Context, name, workspace, text string) error {
-	_, err := agent.RunWriter(ctx, name, workspace, text, c.sink)
+	_, err := agent.RunModel(ctx, name, c.model(name), workspace, text, c.sink)
 	return err
 }
 
 func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (engine.InspectDoc, error) {
-	out, err := agent.RunWriter(ctx, name, workspace, text, c.sink)
+	out, err := agent.RunModel(ctx, name, c.model(name), workspace, text, c.sink)
 	if err != nil {
 		return engine.InspectDoc{}, err
 	}
@@ -605,7 +617,7 @@ func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (e
 // Propose asks the agent for conflict options. Its stdout is not copied to the run
 // transcript: the reply carries file contents, which belong in the plan, not the log.
 func (c CLIAgents) Propose(ctx context.Context, name, workspace, text string) (engine.ConflictReply, error) {
-	out, err := agent.RunWriter(ctx, name, workspace, text, nil)
+	out, err := agent.RunModel(ctx, name, c.model(name), workspace, text, nil)
 	if err != nil {
 		return engine.ConflictReply{}, err
 	}

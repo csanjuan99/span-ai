@@ -77,6 +77,17 @@ func commandArgs(name string) []string {
 	return []string{"-p"}
 }
 
+// commandArgsModel is commandArgs plus the model flag and value when model is valid. An
+// empty or invalid model adds nothing, so the CLI keeps the model Gentle AI configured.
+func commandArgsModel(name, model string) []string {
+	args := append([]string(nil), commandArgs(name)...)
+	spec, ok := Find(name)
+	if !ok || spec.ModelFlag == "" || !ValidModel(model) {
+		return args
+	}
+	return append(args, spec.ModelFlag, model)
+}
+
 // Run executes the CLI with the prompt on stdin and returns stdout.
 func Run(ctx context.Context, name, workspace, prompt string) (string, error) {
 	return RunWriter(ctx, name, workspace, prompt, nil)
@@ -84,7 +95,13 @@ func Run(ctx context.Context, name, workspace, prompt string) (string, error) {
 
 // RunWriter does what Run does and copies stdout to sink while the process runs.
 func RunWriter(ctx context.Context, name, workspace, prompt string, sink io.Writer) (string, error) {
-	cmd := exec.CommandContext(ctx, name, commandArgs(name)...)
+	return RunModel(ctx, name, "", workspace, prompt, sink)
+}
+
+// RunModel does what RunWriter does with the given model. An empty model leaves the
+// CLI on the one Gentle AI configured.
+func RunModel(ctx context.Context, name, model, workspace, prompt string, sink io.Writer) (string, error) {
+	cmd := exec.CommandContext(ctx, name, commandArgsModel(name, model)...)
 	proc.Tame(cmd)
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(prompt)

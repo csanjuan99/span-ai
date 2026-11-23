@@ -718,7 +718,7 @@ func options(workspace, spans, policyPath, project string, explicit bool) (engin
 		Workspace: workspace,
 		Root:      spans,
 		Policy:    file,
-		Agents:    &adapt.CLIAgents{},
+		Agents:    &adapt.CLIAgents{Models: file.Models},
 		Check:     adapt.Exec{},
 		Source:    adapt.Git{Dir: workspace},
 		Review:    adapt.Host{Workspace: workspace, State: spans},
