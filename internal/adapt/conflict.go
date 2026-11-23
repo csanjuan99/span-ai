@@ -3,6 +3,8 @@ package adapt
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -52,17 +54,16 @@ func (g Git) Preflight(ctx context.Context, base string) (engine.Preflight, erro
 	if ref == "" {
 		return engine.Preflight{Note: note}, nil
 	}
-	sha, err := g.output(ctx, "rev-parse", ref+"^{commit}")
+	sha, err := g.hout(ctx, "rev-parse", ref+"^{commit}")
 	if err != nil {
 		return engine.Preflight{Note: err.Error()}, nil
 	}
 	out := engine.Preflight{Base: ref, BaseSHA: sha}
-	if _, err := g.output(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
+	if _, err := g.hout(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
 		out.Checked = true
 		return out, nil
 	}
-	cmd := exec.CommandContext(ctx, "git", "merge-tree", "--write-tree", "--name-only", "HEAD", sha)
-	cmd.Dir = g.Dir
+	cmd := g.command(ctx, "merge-tree", "--write-tree", "--name-only", "HEAD", sha)
 	var stderr bytes.Buffer
 	cmd.Stdout = io.Discard
 	cmd.Stderr = &stderr
@@ -105,20 +106,20 @@ func (g Git) Integrate(ctx context.Context, base string) (engine.Integration, er
 	if ref == "" {
 		return engine.Integration{}, errors.New(note)
 	}
-	sha, err := g.output(ctx, "rev-parse", ref+"^{commit}")
+	sha, err := g.hout(ctx, "rev-parse", ref+"^{commit}")
 	if err != nil {
 		return engine.Integration{}, err
 	}
 	out := engine.Integration{Base: ref, BaseSHA: sha}
-	if _, err := g.output(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
+	if _, err := g.hout(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
 		out.Clean = true
 		return out, nil
 	}
-	mergeBase, err := g.output(ctx, "merge-base", "HEAD", sha)
+	mergeBase, err := g.hout(ctx, "merge-base", "HEAD", sha)
 	if err != nil {
 		return engine.Integration{}, err
 	}
-	_, mergeErr := g.output(ctx, "merge", "--no-commit", "--no-ff", "--no-edit", sha)
+	_, mergeErr := g.hout(ctx, "merge", "--no-commit", "--no-ff", "--no-edit", sha)
 	if mergeErr == nil {
 		out.Clean = true
 		out.Merged = true
@@ -137,12 +138,12 @@ func (g Git) Integrate(ctx context.Context, base string) (engine.Integration, er
 }
 
 func (g Git) trackedChanges(ctx context.Context) (string, error) {
-	return g.output(ctx, "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude).span")
+	return g.hout(ctx, "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude).span")
 }
 
 // Merging reports whether a merge is in progress in the checkout.
 func (g Git) Merging(ctx context.Context) (bool, error) {
-	path, err := g.output(ctx, "rev-parse", "--git-path", "MERGE_HEAD")
+	path, err := g.hout(ctx, "rev-parse", "--git-path", "MERGE_HEAD")
 	if err != nil {
 		return false, err
 	}
@@ -165,17 +166,17 @@ func (g Git) Abort(ctx context.Context) error {
 	if err != nil || !merging {
 		return err
 	}
-	if _, err := g.output(ctx, "merge", "--abort"); err != nil {
+	if _, err := g.hout(ctx, "merge", "--abort"); err != nil {
 		return err
 	}
 	left, err := g.trackedChanges(ctx)
 	if err != nil || left == "" {
 		return err
 	}
-	if _, err := g.output(ctx, "reset", "-q"); err != nil {
+	if _, err := g.hout(ctx, "reset", "-q"); err != nil {
 		return err
 	}
-	if _, err := g.output(ctx, "checkout", "--", "."); err != nil {
+	if _, err := g.hout(ctx, "checkout", "--", "."); err != nil {
 		return err
 	}
 	if left, err = g.trackedChanges(ctx); err != nil {
@@ -236,25 +237,29 @@ func (g Git) resolveOne(ctx context.Context, path string, res engine.FileResolut
 		if err := g.safePath(path); err != nil {
 			return err
 		}
-		full := filepath.Join(g.Dir, filepath.FromSlash(path))
-		info, err := os.Lstat(full)
-		if errors.Is(err, os.ErrNotExist) {
+		var info fs.FileInfo
+		var raw []byte
+		err := g.inTree(func(root *os.Root) error {
+			var err error
+			if info, err = root.Lstat(filepath.FromSlash(path)); err != nil {
+				return err
+			}
+			if !info.Mode().IsRegular() {
+				return errors.New("the regenerated path is not a regular file")
+			}
+			raw, err = root.ReadFile(filepath.FromSlash(path))
+			return err
+		})
+		if errors.Is(err, fs.ErrNotExist) {
 			return g.drop(ctx, path)
 		}
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return errors.New("the regenerated path is not a regular file")
-		}
-		raw, err := os.ReadFile(full)
 		if err != nil {
 			return err
 		}
 		if engine.HasConflictMarkers(raw) {
 			return errors.New("conflict markers are still in the file")
 		}
-		sha, err := g.output(ctx, "hash-object", "-w", "--", path)
+		sha, err := g.hout(ctx, "hash-object", "-w", "--", path)
 		if err != nil {
 			return err
 		}
@@ -295,18 +300,25 @@ func (g Git) place(ctx context.Context, path, mode, sha string) error {
 	if err := g.safePath(path); err != nil {
 		return err
 	}
-	full := filepath.Join(g.Dir, filepath.FromSlash(path))
-	if info, err := os.Lstat(full); err == nil && info.IsDir() && mode != gitlink {
-		g.removeEmptyDirs(full)
+	rel := filepath.FromSlash(path)
+	if mode != gitlink {
+		if err := g.inTree(func(root *os.Root) error {
+			if info, err := root.Lstat(rel); err == nil && info.IsDir() {
+				g.removeEmptyDirs(root, path)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
-	if _, err := g.output(ctx, "update-index", "--add", "--cacheinfo", mode+","+sha+","+path); err != nil {
+	if _, err := g.hout(ctx, "update-index", "--add", "--cacheinfo", mode+","+sha+","+path); err != nil {
 		return err
 	}
 	if mode == gitlink {
 		// A submodule's commit is recorded; its checkout is the submodule's business.
-		return os.MkdirAll(full, 0o755)
+		return g.inTree(func(root *os.Root) error { return root.MkdirAll(rel, 0o755) })
 	}
-	_, err = g.output(ctx, "checkout-index", "-f", "--", path)
+	_, err = g.hout(ctx, "checkout-index", "-f", "--", path)
 	return err
 }
 
@@ -314,15 +326,21 @@ func (g Git) place(ctx context.Context, path, mode, sha string) error {
 // directory is left alone. The tree is only touched when the path is, at this moment, inside
 // the checkout: behind a symlinked parent there is nothing of ours to remove.
 func (g Git) drop(ctx context.Context, path string) error {
-	if _, err := g.output(ctx, "update-index", "--force-remove", "--", path); err != nil {
+	if _, err := g.hout(ctx, "update-index", "--force-remove", "--", path); err != nil {
 		return err
 	}
 	if err := g.safePath(path); err != nil {
 		return nil
 	}
-	full := filepath.Join(g.Dir, filepath.FromSlash(path))
-	info, err := os.Lstat(full)
-	if errors.Is(err, os.ErrNotExist) {
+	return g.inTree(func(root *os.Root) error { return g.removeFile(root, path) })
+}
+
+// removeFile removes one file or link of the tree through the opened checkout, which refuses
+// to leave it, and then the directories it emptied. A directory is left alone.
+func (g Git) removeFile(root *os.Root, path string) error {
+	rel := filepath.FromSlash(path)
+	info, err := root.Lstat(rel)
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
@@ -331,38 +349,52 @@ func (g Git) drop(ctx context.Context, path string) error {
 	if info.IsDir() {
 		return nil
 	}
-	if err := os.Remove(full); err != nil {
+	if err := root.Remove(rel); err != nil {
 		return err
 	}
-	g.removeEmptyDirs(filepath.Dir(full))
+	if parent := filepath.ToSlash(filepath.Dir(rel)); parent != "." {
+		g.removeEmptyDirs(root, parent)
+	}
 	return nil
 }
 
-// removeEmptyDirs removes dir and its parents while they are real, empty directories inside
-// the checkout, stopping at the first that is not. A failure only means the directory stays.
-func (g Git) removeEmptyDirs(dir string) {
-	root := filepath.Clean(g.Dir)
-	for {
-		rel, err := filepath.Rel(root, dir)
-		if err != nil || rel == "." || !filepath.IsLocal(rel) {
+// inTree runs fn on the checkout opened as an os.Root, so no operation through it can leave
+// the checkout, even through a symlink that appeared after a check.
+func (g Git) inTree(fn func(root *os.Root) error) error {
+	root, err := os.OpenRoot(g.Dir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return fn(root)
+}
+
+// removeEmptyDirs removes dir (slash-separated, relative to the checkout) and its parents
+// while they are real, empty directories with no symlink on the way, stopping at the first
+// that is not. A failure only means the directory stays.
+func (g Git) removeEmptyDirs(root *os.Root, dir string) {
+	for dir != "." && dir != "" {
+		// The directory itself and every parent must be real directories, checked now.
+		if g.safePath(dir+"/x") != nil {
 			return
 		}
-		info, err := os.Lstat(dir)
+		rel := filepath.FromSlash(dir)
+		info, err := root.Lstat(rel)
 		if err != nil || !info.IsDir() {
 			return
 		}
-		entries, err := os.ReadDir(dir)
-		if err != nil || len(entries) > 0 || os.Remove(dir) != nil {
+		names, err := listDir(root, rel)
+		if err != nil || len(names) > 0 || root.Remove(rel) != nil {
 			return
 		}
-		dir = filepath.Dir(dir)
+		dir = filepath.ToSlash(filepath.Dir(rel))
 	}
 }
 
 // FinishMerge commits the merge in progress and returns the new head. It refuses while any
 // path is still unmerged.
 func (g Git) FinishMerge(ctx context.Context, message string) (string, error) {
-	left, err := g.output(ctx, "ls-files", "-u")
+	left, err := g.hout(ctx, "ls-files", "-u")
 	if err != nil {
 		return "", err
 	}
@@ -370,20 +402,15 @@ func (g Git) FinishMerge(ctx context.Context, message string) (string, error) {
 		return "", errors.New("some paths are still unmerged")
 	}
 	// No hook runs on span's merge commit: an agent that wrote one cannot add a file to it.
-	noHooks, err := os.MkdirTemp("", "span-nohooks-*")
-	if err != nil {
+	if _, err := g.hout(ctx, "commit", "--no-verify", "-m", message); err != nil {
 		return "", err
 	}
-	defer func() { _ = os.RemoveAll(noHooks) }()
-	if _, err := g.output(ctx, "-c", "core.hooksPath="+noHooks, "commit", "--no-verify", "-m", message); err != nil {
-		return "", err
-	}
-	return g.Head(ctx)
+	return g.hout(ctx, "rev-parse", "HEAD")
 }
 
 // Parents lists HEAD's parents, first parent first.
 func (g Git) Parents(ctx context.Context) ([]string, error) {
-	out, err := g.output(ctx, "rev-list", "--parents", "-n", "1", "HEAD")
+	out, err := g.hout(ctx, "rev-list", "--parents", "-n", "1", "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +489,7 @@ func (g Git) diffBytes(ctx context.Context, path string, old, next []byte, hadOl
 	if err := os.WriteFile(b, next, 0o600); err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, "git", "diff", "--no-index", "--no-color", "--no-ext-diff", "--", a, b)
+	cmd := g.command(ctx, "diff", "--no-index", "--no-color", "--no-ext-diff", "--no-textconv", "--", a, b)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -534,13 +561,13 @@ func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
 			(*set)[path] = true
 		}
 	}
-	if state.Head, err = g.output(ctx, "rev-parse", "HEAD"); err != nil {
+	if state.Head, err = g.hout(ctx, "rev-parse", "HEAD"); err != nil {
 		return engine.TreeState{}, err
 	}
-	if symref, err := g.output(ctx, "symbolic-ref", "-q", "HEAD"); err == nil {
+	if symref, err := g.hout(ctx, "symbolic-ref", "-q", "HEAD"); err == nil {
 		state.Symref = symref
 	}
-	refs, err := g.output(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
+	refs, err := g.hout(ctx, "for-each-ref", "--format=%(refname) %(objectname)")
 	if err != nil {
 		return engine.TreeState{}, err
 	}
@@ -549,74 +576,269 @@ func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
 			state.Refs[name] = sha
 		}
 	}
-	for _, name := range mergeFiles {
-		path, err := g.gitPath(ctx, name)
-		if err != nil {
-			return engine.TreeState{}, err
-		}
-		if raw, err := os.ReadFile(path); err == nil {
-			state.Merge[name] = raw
-		}
+	if state.GitDir, err = g.hout(ctx, "rev-parse", "--absolute-git-dir"); err != nil {
+		return engine.TreeState{}, err
 	}
-	files, err := g.gitFiles(ctx)
+	common, err := g.hout(ctx, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return engine.TreeState{}, err
 	}
-	state.Git = files
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(g.Dir, common)
+	}
+	state.CommonDir = filepath.Clean(common)
+	if state.Git, err = readManaged(state.GitDir, state.CommonDir); err != nil {
+		return engine.TreeState{}, err
+	}
+	for _, name := range mergeFiles {
+		if file, ok := state.Git["git:"+name]; ok {
+			state.Merge[name] = file.Data
+		}
+	}
 	return state, nil
 }
 
 var mergeFiles = []string{"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE"}
 
-func (g Git) gitPath(ctx context.Context, name string) (string, error) {
-	path, err := g.output(ctx, "rev-parse", "--git-path", name)
+// The entries under the git directories span puts back after an agent ran: what would act on
+// a later git command (config, hooks, info/attributes and info/exclude) and the merge state.
+// "common" is the shared git directory, "git" this worktree's own.
+var (
+	managedFiles = [][2]string{{"common", "config"}, {"git", "config.worktree"}, {"git", "MERGE_HEAD"}, {"git", "MERGE_MSG"}, {"git", "MERGE_MODE"}}
+	managedDirs  = [][2]string{{"common", "hooks"}, {"common", "info"}}
+)
+
+func gitRoots(gitDir, commonDir string) (map[string]*os.Root, func(), error) {
+	common, err := os.OpenRoot(commonDir)
 	if err != nil {
-		return "", err
+		return nil, nil, err
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(g.Dir, path)
+	own, err := os.OpenRoot(gitDir)
+	if err != nil {
+		_ = common.Close()
+		return nil, nil, err
 	}
-	return path, nil
+	return map[string]*os.Root{"common": common, "git": own}, func() { _ = common.Close(); _ = own.Close() }, nil
 }
 
-// gitFiles reads the files under the git directory that would act on a later git command:
-// the shared config, this worktree's config, and every hook.
-func (g Git) gitFiles(ctx context.Context) (map[string]engine.GitFile, error) {
-	common, err := g.output(ctx, "rev-parse", "--git-common-dir")
+// readManaged reads the managed entries without following any symlink out of the git
+// directories: a link is recorded as a link.
+func readManaged(gitDir, commonDir string) (map[string]engine.GitFile, error) {
+	roots, done, err := gitRoots(gitDir, commonDir)
 	if err != nil {
 		return nil, err
 	}
-	if !filepath.IsAbs(common) {
-		common = filepath.Join(g.Dir, common)
-	}
-	paths := map[string]string{".git/config": filepath.Join(common, "config")}
-	if worktree, err := g.gitPath(ctx, "config.worktree"); err == nil {
-		paths[".git/config.worktree"] = worktree
-	}
-	if entries, err := os.ReadDir(filepath.Join(common, "hooks")); err == nil {
-		for _, entry := range entries {
-			paths[".git/hooks/"+entry.Name()] = filepath.Join(common, "hooks", entry.Name())
-		}
-	}
+	defer done()
 	files := map[string]engine.GitFile{}
-	for name, path := range paths {
-		info, err := os.Lstat(path)
-		if err != nil || info.IsDir() {
-			continue
+	read := func(root *os.Root, key, rel string) (engine.GitFile, bool, error) {
+		file, ok, err := readEntry(root, rel)
+		if ok {
+			files[key] = file
 		}
-		file := engine.GitFile{Path: path, Mode: info.Mode()}
-		if info.Mode()&fs.ModeSymlink != 0 {
-			target, err := os.Readlink(path)
-			if err != nil {
-				return nil, err
-			}
-			file.Data = []byte(target)
-		} else if file.Data, err = os.ReadFile(path); err != nil {
+		return file, ok, err
+	}
+	for _, item := range managedFiles {
+		if _, _, err := read(roots[item[0]], item[0]+":"+item[1], item[1]); err != nil {
 			return nil, err
 		}
-		files[name] = file
+	}
+	for _, item := range managedDirs {
+		root := roots[item[0]]
+		dir, ok, err := read(root, item[0]+":"+item[1], item[1])
+		if err != nil {
+			return nil, err
+		}
+		if !ok || !dir.Mode.IsDir() {
+			continue
+		}
+		names, err := listDir(root, item[1])
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			if _, _, err := read(root, item[0]+":"+item[1]+"/"+name, item[1]+"/"+name); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return files, nil
+}
+
+func readEntry(root *os.Root, rel string) (engine.GitFile, bool, error) {
+	info, err := root.Lstat(rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		return engine.GitFile{}, false, nil
+	}
+	if err != nil {
+		return engine.GitFile{}, false, err
+	}
+	file := engine.GitFile{Mode: info.Mode()}
+	switch {
+	case info.Mode()&fs.ModeSymlink != 0:
+		target, err := root.Readlink(rel)
+		if err != nil {
+			return engine.GitFile{}, false, err
+		}
+		file.Data = []byte(target)
+	case info.Mode().IsRegular():
+		if file.Data, err = root.ReadFile(rel); err != nil {
+			return engine.GitFile{}, false, err
+		}
+	}
+	return file, true, nil
+}
+
+// listDir names the entries of a directory already proven to be a real one.
+func listDir(root *os.Root, rel string) ([]string, error) {
+	dir, err := root.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// restoreManaged puts the managed entries back with plain file operations, before any git
+// command runs: until then the agent's config, attributes and hooks are live. Every entry is
+// Lstat'ed first; a symlink is removed as a link, a directory only after Lstat proved it real,
+// and a file is written to a temporary name beside it and renamed over, so nothing is ever
+// opened through a link.
+func restoreManaged(before engine.TreeState) ([]string, error) {
+	roots, done, err := gitRoots(before.GitDir, before.CommonDir)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	var changed []string
+	put := func(root *os.Root, key, rel string) error {
+		want, had := before.Git[key]
+		moved, err := restoreEntry(root, rel, want, had)
+		if moved {
+			changed = append(changed, ".git/"+rel)
+		}
+		return err
+	}
+	for _, item := range managedFiles {
+		if err := put(roots[item[0]], item[0]+":"+item[1], item[1]); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range managedDirs {
+		root, key := roots[item[0]], item[0]+":"+item[1]
+		if err := put(root, key, item[1]); err != nil {
+			return nil, err
+		}
+		if dir, ok := before.Git[key]; !ok || !dir.Mode.IsDir() {
+			continue
+		}
+		names, err := listDir(root, item[1])
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range names {
+			if _, ok := before.Git[key+"/"+name]; !ok {
+				if err := put(root, key+"/"+name, item[1]+"/"+name); err != nil {
+					return nil, err
+				}
+			}
+		}
+		for name := range before.Git {
+			if child, ok := strings.CutPrefix(name, key+"/"); ok {
+				if err := put(root, name, item[1]+"/"+child); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	sort.Strings(changed)
+	return changed, nil
+}
+
+// restoreEntry makes rel what want says, or absent when had is false. It reports whether it
+// changed anything.
+func restoreEntry(root *os.Root, rel string, want engine.GitFile, had bool) (bool, error) {
+	info, err := root.Lstat(rel)
+	exists := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	if exists && had && sameEntry(root, rel, info, want) {
+		return false, nil
+	}
+	if !exists && !had {
+		return false, nil
+	}
+	if exists {
+		if info.IsDir() {
+			// Lstat proved a real directory: RemoveAll cannot leave it through a link.
+			err = root.RemoveAll(rel)
+		} else {
+			// A file or a link: the link itself is removed, never what it points at.
+			err = root.Remove(rel)
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+	if !had {
+		return true, nil
+	}
+	switch {
+	case want.Mode.IsDir():
+		return true, root.Mkdir(rel, want.Mode.Perm())
+	case want.Mode&fs.ModeSymlink != 0:
+		return true, root.Symlink(string(want.Data), rel)
+	default:
+		return true, writeBeside(root, rel, want.Data, want.Mode.Perm())
+	}
+}
+
+func sameEntry(root *os.Root, rel string, info fs.FileInfo, want engine.GitFile) bool {
+	switch {
+	case want.Mode.IsDir():
+		return info.IsDir()
+	case want.Mode&fs.ModeSymlink != 0:
+		target, err := root.Readlink(rel)
+		return info.Mode()&fs.ModeSymlink != 0 && err == nil && target == string(want.Data)
+	default:
+		if !info.Mode().IsRegular() || info.Mode().Perm() != want.Mode.Perm() {
+			return false
+		}
+		data, err := root.ReadFile(rel)
+		return err == nil && bytes.Equal(data, want.Data)
+	}
+}
+
+// writeBeside writes data to a new temporary file next to rel and renames it over rel.
+func writeBeside(root *os.Root, rel string, data []byte, perm fs.FileMode) error {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return err
+	}
+	tmp := rel + ".span-" + hex.EncodeToString(suffix[:])
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write(data)
+	if err := errors.Join(writeErr, f.Close()); err != nil {
+		_ = root.Remove(tmp)
+		return err
+	}
+	if err := root.Chmod(tmp, perm); err != nil {
+		_ = root.Remove(tmp)
+		return err
+	}
+	return root.Rename(tmp, rel)
 }
 
 // Restore puts the repository back where before found it, except the paths in keep: hooks
@@ -628,36 +850,21 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 	for _, path := range keep {
 		kept[path] = true
 	}
+	changed := map[string]bool{}
+	// First, with no git command: the agent's config, attributes and hooks go away.
+	gitChanged, err := restoreManaged(before)
+	if err != nil {
+		return engine.Restored{}, err
+	}
+	for _, name := range gitChanged {
+		changed[name] = true
+	}
 	now, err := g.Snapshot(ctx)
 	if err != nil {
 		return engine.Restored{}, err
 	}
-	changed := map[string]bool{}
-	if err := g.restoreGitFiles(before.Git, now.Git, changed); err != nil {
-		return engine.Restored{}, err
-	}
 	if err := g.restoreRefs(ctx, before, now, changed); err != nil {
 		return engine.Restored{}, err
-	}
-	for _, name := range mergeFiles {
-		was, had := before.Merge[name]
-		is, has := now.Merge[name]
-		if had == has && bytes.Equal(was, is) {
-			continue
-		}
-		path, err := g.gitPath(ctx, name)
-		if err != nil {
-			return engine.Restored{}, err
-		}
-		if had {
-			err = os.WriteFile(path, was, 0o644)
-		} else {
-			err = os.Remove(path)
-		}
-		if err != nil {
-			return engine.Restored{}, err
-		}
-		changed[".git/"+name] = true
 	}
 	var info bytes.Buffer
 	paths := map[string]bool{}
@@ -696,7 +903,7 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 		if err := g.safePath(path); err != nil {
 			return engine.Restored{}, err
 		}
-		if _, err := g.output(ctx, "checkout-index", "-f", "--", path); err != nil {
+		if _, err := g.hout(ctx, "checkout-index", "-f", "--", path); err != nil {
 			return engine.Restored{}, err
 		}
 		changed[path] = true
@@ -708,12 +915,8 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 		if err := g.safePath(path); err != nil {
 			return engine.Restored{}, err
 		}
-		full := filepath.Join(g.Dir, filepath.FromSlash(path))
-		if info, err := os.Lstat(full); err == nil && !info.IsDir() {
-			if err := os.Remove(full); err != nil {
-				return engine.Restored{}, err
-			}
-			g.removeEmptyDirs(filepath.Dir(full))
+		if err := g.inTree(func(root *os.Root) error { return g.removeFile(root, path) }); err != nil {
+			return engine.Restored{}, err
 		}
 		changed[path] = true
 	}
@@ -734,47 +937,12 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 	return out, nil
 }
 
-func (g Git) restoreGitFiles(before, now map[string]engine.GitFile, changed map[string]bool) error {
-	for name, was := range before {
-		path := was.Path
-		is, ok := now[name]
-		if ok && is.Mode == was.Mode && bytes.Equal(is.Data, was.Data) {
-			continue
-		}
-		if ok {
-			if err := os.Remove(path); err != nil {
-				return err
-			}
-		}
-		var err error
-		if was.Mode&fs.ModeSymlink != 0 {
-			err = os.Symlink(string(was.Data), path)
-		} else if err = os.WriteFile(path, was.Data, was.Mode.Perm()); err == nil {
-			err = os.Chmod(path, was.Mode.Perm())
-		}
-		if err != nil {
-			return err
-		}
-		changed[name] = true
-	}
-	for name, is := range now {
-		if _, ok := before[name]; ok {
-			continue
-		}
-		if err := os.Remove(is.Path); err != nil {
-			return err
-		}
-		changed[name] = true
-	}
-	return nil
-}
-
 func (g Git) restoreRefs(ctx context.Context, before, now engine.TreeState, changed map[string]bool) error {
 	for name, sha := range before.Refs {
 		if now.Refs[name] == sha {
 			continue
 		}
-		if _, err := g.output(ctx, "update-ref", name, sha); err != nil {
+		if _, err := g.hout(ctx, "update-ref", "--no-deref", name, sha); err != nil {
 			return err
 		}
 		changed[name] = true
@@ -783,19 +951,19 @@ func (g Git) restoreRefs(ctx context.Context, before, now engine.TreeState, chan
 		if _, ok := before.Refs[name]; ok {
 			continue
 		}
-		if _, err := g.output(ctx, "update-ref", "-d", name); err != nil {
+		if _, err := g.hout(ctx, "update-ref", "--no-deref", "-d", name); err != nil {
 			return err
 		}
 		changed[name] = true
 	}
 	switch {
 	case before.Symref != "" && now.Symref != before.Symref:
-		if _, err := g.output(ctx, "symbolic-ref", "HEAD", before.Symref); err != nil {
+		if _, err := g.hout(ctx, "symbolic-ref", "HEAD", before.Symref); err != nil {
 			return err
 		}
 		changed["HEAD"] = true
 	case before.Symref == "" && (now.Symref != "" || now.Head != before.Head):
-		if _, err := g.output(ctx, "update-ref", "--no-deref", "HEAD", before.Head); err != nil {
+		if _, err := g.hout(ctx, "update-ref", "--no-deref", "HEAD", before.Head); err != nil {
 			return err
 		}
 		changed["HEAD"] = true
@@ -821,6 +989,21 @@ func (g Git) provenBack(ctx context.Context, before engine.TreeState, kept map[s
 	for name, sha := range before.Refs {
 		if now.Refs[name] != sha {
 			differ = append(differ, name)
+		}
+	}
+	for name := range now.Refs {
+		if _, ok := before.Refs[name]; !ok {
+			differ = append(differ, name)
+		}
+	}
+	for key, want := range before.Git {
+		if got, ok := now.Git[key]; !ok || got.Mode != want.Mode || !bytes.Equal(got.Data, want.Data) {
+			differ = append(differ, key)
+		}
+	}
+	for key := range now.Git {
+		if _, ok := before.Git[key]; !ok {
+			differ = append(differ, key)
 		}
 	}
 	for path, meta := range before.Index {
@@ -886,17 +1069,17 @@ func (g Git) baseRef(ctx context.Context, base string) (string, string) {
 	if base == "" || strings.HasPrefix(base, "-") || strings.ContainsAny(base, ": \t\n") {
 		return "", fmt.Sprintf("base branch %q is not a branch name", base)
 	}
-	if _, err := g.output(ctx, "check-ref-format", "--branch", base); err != nil {
+	if _, err := g.hout(ctx, "check-ref-format", "--branch", base); err != nil {
 		return "", fmt.Sprintf("base branch %q is not a branch name", base)
 	}
-	if _, err := g.output(ctx, "remote", "get-url", "origin"); err == nil {
+	if _, err := g.hout(ctx, "remote", "get-url", "origin"); err == nil {
 		spec := "+refs/heads/" + base + ":refs/remotes/origin/" + base
-		if _, err := g.output(ctx, "fetch", "--quiet", "--no-tags", "origin", spec); err != nil {
+		if _, err := g.hout(ctx, "fetch", "--quiet", "--no-tags", "origin", spec); err != nil {
 			return "", "the base " + base + " could not be fetched from origin: " + err.Error()
 		}
 		return "origin/" + base, ""
 	}
-	if _, err := g.output(ctx, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
+	if _, err := g.hout(ctx, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
 		return "", "base branch " + base + " is missing"
 	}
 	return base, ""
@@ -989,7 +1172,7 @@ func (g Git) fileOf(ctx context.Context, path string, staged stagedEntry, mergeB
 		renamed = true
 	case "UD", "DU":
 		// A path the merge base never had was renamed on one side and deleted on the other.
-		_, err := g.output(ctx, "cat-file", "-e", mergeBase+":"+path)
+		_, err := g.hout(ctx, "cat-file", "-e", mergeBase+":"+path)
 		renamed = err != nil
 	}
 	file.Kind = Kind(file, staged.state, renamed)
@@ -1092,10 +1275,36 @@ func Generated(path string, sides ...string) bool {
 	return false
 }
 
-// raw runs one git command with optional stdin and returns stdout untrimmed, for -z output.
-func (g Git) raw(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+// hardened are the options every git command of the conflict phase runs with. An agent ran
+// in this checkout: a hook, an fsmonitor, a pager or an ext:: transport it configured must not
+// run when span reads or writes the repository. The repository's own config and attributes
+// are put back from the snapshot with plain file operations before any git command.
+var hardened = []string{
+	"--no-optional-locks",
+	"-c", "core.fsmonitor=false",
+	"-c", "core.hooksPath=" + os.DevNull,
+	"-c", "core.pager=cat",
+	"-c", "protocol.ext.allow=never",
+}
+
+// command is one hardened git command in the checkout.
+func (g Git) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append(append([]string{}, hardened...), args...)...)
 	cmd.Dir = g.Dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	return cmd
+}
+
+// hout runs one hardened git command and returns its trimmed stdout.
+func (g Git) hout(ctx context.Context, args ...string) (string, error) {
+	out, err := g.raw(ctx, nil, args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// raw runs one hardened git command with optional stdin and returns stdout untrimmed, for -z
+// output.
+func (g Git) raw(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
+	cmd := g.command(ctx, args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -1120,8 +1329,7 @@ func splitZ(out []byte) []string {
 
 // blob reads one object. A negative limit reads all of it; otherwise at most limit bytes.
 func (g Git) blob(ctx context.Context, sha string, limit int) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", "cat-file", "blob", sha)
-	cmd.Dir = g.Dir
+	cmd := g.command(ctx, "cat-file", "blob", sha)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()

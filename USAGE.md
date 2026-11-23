@@ -783,12 +783,19 @@ options: keep this branch's version, take the base's, or keep or delete a delete
 
 The agent runs in the checkout. Whatever it does there is put back before its proposal is
 used: staged, edited or new files, commits, amends, resets, a checkout of another branch, the
-merge state, local branches, hooks and git config. The card's note names what it touched.
+merge state, every ref (branches, tags, notes, remote-tracking refs), hooks, git config and
+`.git/info` (attributes, exclude). The git directory is put back with plain file operations
+before span runs any git command, and every git command of the conflict phase runs with no
+hooks, no fsmonitor, no pager and no `ext::` transport, so nothing the agent configured runs
+while span cleans up. A symlink the agent planted in the git directory or the tree is removed
+as a link; nothing is written or deleted through it. The card's note names what it touched.
 Ignored files it created are named too but never deleted. When span cannot prove the
 repository is back where it was, the conflict fails and only abort is offered. The merge
 commit is made with every hook disabled, and it is only accepted when its parents are exactly
 the run's head and the base span merged; any other commit is refused and never pushed. No file
-reaches the merge commit unless a card showed it.
+reaches the merge commit unless a card showed it. Out of scope: your global and system git config
+(`~/.gitconfig` and the files it includes), and whatever the agent does outside the checkout,
+such as network calls.
 
 `regenerate` is only offered for lockfiles and generated files. Its command must start with
 one of `npm`, `pnpm`, `yarn`, `bun`, `npx`, `go`, `cargo`, `poetry`, `pip`, `pip3`, `uv`,

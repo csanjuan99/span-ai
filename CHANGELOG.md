@@ -30,7 +30,9 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
   before the host merge, once prove, QA and inspect passed on it. At most three resolutions
   per run.
 - **The checkout stays honest.** What the agent or a regenerate command changes is put back:
-  files, the index, commits, resets, branch checkouts, the merge state, hooks and config;
+  files, the index, commits, resets, branch checkouts, the merge state, every ref, hooks,
+  config and `.git/info`, the git directory first and without running git, then with hardened
+  git commands (no hooks, fsmonitor, pager or `ext::`) and never through a planted symlink;
   ignored files are named, never deleted. The merge commit runs no hooks and is accepted only
   with the run's head and the base as its parents. No resolution writes or deletes through a
   symlink, including a parent that becomes one while the choice is applied.

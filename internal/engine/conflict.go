@@ -137,14 +137,17 @@ type TreeState struct {
 	Symref string
 	Refs   map[string]string
 	Merge  map[string][]byte
-	// Git are files under the git directory an agent could use to act later (hooks, config),
-	// by path, with their bytes and mode.
+	// GitDir and CommonDir are this worktree's git directory and the shared one.
+	GitDir    string
+	CommonDir string
+	// Git are the entries under the git directories that act on later git commands or hold
+	// the merge (config, hooks, info, the merge state files), keyed like common:hooks/x.
 	Git map[string]GitFile
 }
 
-// GitFile is one file under the git directory, at Path, keyed by a name like .git/config.
+// GitFile is one entry under a git directory: a file's bytes, a symlink's target, or a
+// directory.
 type GitFile struct {
-	Path string
 	Data []byte
 	Mode os.FileMode
 }

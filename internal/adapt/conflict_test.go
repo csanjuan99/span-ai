@@ -1231,3 +1231,125 @@ func TestHostMergeNamesABehindRefusal(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// agentRuns snapshots a conflicted repository, runs script as the agent would, and restores.
+func agentRuns(t *testing.T, script string, env ...string) (string, engine.Restored, error) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent script uses sh")
+	}
+	dir := conflictedRepo(t)
+	g := Git{Dir: dir}
+	before, err := g.Snapshot(context.Background())
+	must(t, err)
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	restored, err := g.Restore(context.Background(), before, nil)
+	return dir, restored, err
+}
+
+func markerDir(t *testing.T) string {
+	t.Helper()
+	m := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(m, "fsm.sh"), []byte("#!/bin/sh\ntouch \""+m+"/ran\"\n"), 0o755))
+	return m
+}
+
+func assertNotRun(t *testing.T, m string) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(m, "ran")); err == nil {
+		t.Fatal("code the agent configured ran during the restore")
+	}
+}
+
+func TestRestoreRunsNoFsmonitorTheAgentSet(t *testing.T) {
+	m := markerDir(t)
+	dir, _, err := agentRuns(t, "git config core.fsmonitor \"$M/fsm.sh\"", "M="+m)
+	assertNotRun(t, m)
+	must(t, err)
+	if out, _ := exec.Command("git", "-C", dir, "config", "--local", "core.fsmonitor").Output(); len(out) > 0 {
+		t.Fatalf("the agent's fsmonitor survived: %s", out)
+	}
+}
+
+func TestRestoreRunsNoFilterTheAgentSet(t *testing.T) {
+	m := markerDir(t)
+	script := "git config filter.x.clean \"sh -c 'touch $M/ran; cat'\" && mkdir -p .git/info && echo '* filter=x' > .git/info/attributes && sleep 1 && touch c.txt"
+	dir, _, err := agentRuns(t, script, "M="+m)
+	assertNotRun(t, m)
+	must(t, err)
+	if body, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "attributes")); strings.Contains(string(body), "filter=x") {
+		t.Fatal("the agent's attributes survived")
+	}
+}
+
+func TestRestoreRunsNoIncludedConfig(t *testing.T) {
+	m := markerDir(t)
+	must(t, os.WriteFile(filepath.Join(m, "inc.cfg"), []byte("[core]\n\tfsmonitor = "+m+"/fsm.sh\n"), 0o644))
+	_, _, err := agentRuns(t, "git config include.path \"$M/inc.cfg\"", "M="+m)
+	assertNotRun(t, m)
+	must(t, err)
+}
+
+func TestRestoreNeverDeletesThroughASymlinkedHooksDir(t *testing.T) {
+	out := t.TempDir()
+	write(t, out, "precious", "keep me\n")
+	dir, _, err := agentRuns(t, "rm -rf .git/hooks && ln -s \"$OUT\" .git/hooks", "OUT="+out)
+	must(t, err)
+	if body, err := os.ReadFile(filepath.Join(out, "precious")); err != nil || string(body) != "keep me\n" {
+		t.Fatalf("$OUT/precious = %q %v", body, err)
+	}
+	if entries, _ := os.ReadDir(out); len(entries) != 1 {
+		t.Fatalf("restore wrote into $OUT: %v", entries)
+	}
+	if info, err := os.Lstat(filepath.Join(dir, ".git", "hooks")); err != nil || !info.IsDir() {
+		t.Fatalf("hooks is not a real directory again: %v %v", info, err)
+	}
+}
+
+func TestRestoreNeverWritesThroughASymlinkedMergeFile(t *testing.T) {
+	out := t.TempDir()
+	write(t, out, "victim", "untouched\n")
+	dir := conflictedRepo(t)
+	msg, err := os.ReadFile(filepath.Join(dir, ".git", "MERGE_MSG"))
+	must(t, err)
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	g := Git{Dir: dir}
+	before, err := g.Snapshot(context.Background())
+	must(t, err)
+	must(t, os.Remove(filepath.Join(dir, ".git", "MERGE_MSG")))
+	must(t, os.Symlink(filepath.Join(out, "victim"), filepath.Join(dir, ".git", "MERGE_MSG")))
+	if _, err := g.Restore(context.Background(), before, nil); err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := os.ReadFile(filepath.Join(out, "victim")); string(body) != "untouched\n" {
+		t.Fatalf("$OUT/victim = %q", body)
+	}
+	info, err := os.Lstat(filepath.Join(dir, ".git", "MERGE_MSG"))
+	if err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("MERGE_MSG is still a link: %v", err)
+	}
+	if body, _ := os.ReadFile(filepath.Join(dir, ".git", "MERGE_MSG")); string(body) != string(msg) {
+		t.Fatalf("MERGE_MSG = %q", body)
+	}
+}
+
+func TestRestorePutsBackEveryRefAndTheInfoFiles(t *testing.T) {
+	dir, restored, err := agentRuns(t, "git tag agent-tag && git update-ref refs/notes/agent HEAD && git update-ref refs/remotes/origin/fake HEAD && mkdir -p .git/info && echo '*.txt' >> .git/info/exclude")
+	must(t, err)
+	if refs := git(t, dir, "for-each-ref", "--format=%(refname)"); strings.Contains(refs, "agent") || strings.Contains(refs, "fake") {
+		t.Fatalf("refs %q", refs)
+	}
+	if body, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude")); strings.Contains(string(body), "*.txt") {
+		t.Fatal("the agent's exclude survived")
+	}
+	if !strings.Contains(strings.Join(restored.Paths, ","), ".git/info/exclude") {
+		t.Fatalf("restored %v", restored.Paths)
+	}
+}
