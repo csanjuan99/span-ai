@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSelectSkipsCLIWithoutGentleAI(t *testing.T) {
@@ -97,5 +100,18 @@ func TestParseJSONReadsObjectInsideProse(t *testing.T) {
 	}
 	if !doc.Blocking || doc.Reason != "missing spec" {
 		t.Fatalf("%+v", doc)
+	}
+}
+
+func TestACancelledAgentReportsTheContextErrorNotABlock(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "slow-agent")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	_, err := RunWriter(ctx, script, t.TempDir(), "prompt", nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want the context error", err)
 	}
 }
