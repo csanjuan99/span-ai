@@ -391,6 +391,9 @@ func claimAndConfigure(req setup.Request, label string) (setup.Result, *runlock.
 	return res, claim, nil
 }
 
+// resumeRun drives a launched run. A variable so a test can launch without an agent CLI.
+var resumeRun = engine.Resume
+
 func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, error) {
 	// Take the checkout before anything is written into it. Checking first and writing
 	// after leaves a window in which two launches both pass the check and the second
@@ -437,7 +440,7 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	// the run has held once and been woken.
 	hub.Fly(id, func(flight context.Context) {
 		defer claim.Release()
-		_, _ = engine.Resume(flight, opt, id)
+		_, _ = resumeRun(flight, opt, id)
 	})
 	return id, "intake", nil
 }
