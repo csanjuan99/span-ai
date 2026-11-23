@@ -323,7 +323,7 @@ The agent is a CLI already on `PATH` with Gentle AI detectable:
 | `claude` | it is on `PATH` | `~/.claude/CLAUDE.md` contains `Organic Driven Development` |
 | `codex` | it is on `PATH` | `~/.codex/AGENTS.md` contains `Organic Driven Development` |
 
-With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
+With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--approve-for-me`, which already uses the workspace-write sandbox and cannot be combined with `--sandbox`. A prompt for permission would have no one to answer it.
 
 Build requires Organic Driven Development. `odd/tasks/<feature>.md` (the run's feature, from its branch; see [What span.yaml is for](#what-spanyaml-is-for)) must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
 
@@ -705,7 +705,7 @@ a prompt, so the flags are fixed per CLI.
 | --- | --- | --- | --- | --- |
 | Cursor | `cursor` | `cursor-agent` | `-p --trust --force` | `~/.cursor/rules/gentle-ai.mdc` exists |
 | Claude | `claude` | `claude` | `-p --dangerously-skip-permissions` | `~/.claude/CLAUDE.md` says Organic Driven Development |
-| Codex | `codex` | `codex` | `exec --sandbox workspace-write --approve-for-me` | `~/.codex/AGENTS.md` says Organic Driven Development |
+| Codex | `codex` | `codex` | `exec --approve-for-me` | `~/.codex/AGENTS.md` says Organic Driven Development |
 | Pi | `pi` | `pi` | `--print --approve` | `~/.pi/agent/npm/node_modules/gentle-pi` is installed |
 
 `agent: any` or `auto` picks the first ready CLI in that order, and uses a second ready

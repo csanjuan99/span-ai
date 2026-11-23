@@ -78,7 +78,7 @@ func TestCommandArgsLetsTheHeadlessAgentWrite(t *testing.T) {
 	}{
 		{name: "cursor-agent", want: []string{"-p", "--trust", "--force"}},
 		{name: "claude", want: []string{"-p", "--dangerously-skip-permissions"}},
-		{name: "codex", want: []string{"exec", "--sandbox", "workspace-write", "--approve-for-me"}},
+		{name: "codex", want: []string{"exec", "--approve-for-me"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
