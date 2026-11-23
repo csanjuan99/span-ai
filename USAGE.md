@@ -272,7 +272,9 @@ when the kind is `hotfix`.
 
 The merge stage checks it too. If the change targets another branch (for example `main`
 when the run's base is `dev`), the run holds instead of merging: retarget the change
-(`gh pr edit <n> --base <base>`) or approve the merge stage to merge it where it is. If the
+(`gh pr edit <n> --base <base>`) or approve the merge stage to merge it where it is; the run's base then becomes that branch, so
+the conflict check reads it. This is what a stacked change needs when its base branch was
+merged and deleted and the host moved the change. If the
 change was already merged into another branch, the run holds with that branch named, so a
 merge into the wrong place is not closed as if it were right; check that branch, then
 approve the stage to close the run. A host that cannot report the target, such as the local
