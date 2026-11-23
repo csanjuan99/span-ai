@@ -28,6 +28,9 @@ type File struct {
 	Rules   string `yaml:"rules"`
 	Harness string `yaml:"harness"`
 	Agent   string `yaml:"agent"`
+	// Models picks one model per CLI, by CLI id (cursor, claude, codex, pi). A CLI without an
+	// entry runs on the model Gentle AI configured for it.
+	Models map[string]string `yaml:"models"`
 	// Base is the branch new runs start from and open their change into when the run does
 	// not name one. Empty keeps the defaults: dev for feat and fix, master for hotfix.
 	Base     string              `yaml:"base"`
@@ -171,6 +174,14 @@ func (f File) Validate() error {
 	if mode := f.ConflictMode(); mode != "auto" && mode != "hold" {
 		return fmt.Errorf("stages.conflict %q is not auto or hold", mode)
 	}
+	for id, model := range f.Models {
+		if !agent.IsID(id) {
+			return fmt.Errorf("models: %q is not one of %s", id, agent.IDs())
+		}
+		if !agent.ValidModel(model) {
+			return fmt.Errorf("models.%s: %q is not a model name", id, model)
+		}
+	}
 	if f.Base != "" {
 		if err := branch.CheckBase(f.Base); err != nil {
 			return err
@@ -211,6 +222,9 @@ func (f File) ConflictMode() string {
 	}
 	return "hold"
 }
+
+// ModelFor is the model chosen for a CLI id, or "" when the CLI keeps its own.
+func (f File) ModelFor(id string) string { return f.Models[id] }
 
 // BlockStatus is the Jira status for a story that is missing information.
 func (f File) BlockStatus() string {
@@ -264,7 +278,12 @@ func SetAgent(path, value string) error {
 	if err != nil {
 		return err
 	}
-	next := replaceAgent(string(raw), value)
+	return writeChecked(path, replaceAgent(string(raw), value), mode)
+}
+
+// writeChecked validates the new body and replaces the file with it through a temp file, so
+// a body that would not load never reaches the disk.
+func writeChecked(path, next string, mode os.FileMode) error {
 	var check File
 	if err := yaml.Unmarshal([]byte(next), &check); err != nil {
 		return err
@@ -290,6 +309,97 @@ func SetAgent(path, value string) error {
 		return err
 	}
 	return os.Rename(name, path)
+}
+
+// SetModel records the model for one CLI under models:, or removes it when model is empty.
+// Every other line stays where it was. A missing file is created holding only that entry.
+func SetModel(path, id, model string) error {
+	if !agent.IsID(id) {
+		return fmt.Errorf("%q is not one of %s", id, agent.IDs())
+	}
+	if model != "" && !agent.ValidModel(model) {
+		return fmt.Errorf("%q is not a model name", model)
+	}
+	mode := os.FileMode(0o644)
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		raw, err = nil, nil
+	} else if err == nil {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return statErr
+		}
+		mode = info.Mode().Perm()
+	}
+	if err != nil {
+		return err
+	}
+	next, err := replaceModel(string(raw), id, model)
+	if err != nil {
+		return err
+	}
+	return writeChecked(path, next, mode)
+}
+
+// replaceModel edits the models: block of body. It refuses a models: written inline
+// (models: {cursor: x}) rather than guess how to rewrite it.
+func replaceModel(body, id, model string) (string, error) {
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, line := range lines {
+		if strings.HasPrefix(line, "models:") {
+			rest := strings.TrimSpace(strings.TrimPrefix(line, "models:"))
+			if rest != "" && !strings.HasPrefix(rest, "#") {
+				return "", fmt.Errorf("models: is written inline; rewrite it as a block to change it from here")
+			}
+			start = i
+			break
+		}
+	}
+	entry := "  " + id + ": " + model
+	if start < 0 {
+		if model == "" {
+			return body, nil
+		}
+		out := strings.TrimRight(body, "\n")
+		if out != "" {
+			out += "\n"
+		}
+		return out + "models:\n" + entry + "\n", nil
+	}
+	end := start + 1
+	last := start
+	found := -1
+	for ; end < len(lines); end++ {
+		line := lines[end]
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") && !strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		last = end
+		if strings.HasPrefix(trimmed, id+":") {
+			found = end
+		}
+	}
+	switch {
+	case found >= 0 && model == "":
+		lines = append(lines[:found], lines[found+1:]...)
+		last--
+	case found >= 0:
+		indent := lines[found][:len(lines[found])-len(strings.TrimLeft(lines[found], " \t"))]
+		lines[found] = indent + id + ": " + model
+	case model != "":
+		lines = append(lines[:last+1], append([]string{entry}, lines[last+1:]...)...)
+	}
+	// An entry removed from a block that had only that entry leaves models: with no children
+	// (last is still the header), and an empty header is dropped too.
+	if model == "" && found >= 0 && last == start {
+		lines = append(lines[:start], lines[start+1:]...)
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 func replaceAgent(body, value string) string {

@@ -12,6 +12,10 @@ run:
 rules: rules.md
 # cursor, claude, codex, pi, or any.
 agent: any
+# One model per CLI id (cursor, claude, codex, pi), passed as --model. Gentle AI and its
+# configuration are required: a CLI without an entry keeps the model Gentle AI set up.
+# models:
+#   claude: opus
 stages:
   open: auto
   merge: auto

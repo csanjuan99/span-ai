@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   abortConflict,
+  agentChoice,
   approveStage,
   basePlaceholder,
   branchChoice,
@@ -10,6 +11,8 @@ import {
   conflictOf,
   hintConflict,
   liveFrame,
+  modelList,
+  saveModel,
   snapshot,
   startRun,
 } from "@/lib/api"
@@ -315,5 +318,34 @@ describe("basePlaceholder", () => {
     expect(basePlaceholder("hotfix", "release/2.1")).toBe("master")
     expect(basePlaceholder("feat", "release/2.1")).toBe("release/2.1")
     expect(basePlaceholder("infer", "dev")).toBe("dev")
+  })
+})
+
+describe("models", () => {
+  it("reads the model chosen for each CLI and drops empty ones", () => {
+    const choice = agentChoice({ agents: [], models: { claude: "opus", cursor: "", pi: 4 } })
+    expect(choice.models).toEqual({ claude: "opus" })
+    expect(agentChoice({}).models).toEqual({})
+  })
+
+  it("reads a model list and degrades a bad reply to an empty free-text one", () => {
+    expect(
+      modelList({ models: [{ id: "opus", label: "Opus" }, { id: "" }, null, { label: "x" }], free: true, source: "fixed" }),
+    ).toEqual({ models: [{ id: "opus", label: "Opus" }], free: true, source: "fixed", error: "" })
+    expect(modelList("nope")).toEqual({ models: [], free: true, source: "none", error: "" })
+    expect(modelList({ source: "weird" }).source).toBe("none")
+  })
+
+  it("posts the project, the CLI and the model as a form and surfaces the server's reason", async () => {
+    const fetchMock = vi.fn((url: string, init: RequestInit) => {
+      void url
+      void init
+      return Promise.resolve(new Response(JSON.stringify({ message: "Claude: not ready. Gentle AI and its configuration are required" }), { status: 400 }))
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(saveModel("/p", "claude", "opus")).rejects.toThrow("Gentle AI and its configuration are required")
+    const [url, init] = fetchMock.mock.calls[0] ?? ["", {}]
+    expect(url).toBe("/agent/model")
+    expect(String(init.body)).toBe("project=%2Fp&cli=claude&model=opus")
   })
 })

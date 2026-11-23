@@ -721,6 +721,47 @@ anything else is refused, so the picker never leaves a file in a home directory.
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
 
+### Choosing the model of each agent
+
+**Gentle AI and its configuration are required.** Span does not pick models by itself:
+each CLI keeps the models Gentle AI set up for it, including the ones it uses for its own
+sub-agents. A CLI without Gentle AI is not ready, cannot be chosen, and cannot be given a
+model. Choosing a model here only changes the one that orchestrates the work.
+
+`models:` in `span.yaml` holds one model per CLI id. Whenever that CLI runs (frame, build,
+inspect, or proposing options for a conflict) Span adds `--model <name>` to its fixed flags.
+A CLI with no entry gets no flag and runs on the model Gentle AI configured.
+
+```yaml
+models:
+  cursor: gpt-5.3-codex
+  claude: opus
+  pi: xai/grok-4.7
+```
+
+On the page, each CLI has a **model** field under the Agent picker. It suggests what the CLI
+can offer and accepts any valid name, so a model the list does not show can still be typed:
+
+| CLI | Where the suggestions come from |
+| --- | --- |
+| Cursor | `cursor-agent --list-models`, the models of your account |
+| Pi | `pi --list-models`, written `provider/model` |
+| Claude | the aliases `opus`, `sonnet` and `haiku` (it cannot list models) |
+| Codex | none: it cannot list models, so the name is typed |
+
+Clearing the field removes the entry, and the block when it is empty. A model name is
+letters, digits and `. _ : / @ + -`, up to 100 characters, and never starts with a dash, so a
+value cannot be read as a flag; it is checked when `span.yaml` loads, when the page saves,
+and again before the CLI starts, and it is passed as its own argument. A `span.yaml` whose
+`models:` is written inline (`models: {cursor: x}`) loads, but the page will not rewrite it.
+
+`GET /agent/models?cli=<id>` returns the suggestions (listed CLIs are asked at most once a
+minute, a failure for 30 seconds, and concurrent requests share one process; a failure comes
+back as `error` and the field stays editable), and
+`POST /agent/model` with `project`, `cli` and `model` writes the choice. `GET /agent` also
+returns the chosen `models`. A change reaches the runs that start after it, not one already
+running.
+
 ### Choosing the agent per stage, and pausing for it
 
 The project picks a default agent. One run can override it per stage without touching

@@ -2,11 +2,12 @@ import { useEffect, useState } from "react"
 
 import { agentChoice, getJSON, saveAgent } from "@/lib/api"
 import type { AgentChoice } from "@/lib/types"
+import { ModelPicker } from "@/components/agent-picker/ModelPicker"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-const empty: AgentChoice = { agents: [], selected: "any", chosen: "", exists: false, reason: "" }
+const empty: AgentChoice = { agents: [], selected: "any", chosen: "", exists: false, reason: "", models: {} }
 
 /**
  * Which CLI writes this project. The page reads the same registry the engine uses,
@@ -101,6 +102,7 @@ export function AgentPicker({ project }: { project: string }) {
       ) : null}
       {choice.reason !== "" ? <p className="text-pretty text-sm text-muted-foreground">{choice.reason}</p> : null}
       {note !== "" ? <p className="text-pretty text-sm">{note}</p> : null}
+      {choice.agents.length > 0 ? <ModelPicker project={project} choice={choice} onSaved={setLoaded} /> : null}
     </div>
   )
 }

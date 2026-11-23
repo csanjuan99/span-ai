@@ -11,6 +11,8 @@ import {
   type Gate,
   type ImplementationView,
   type LiveFrame,
+  type ModelList,
+  type ModelOption,
   type QACase,
   type Snapshot,
   type Statement,
@@ -557,7 +559,41 @@ export function agentChoice(value: unknown): AgentChoice {
     chosen: text(body.chosen),
     exists: flag(body.exists),
     reason: text(body.reason),
+    models: modelMap(body.models),
   }
+}
+
+function modelMap(value: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!isRecord(value)) {
+    return out
+  }
+  for (const [id, model] of Object.entries(value)) {
+    if (typeof model === "string" && model !== "") {
+      out[id] = model
+    }
+  }
+  return out
+}
+
+/** The models one CLI can offer. A reply that is not a list reads as an empty free-text one. */
+export function modelList(value: unknown): ModelList {
+  const body = isRecord(value) ? value : {}
+  const rows = Array.isArray(body.models) ? body.models : []
+  const options: ModelOption[] = []
+  for (const row of rows) {
+    const item = isRecord(row) ? row : {}
+    if (text(item.id) !== "") {
+      options.push({ id: text(item.id), label: text(item.label) })
+    }
+  }
+  const source = body.source === "cli" || body.source === "fixed" ? body.source : "none"
+  return { models: options, free: body.free !== false, source, error: text(body.error) }
+}
+
+/** Save the model one CLI runs on. An empty model gives the choice back to Gentle AI. */
+export async function saveModel(project: string, cli: string, model: string): Promise<unknown> {
+  return postForm("/agent/model", new URLSearchParams({ project, cli, model }))
 }
 
 /** Save the agent the project runs. The server rewrites one line of span.yaml. */

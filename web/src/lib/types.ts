@@ -155,6 +155,22 @@ export interface AgentChoice {
   chosen: string
   exists: boolean
   reason: string
+  /** The model chosen for each CLI id. A CLI without an entry keeps the one Gentle AI set. */
+  models: Record<string, string>
+}
+
+/** One model a CLI accepts. */
+export interface ModelOption {
+  id: string
+  label: string
+}
+
+/** What the desk can offer for one CLI. `free` means any valid model name may be typed. */
+export interface ModelList {
+  models: ModelOption[]
+  free: boolean
+  source: "cli" | "fixed" | "none"
+  error: string
 }
 
 /** An agent CLI that ran out of quota or credentials. */
