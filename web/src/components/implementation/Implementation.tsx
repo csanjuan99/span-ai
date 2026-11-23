@@ -6,6 +6,7 @@ import { Risks } from "@/components/implementation/report/Risks"
 import { Transcript } from "@/components/implementation/report/Transcript"
 import { Verdict } from "@/components/implementation/report/Verdict"
 import { parseDiff, parseStat, totals, type DiffFile } from "@/lib/diff"
+import type { JournalState } from "@/hooks/use-events"
 import type { FeatureReport } from "@/lib/featuredoc"
 import { buildReport } from "@/lib/report"
 import type { Cursor, Statement } from "@/lib/types"
@@ -35,6 +36,7 @@ export interface RunFacts {
   statements: Statement[]
   agents: Record<string, string>
   feature: FeatureReport | null
+  journal: JournalState
 }
 
 /** The report a person reads before trusting the change, then the diff, then the raw transcript. */
@@ -89,7 +91,7 @@ export function Implementation({
         ) : null}
       </section>
       <section aria-label="Record" className="flex flex-col gap-2">
-        <Audit cursor={run.cursor} statements={run.statements} agents={run.agents} />
+        <Audit cursor={run.cursor} statements={run.statements} agents={run.agents} journal={run.journal} />
         <Transcript lines={transcript} />
       </section>
     </div>

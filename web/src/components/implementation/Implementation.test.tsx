@@ -11,7 +11,7 @@ const cursor: Cursor = {
   workspace: "/w", issue: "", questions: [],
 }
 
-const run: RunFacts = { cursor, statements: [], agents: {}, feature: null }
+const run: RunFacts = { cursor, statements: [], agents: {}, feature: null, journal: { events: [], intact: true, brokenAt: 0 } }
 
 const patch = ["diff --git a/pay.go b/pay.go", "--- a/pay.go", "+++ b/pay.go", "@@ -1,1 +1,2 @@", " a", "+charge"].join("\n")
 
@@ -64,5 +64,21 @@ describe("Implementation", () => {
     render(<Implementation stat=" pay.go | 1 +" patch={patch} truncated={false} transcript={[]} run={run} />)
     expect(screen.getByText(/The agent recorded no decision/)).toBeTruthy()
     expect(screen.getByText(/no feature document log/)).toBeTruthy()
+  })
+})
+
+describe("Implementation audit trail", () => {
+  afterEach(cleanup)
+
+  it("lists what a person did and warns when the journal was altered", () => {
+    const journal = {
+      events: [{ seq: 1, time: "2026-11-23T09:03:11Z", actor: "person", type: "rewind", detail: { stage: "build" } }],
+      intact: false,
+      brokenAt: 2,
+    }
+    render(<Implementation stat="" patch="" truncated={false} transcript={[]} run={{ ...run, journal }} />)
+    expect(screen.getByText("rewind")).toBeTruthy()
+    expect(screen.getByText("stage build")).toBeTruthy()
+    expect(screen.getByText("journal altered at event 2")).toBeTruthy()
   })
 })

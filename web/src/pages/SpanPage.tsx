@@ -13,6 +13,7 @@ import { useSpan } from "@/hooks/use-span"
 import { ConflictPanel } from "@/components/conflict/ConflictPanel"
 import { FailureCard } from "@/components/failure/FailureCard"
 import { Implementation } from "@/components/implementation/Implementation"
+import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
 import { Ledger } from "@/components/ledger/Ledger"
 import { QACases } from "@/components/qa-cases/QACases"
@@ -37,6 +38,7 @@ export function SpanPage() {
   const [note, setNote] = useState("")
   const cursor = state.span?.cursor
   const featureState = useFeature(id, cursor?.gitSHA ?? "")
+  const journalState = useEvents(id, state.span?.statements.length ?? 0)
   const current = cursor?.stage || "intake"
   const paused = Boolean(cursor?.hold || cursor?.stop)
   // The stage a note targets follows the run until the person touches the form; touching it
@@ -341,6 +343,7 @@ export function SpanPage() {
                 statements: state.span.statements,
                 agents: state.span.stageAgents ?? {},
                 feature: featureState.feature,
+                journal: journalState,
               }}
             />
           ) : null}
