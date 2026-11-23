@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { getJSON, UnauthorizedError } from "@/lib/api"
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 describe("a server that needs its token", () => {
   it("is reported as such, not as a body that was not JSON", async () => {
