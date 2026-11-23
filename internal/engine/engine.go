@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +27,7 @@ import (
 	"span/internal/feature"
 	"span/internal/handoff"
 	"span/internal/harness"
+	"span/internal/journal"
 	"span/internal/learn"
 	"span/internal/policy"
 	"span/internal/prompt"
@@ -1412,9 +1414,20 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	}
 	sealed := s
 	r.publish(Event{Type: "statement", Statement: &sealed})
+	r.journal("stage", map[string]string{
+		"stage": stage, "verdict": stored, "iteration": strconv.Itoa(r.cur.Iteration), "digest": s.Digest,
+	})
 	r.cur.LastDigest = s.Digest
 	r.noteLesson(stage, stored, reason)
 	return verdict, reason, nil
+}
+
+// journal adds one line to the run's event journal. A journal that cannot be written is
+// logged and does not stop the run: the statement it mirrors is already sealed.
+func (r *runner) journal(kind string, detail map[string]string) {
+	if err := journal.Append(r.spanDir(), journal.Span, kind, detail); err != nil {
+		log.Printf("journal %s: %v", r.cur.ID, err)
+	}
 }
 
 func (r *runner) ensureBranch(ctx context.Context) error {

@@ -213,6 +213,19 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, body)
 	})
+	mux.HandleFunc("GET /spans/{id}/events", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if !safe(id) {
+			http.NotFound(w, r)
+			return
+		}
+		view, err := readEvents(root, id)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	})
 	mux.HandleFunc("GET /spans/{id}/acceptance", func(w http.ResponseWriter, r *http.Request) {
 		body, err := readAcceptance(root, r.PathValue("id"))
 		if err != nil {
@@ -426,7 +439,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	// Every route that changes state is a POST, and a browser tab on any site can send one
 	// to 127.0.0.1. Refuse the ones the browser marks as cross-site; clients that send no
 	// Origin or Sec-Fetch-Site (curl, the CLI) pass.
-	return protect(token, http.NewCrossOriginProtection().Handler(mux))
+	return protect(token, http.NewCrossOriginProtection().Handler(journalled(root, mux)))
 }
 
 // Listen checks the address policy and serves.

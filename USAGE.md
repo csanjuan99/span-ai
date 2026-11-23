@@ -1256,3 +1256,16 @@ limits:
 When a call runs past it, Span stops the agent and the stage holds with `<stage> ran past limits.stageTimeout (45m0s) and was stopped. Raise the limit or split the story, then resume.` A timeout is not a failing check, so it does not spend a repair. Resuming starts that stage again.
 
 Not covered: a limit on spend. Span does not read token counts or cost from the CLIs, so there is no budget to set. The limit above bounds time only.
+
+## The run journal
+
+Every run keeps `.span/runs/<id>/events.jsonl`, an append-only record of what happened to it and who did it. Statements already seal what each stage decided. The journal adds the rest:
+
+- `span` events: one `stage` line per sealed statement, with the stage, verdict, iteration and the statement digest.
+- `person` events: each action taken on the page that succeeded (`stop`, `pause`, `resume`, `approve`, `rewind`, `agent`, `answer`, `story`, `relaunch`, `instructions`, `conflict.*`). A refused request leaves no line.
+
+Each line has a `seq`, a time, the actor and the type. A line also carries `prev`, the SHA-256 of the line before it, so a removed or edited line breaks the chain. `GET /spans/<id>/events` returns the events with `intact` and, when broken, `brokenAt`; the Audit panel of the Implementation tab lists the actions by a person and warns when the chain is broken.
+
+Free text a person typed (an answer, a note, an instruction) is never stored in the journal, only its length. Short fixed fields such as the stage are.
+
+Limits: the chain shows tampering, it does not prevent it, since anyone who can rewrite the file can rewrite the whole chain. Runs started before this version have no journal, and an empty one reads as intact. Nothing is exported to OpenTelemetry.
