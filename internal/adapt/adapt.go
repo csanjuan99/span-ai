@@ -122,7 +122,9 @@ func (g Git) Dirty(ctx context.Context) (bool, error) {
 }
 
 func (g Git) Commit(ctx context.Context, message string) (string, error) {
-	if _, err := g.output(ctx, "add", "-A", "--", ".", ":(exclude).span"); err != nil {
+	// span.yaml is the person's policy, not the story's work: committing it puts it on one
+	// branch only, and the next checkout of another branch loses it.
+	if _, err := g.output(ctx, "add", "-A", "--", ".", ":(exclude).span", ":(exclude)span.yaml"); err != nil {
 		return "", err
 	}
 	if _, err := g.output(ctx, "commit", "-m", message); err != nil {

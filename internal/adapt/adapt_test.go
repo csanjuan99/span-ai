@@ -121,3 +121,32 @@ func TestEnsureBranchCreatesFeatFromDevAndLeavesItAlone(t *testing.T) {
 		t.Fatal("created a branch outside feat, fix, and hotfix")
 	}
 }
+
+func TestGitCommitLeavesThePolicyFileOutOfTheBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v %s", err, out)
+	}
+	for name, body := range map[string]string{"main.go": "package main\n", "span.yaml": "feature: x\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := (Git{Dir: dir}).Commit(context.Background(), "feat: start"); err != nil {
+		t.Fatal(err)
+	}
+	list := exec.Command("git", "ls-files")
+	list.Dir = dir
+	out, err := list.CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "main.go\n" {
+		t.Fatalf("span.yaml is the person's policy, not the story's work; tracked %q", out)
+	}
+}

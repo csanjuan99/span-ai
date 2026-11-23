@@ -110,6 +110,9 @@ func resume(args []string) int {
 			policyFile = projectPolicy(project)
 		}
 	}
+	if policyFile == "" {
+		policyFile = resolvePolicy(*spans, tree, "")
+	}
 	opt, err := options(tree, *spans, policyFile, project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -161,7 +164,7 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		if err != nil {
 			return err
 		}
-		opt, err := options(snap.Cursor.Workspace, spans, projectPolicy(snap.Cursor.Project), snap.Cursor.Project)
+		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project)
 		if err != nil {
 			return err
 		}
