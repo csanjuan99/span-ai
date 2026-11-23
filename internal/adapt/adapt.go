@@ -14,38 +14,106 @@ import (
 
 	"span/internal/agent"
 	"span/internal/engine"
+	"span/internal/proc"
+	"span/internal/prove"
 )
 
 // Exec runs a declared command as argv, without a shell.
 type Exec struct{}
 
-func (Exec) Run(ctx context.Context, command, dir string) (int, error) {
+// OutputCap is how much of a command's output is kept. A failing suite prints the
+// failure at the end, so the cap keeps the tail and drops the start. The captured
+// text goes to the run log; only a short tail travels on the statement.
+const OutputCap = 1 << 20
+
+func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) {
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
-		return 0, errors.New("empty command")
+		return prove.Output{}, errors.New("empty command")
 	}
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	proc.Tame(cmd)
 	cmd.Dir = dir
+	kept := &tailBuffer{max: OutputCap}
+	cmd.Stdout = kept
+	cmd.Stderr = kept
 	err := cmd.Run()
+	out := prove.Output{Text: kept.String(), Truncated: kept.Truncated()}
 	if err == nil {
-		return 0, nil
+		return out, nil
+	}
+	// A killed check did not fail, it did not finish. Reporting exit -1 would send the run
+	// back to build and spend a repair on a Stop or Ctrl-C.
+	if ctx.Err() != nil {
+		return out, ctx.Err()
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
-		return exit.ExitCode(), nil
+		out.ExitCode = exit.ExitCode()
+		return out, nil
 	}
-	return 0, err
+	return out, err
+}
+
+// tailBuffer keeps the last max bytes written to it. One goroutine writes at a
+// time because the same pointer is handed to both stdout and stderr.
+type tailBuffer struct {
+	max     int
+	data    []byte
+	written int
+}
+
+// Truncated reports whether the start of the output was dropped.
+func (b *tailBuffer) Truncated() bool { return b.written > b.max }
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.written += len(p)
+	b.data = append(b.data, p...)
+	if len(b.data) > 2*b.max {
+		b.data = append(b.data[:0], b.data[len(b.data)-b.max:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string {
+	if len(b.data) <= b.max {
+		return string(b.data)
+	}
+	return string(b.data[len(b.data)-b.max:])
 }
 
 // Git is the workspace source.
 type Git struct{ Dir string }
+
+// IsWorktree reports whether dir is a linked worktree. A linked worktree has a .git
+// file that points at the shared repository, so the check is exact and needs no git call.
+func IsWorktree(dir string) bool {
+	info, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil && !info.IsDir()
+}
+
+// Git runs one git command in dir for the packages that own a command surface.
+func (g Git) Git(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr.String())
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
 
 func (g Git) Head(ctx context.Context) (string, error) {
 	return g.output(ctx, "rev-parse", "HEAD")
 }
 
 func (g Git) Dirty(ctx context.Context) (bool, error) {
-	out, err := g.output(ctx, "status", "--porcelain")
+	// Span's own state lives at .span inside the workspace. Counting it here would
+	// make every run permanently dirty, which turns off evidence reuse and leaves a
+	// check that already passed looking like a fresh change.
+	out, err := g.output(ctx, "status", "--porcelain", "--", ".", ":(exclude).span")
 	if err != nil {
 		return false, err
 	}
@@ -92,14 +160,10 @@ func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
 }
 
 func (g Git) output(ctx context.Context, args ...string) (string, error) {
+	// The author is whoever this checkout is configured with. Span does not invent an
+	// identity and does not overwrite the user's: the commit is theirs.
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.Dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Span",
-		"GIT_AUTHOR_EMAIL=span@example.test",
-		"GIT_COMMITTER_NAME=Span",
-		"GIT_COMMITTER_EMAIL=span@example.test",
-	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -138,12 +202,6 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bool, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.Dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Span",
-		"GIT_AUTHOR_EMAIL=span@example.test",
-		"GIT_COMMITTER_NAME=Span",
-		"GIT_COMMITTER_EMAIL=span@example.test",
-	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -297,11 +355,15 @@ func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
 		return errors.New("empty release command")
 	}
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	proc.Tame(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "SPAN_SHA="+sha)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("%w: %s", err, stderr.String())
 	}
 	return nil
@@ -319,7 +381,7 @@ func (c *CLIAgents) Bind(w io.Writer) { c.sink = w }
 func (c CLIAgents) Select(want string) (agent.Selection, error) {
 	home := c.Home
 	if home == "" {
-		home, _ = os.UserHomeDir()
+		home = agent.Home()
 	}
 	return agent.Select(want, home)
 }
