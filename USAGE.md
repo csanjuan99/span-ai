@@ -1,0 +1,518 @@
+# Using Span
+
+Span takes a brief through to deploy. The same binary runs on a laptop or a server. Each stage writes a statement: `advance` continues, `hold` pauses, `stop` ends the span.
+
+## Quickstart
+
+Build the page, then the binary. `./span quickstart` waits until the run finishes and prints text. The page returns as soon as the run is opened and follows it.
+
+```bash
+cd /path/to/span
+cd web && npm install && npm run build && cd ..
+go build -o span ./cmd/span
+
+./span quickstart --workspace /path/to/project --story "Add saved cards"
+./span serve --addr 127.0.0.1:8787
+```
+
+Open `http://127.0.0.1:8787`. Find the repos, save the Jira account, load a story, and start the run. **Configure and run** answers with the span id and opens that span. Those actions are the same operations as `./span repos`, `./span jira`, and `./span quickstart`. Restart `./span serve` after rebuilding the binary.
+
+What auto-configuration writes, only if `span.yaml` is missing:
+
+- `agent: any`
+- `open: auto` and `merge: hold`
+- one prove command when the repository root shows it: `go test ./...`, `npm test`, `cargo test`, or `python -m pytest`
+- the harness path and the skill names under `harness/skills`
+
+`--force` rewrites `span.yaml`. An existing file is left in place.
+
+The project must already be a git repository with the base branch: `dev` for `feat/` and `fix/`, `master` for `hotfix/`.
+
+## Where Span writes
+
+Span reads the folder you give it.
+
+- A git checkout is that repo. Running with `--workspace` pointed at `salute-infra` writes there.
+- A folder of checkouts, such as `salute/` with `salute-apollo`, `salute-infra`, and `salute-hermes`, lists those repos. Pick one or several. Each selected repo gets its own run and its own branch, and the agent is told to write only in that repo.
+- If the folder is itself a checkout and also contains other checkouts, both are listed and you choose.
+
+Span looks one directory down. Hidden directories, `node_modules`, and `vendor` are skipped.
+
+```bash
+./span repos --path /path/to/salute
+./span quickstart --workspace /path/to/salute --repo salute-infra --repo salute-apollo --issue AET-1478
+```
+
+`--repo` repeats once per checkout. With a single repo, omit it. The page at `./span serve` uses the same choice: find repos, then tick the ones this story touches.
+
+| Message | What to fix |
+| --- | --- |
+| `no_repo` | The path is missing, or it is not a checkout and it has no checkout one level down |
+| `selection_required` | The folder lists more than one checkout. Pass `--repo` once per name, or tick them on the page |
+| `unknown_repo` | That name is not one of the checkouts in the folder |
+| `invalid: files need a story` | A file was attached and neither the story text nor an issue key was set |
+
+## Jira Cloud
+
+Span reads a Jira Cloud story and uses it as the brief. It comments and moves the issue only when the story is missing information. It does not edit the issue fields.
+
+You need three values from the site you already use in the browser:
+
+| Value | Where it comes from |
+| --- | --- |
+| Site | The origin in the address bar, `https://your-site.atlassian.net` |
+| Email | The Atlassian account that can open the story |
+| API token | Created once at <https://id.atlassian.com/manage-profile/security/api-tokens> |
+
+Create the token from that page with **Create API token**, copy it, and paste it into the form or the command below. Jira Cloud does not redirect back with the token. An OAuth app could, and Span does not use one. The normal path is the form or `./span jira configure`.
+
+The written steps live in this file, under this heading. The page at `http://127.0.0.1:8787` shows the same link above the Jira fields. With an email, Span sends HTTP basic auth. With the email left empty, it sends the token as a bearer token. The account needs permission to browse the project, add comments, and transition issues. Jira Cloud often answers 404 when the account cannot see the issue, and Span reports that as `not_found`. Keep the token out of the repo and out of shell history.
+
+### Save the account
+
+The login belongs to one folder. A parent folder and a checkout inside it are different projects. Save the account in the same folder you pass as `--workspace` or type in the form. `--project` defaults to `.`, the folder you are in when you run `./span`.
+
+```bash
+./span jira configure \
+  --project /path/to/salute \
+  --url https://your-site.atlassian.net \
+  --email you@example.com \
+  --token '<paste the token>'
+./span jira status --project /path/to/salute
+```
+
+`status` prints `configured true`, the project folder, the site, and the email. It does not print the token.
+
+On the page, the **Folder** field is that project. A saved account shows **Logged in to Jira as** the email and the site **for this folder**, and hides the token fields. Changing the folder loads that folder's login. **Close session** removes only that folder's login. The command is `./span jira logout --project /path/to/salute`.
+
+On `http://127.0.0.1:8787` the first save is the **Jira session** form: site, email, API token, **Save session**. The token field is cleared after a successful save.
+
+The token is written to `<project>/.span/jira.json`, mode `0600`. Span also writes `<project>/.span/.gitignore` containing `*` so the file stays out of git. A later configure with an empty token keeps the token already stored for that project and updates the site or the email.
+
+A login saved for one folder is not used by another folder. Environment variables do not log every project in. An older copy under the OS user config directory is not read. Save the token again in each project folder.
+
+### Read a story
+
+```bash
+./span jira issue --project /path/to/salute AET-1478
+```
+
+That calls `GET /rest/api/3/issue/AET-1478` and prints the brief Span will execute:
+
+```text
+AET-1478 Show channels
+Type: Story
+Status: To Do
+URL: https://your-site.atlassian.net/browse/AET-1478
+
+Show the channel list.
+
+Acceptance criteria:
+Includes archived channels.
+```
+
+The description is the Jira document, turned into plain text. Acceptance criteria are included when the issue has a field whose name contains `Acceptance Criteria`. A story with no such field still runs from the summary and the description.
+
+List up to 20 issues:
+
+```bash
+./span jira search --project /path/to/salute
+./span jira search --project /path/to/salute --jql "project = AET AND type = Story ORDER BY updated DESC"
+```
+
+With no `--jql`, the query is `assignee = currentUser() ORDER BY updated DESC`. Search uses `POST /rest/api/3/search/jql`. The old `/rest/api/3/search` endpoint is not called.
+
+On the page, **My stories** runs that default search. **Load one story** reads the key in the story field and fills the text area with the brief.
+
+### Missing information
+
+Frame reads the story in the language it is written. Criteria the story already states are written under the one standard heading `Acceptance criteria:`. Span does not keep a list of translated headings. A question is a hold on the same span. The page lists each question. **Answer and continue** records the reply and runs frame again. **Read the story again** loads the Jira issue and runs frame on that text. A missing Jira account is not a question and does not stop the run. When the account is configured, Span comments on the issue and does not move it.
+
+A run with no issue key waits locally and does not call Jira. Out of scope stays a stop. That run does not continue.
+
+### Run that story
+
+Leave `--story` empty. The issue text is the brief, and the key is the branch suffix.
+
+```bash
+./span quickstart --workspace /path/to/salute-infra --issue AET-1478
+./span quickstart --workspace /path/to/salute --repo salute-infra --repo salute-apollo --issue AET-1478
+```
+
+The first command writes in that checkout. The second starts one run in each selected repo, with the same brief, and tells the agent to write only in that repo. The branch looks like `feat/AET-1478-show-channels`. `--kind fix` or `--base master` still chooses `fix/` or `hotfix/` as in [Branches](#branches).
+
+If you also pass `--story`, that text is the brief and the issue key is still used for the branch. The page does this when you edit the text area after **Load one story**.
+
+### When it fails
+
+| Message | What to fix |
+| --- | --- |
+| `not_configured` | Save the account for this folder with `./span jira configure --project <folder>` or the page |
+| `unauthorized` | Email and token do not match, or the token was revoked. Create a new token and configure again |
+| `not_found` | The key is wrong, or this account cannot browse that issue |
+| `unreachable` | The site URL does not answer. Check `https://your-site.atlassian.net` |
+| `invalid` | The site URL is missing, or Jira rejected the query |
+
+## Branches
+
+Only three prefixes exist.
+
+| Prefix | Starts from | Use |
+| --- | --- | --- |
+| `feat/` | `dev` | a new story |
+| `fix/` | `dev` | an adjustment |
+| `hotfix/` | `master` | an adjustment from master |
+
+The text after the prefix is inferred when the span starts. A linked key such as `AET-1478`, from `--issue` or from the story text, produces `feat/AET-1478-show-channels`. Without a key, the first line becomes a slug: `feat/add-saved-cards`.
+
+`--kind` sets the prefix. When it is omitted, a story that starts with `fix:` or `bug:` is `fix/`, a base of `master` is `hotfix/`, and anything else is `feat/` from `dev`.
+
+```bash
+./span quickstart --workspace /path/to/project --kind fix --issue AET-1478 --story "Show channels"
+./span quickstart --workspace /path/to/project --base master --story "Refund the double charge"
+```
+
+## House style
+
+`harness/skills` is the writing standard, copied from the skill set so two people produce one author's code. The build prompt lists each skill name, its trigger, and the path of `SKILL.md`. The agent reads that file only when the trigger matches the change. Reference files stay unloaded until the skill itself names one. Bodies are not pasted into the prompt.
+
+A sealed `hold` or `stop` in frame, build, or inspect is stored in `<workspace>/.span/lessons.json`. The next prompt for that same stage includes at most five of those lines. A lesson that fails to prevent the same mistake twice is dropped. The file is local, the lookup does not call a model, and the skill files are not rewritten.
+
+## Quick path
+
+1. Build the binary in this repository.
+2. Point `--workspace`, or the **Folder** field, at the project. Quickstart writes `span.yaml` when that file is missing.
+3. When the story comes from Jira, save the account in that same folder.
+4. Start the span. If it pauses, read the statement, adjust, and resume with `./span resume`.
+5. To use the page, run `./span serve` on localhost from this folder.
+
+```bash
+cd /path/to/span
+go build -o span ./cmd/span
+./span run --brief /path/to/project/brief.md --workspace /path/to/project
+./span resume <id> --workspace /path/to/project
+./span serve --addr 127.0.0.1:8787 --spans /path/to/project/.span/runs
+```
+
+`advance` exits 0. `hold` and `stop` exit 1. A startup error (empty brief, invalid `span.yaml`) also exits 1 and prints the reason on stderr.
+
+A finished run prints an identity line and a reason line:
+
+```text
+2026-11-18-1534-a1b2 note advance
+lead time 4m0s
+```
+
+## Before the first run
+
+The workspace is a git repository. Open runs `git push origin HEAD`, so a remote named `origin` is required when open is `auto`.
+
+The agent is a CLI already on `PATH` with Gentle AI detectable:
+
+| CLI | Used when | Gentle AI is detected in |
+| --- | --- | --- |
+| `cursor-agent` | it is on `PATH` | `~/.cursor/rules/gentle-ai.mdc` |
+| `claude` | it is on `PATH` | `~/.claude/CLAUDE.md` contains `Organic Driven Development` |
+| `codex` | it is on `PATH` | `~/.codex/AGENTS.md` contains `Organic Driven Development` |
+
+With `agent: any`, the order is cursor, claude, codex. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
+
+Build requires Organic Driven Development. `odd/tasks/<feature>.md` must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
+
+## Basic use
+
+### Build
+
+```bash
+go build -o span ./cmd/span
+go test ./...
+```
+
+`go test ./...` does not call an agent and does not deploy. It checks the gates with fakes.
+
+### Project policy
+
+`span.yaml` lives at the workspace root unless you pass `--policy`. `feature` allows letters, digits, `.`, `-`, and `_`. An empty mode means `auto`.
+
+```yaml
+feature: payments
+agent: any
+stages:
+  open: auto
+  merge: hold
+prove:
+  fast:
+    - go test ./...
+  acceptance:
+    - go test ./acceptance
+promote:
+  environments:
+    - name: preview
+      command: echo preview
+      mode: auto
+    - name: production
+      command: echo production
+      mode: hold
+manifest:
+  build:
+    skills: []
+    rules:
+      - rules.md
+    mcp: []
+  inspect:
+    skills: []
+    rules:
+      - rules.md
+    mcp: []
+```
+
+`open: hold` or `merge: hold` pauses before that effect. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
+
+`prove` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, shell quotes, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
+
+Promote receives the sha in `SPAN_SHA`.
+
+The `rules` field in the yaml is accepted and is not injected by itself. The agent sees the names you list under `manifest`, not the skill body. The harness (Cursor, Claude, or Codex) loads that body on its own.
+
+### Brief
+
+`--brief` is a file path. The whole file is the request. An empty brief does not start.
+
+```bash
+./span run --brief brief.md --workspace /path/to/project
+```
+
+Flags for `run` and `resume`:
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--workspace` | `.` | Repository to change |
+| `--brief` | none | Required for `run` |
+| `--spans` | `<workspace>/.span/runs` | Where state is stored |
+| `--policy` | `<workspace>/span.yaml` | Policy file |
+
+`resume` takes the id as an argument, not a flag:
+
+```bash
+./span resume 2026-11-18-1534-a1b2 --workspace /path/to/project
+```
+
+If you omit `--brief` on resume, Span reads `.span/runs/<id>/brief.md`.
+
+### Stages
+
+The order is fixed: intake, frame, build, prove, qa, inspect, open, merge, promote, note.
+
+| Stage | What it does | When it does not continue |
+| --- | --- | --- |
+| intake | Stores the brief and its digest | It does not stop on its own |
+| frame | Reads the story in its own language and carries what it decides into the standard | `hold` on questions or missing acceptance. `stop` on out of scope. `hold` when there are no claims or no agent |
+| build | Runs ODD and commits a dirty tree | `stop` without the feature document. `hold` when the agent or git fails |
+| prove | Runs `fast`, then `acceptance` if fast passed | `hold` when the command is not executable or did not start. A non-zero exit starts another iteration |
+| qa | Checks each acceptance line against a test declaration, then runs one command | `hold` when an id is missing or the command fails. A story with no acceptance lines skips this stage |
+| inspect | A separate read of the diff | A blocking finding returns to build. The third block holds |
+| open | Looks up the change, pushes, and opens it | `hold` when the mode is `hold`, the push fails, or the create result is unknown |
+| merge | Merges when it is not already merged | `hold` when the mode is `hold` or the result cannot be confirmed |
+| promote | Walks environments in order | `hold` on a `hold` environment or an unknown result. `stop` when the command finished and failed |
+| note | Records lead time from frame | Reached only after promote advances |
+
+`qa` numbers the lines under `Acceptance criteria:` as `AC-1`, `AC-2`, and so on. The build prompt tells the agent to put each id on a test declaration (`func Test`, `test(`, `it(`, or `def test_`), as `AC-1` or `AC1`. A comment is not enough. The command is `qa.command` when set. Otherwise a repo with `playwright.config.*`, or `qa.browser: true`, runs `npx playwright test`. Otherwise Span uses the first `prove.acceptance` command, then the first `prove.fast` command. The result is `.span/runs/<id>/qa-gate.json` with `pass`, `fail`, or `unverified`. This stage does not comment on Jira.
+
+A browser repo also tells the agent to test user-visible behavior with `getByRole` and web-first `expect`, and to record a trace on the first retry. `@playwright/mcp --caps=testing` is named as an authoring aid. The gate is the command, not an MCP session.
+
+Span commits. The agent does not. The message is `feat(<feature>): span <id>`. The author is `Span <span@example.test>`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
+
+### Statements
+
+Each stage writes its files before the next stage starts:
+
+```text
+.span/runs/<id>/iter/<n>/<stage>.json
+.span/runs/<id>/iter/<n>/<stage>.md
+.span/runs/<id>/cursor.json
+.span/runs/<id>/brief.md
+```
+
+The JSON is the statement. It carries the verdict, the previous statement digest, the sha, the change URL, the commands, and the reason. The markdown file is the same record for reading.
+
+The cursor is the resume point: iteration, stage, sha, URL, and any pending effect.
+
+## Advanced use
+
+### Instructions per stage
+
+Instructions do not change the engine contract. They do not authorize push, merge, or deploy, and they do not change a verdict.
+
+For every run of the project:
+
+```text
+span/stages/<stage>.md
+```
+
+For one run:
+
+```text
+.span/runs/<id>/instructions/<stage>.md
+```
+
+Both are read when that stage builds its prompt, which is when the stage starts. A stage that is already running does not read a note saved during that pass. Intake stores the digest and does not call an agent, so an intake note does not steer the run. If the note changes before the next time that stage starts, that start sees it.
+
+From `./span serve`, the ledger keeps this control. While a stage is running, choose **Leave a note for a stage**. On hold or stop the control is already open, because resume reads the note when that stage starts again.
+
+### Handoffs
+
+Files are optional. A handoff can be a note, an image, or any other file. Span does not require a format.
+
+Attach them when you load the story. The form field is **Handoff files**. The same call from this folder repeats `--file`:
+
+```bash
+./span quickstart --workspace /path/to/project --issue AET-1478 \
+  --file ./board.png --file ./notes.md
+```
+
+Each selected repo receives a copy in `.span/runs/<id>/handoffs/`. The first frame is told to open those paths. Only the file name is kept, so `notes/board.png` is stored as `board.png`. A story accepts 20 files, and each file can be up to 32MiB. A file without a story or an issue key is `invalid: files need a story`.
+
+You can still copy files into `.span/runs/<id>/handoffs/` while the span exists. The stage already running does not read them. They enter the next frame, with their digest.
+
+### Tests and another iteration
+
+`fast` runs first. If a `fast` command fails, `acceptance` does not start.
+
+A non-zero exit attributed to this change does not discard the span. It returns to frame with the previous prove report and opens the next iteration. ODD receives that report so it can correct specs and tasks.
+
+The cap is 3 iterations. The third attributable failure holds and keeps the reports. A command that never started does not consume an iteration. It holds, and `./span resume` repeats the band.
+
+Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build. Two returns can correct the change. The third holds.
+
+### Resume
+
+`./span resume <id>` reads the cursor.
+
+| Saved state | Resume behavior |
+| --- | --- |
+| `hold` | Continues at the paused stage |
+| `stop` | Stays stopped. The agent is not called |
+| `done` | Stays finished |
+| Stage whose statement is `advance` | That stage is not repeated |
+| Open when the change already exists | Does not open another one and does not push again |
+| Promote with a receipt for that environment and sha | Does not run that command again |
+| Promote started without a receipt | `hold`. The result is unknown and is not retried blind |
+
+A successful environment receipt is `.span/runs/<id>/receipts/<environment>-<sha>`.
+
+If the process dies, the agent drops, or the network cuts, the last cursor on disk is the start point. Intake is not repeated.
+
+### Changes and GitHub
+
+When `gh` is on `PATH`, open lists and creates the pull request with `gh pr`, and merge uses `gh pr merge --merge`. The workspace must be that repository's checkout, with commits already pushed to `origin`.
+
+When `gh` is absent, the change is recorded as `local:<id>:<branch>` in `.span/runs/<id>/change.url`. A local merge writes `merged` beside it. That does not publish to a forge.
+
+### Read statements and give instructions
+
+`./span serve` has no `--workspace`. The desk at `/` is the quickstart. Its **Folder** field is the project for repos, Jira, and the run. `--spans` is the runs directory the page reads. The default is `.span/runs` relative to the directory where you launched the command, not the Folder field. Pass an absolute path when those statements live somewhere else. A run started from the page is stored in that directory, so the id the page receives is the id the page can open.
+
+```bash
+./span serve --addr 127.0.0.1:8787 --spans /path/to/project/.span/runs
+```
+
+Localhost does not need a token. Any other address without `SPAN_TOKEN` refuses to start.
+
+```bash
+SPAN_TOKEN=a-long-secret ./span serve --addr 0.0.0.0:8787 --spans /path/to/project/.span/runs
+```
+
+Every HTTP request sends `Authorization: Bearer a-long-secret`. A browser cannot set that header on a WebSocket, so the page sends the same secret as the subprotocol `span.` plus the raw URL-safe base64 of the token. On localhost, leave **Serve token** empty. A value left in the tab used to make the browser drop the live socket: the page offered a subprotocol and the server did not name one back. With no `SPAN_TOKEN`, the server accepts that offered protocol and the socket opens. When `SPAN_TOKEN` is set, type it there and choose **Use token** before **Configure and run**. The token stays in this browser tab.
+
+### The page
+
+Two routes, one process. There is no second port.
+
+| Route | What it shows |
+| --- | --- |
+| `/` | The desk: folder, find repos, repo checkboxes, the Jira session for that folder, load one story, my stories, close session, kind, story text, handoff files, configure and run, and the span list |
+| `/spans/<id>` | One run, in three readings |
+
+**Configure and run** answers `202` with `{"id","stage"}` once `cursor.json` exists, then the run continues after the response. Closing the page does not cancel it. `./span quickstart` still waits and prints text.
+
+The span page keeps one rail of the ten stages. The current stage is the mark. Under it, one sentence: the sealed reason. `hold` and `stop` stay on that rail, including a Jira block comment. A timeline band above the status line records each sealed decision and local action; a transcript flush is one line, and the agent text stays on Implementation. Every 2 seconds the page reviews the agent in this process and keeps one timeline line. If the stage looks running and no worker is left, **Relaunch** starts it again.
+
+The three readings are the same run:
+
+- **Ledger.** Each sealed statement: stage, verdict, iteration, reason, parent digest, commands, git SHA, and change URL. The instruction control stays here, closed while a stage is running. **Leave a note for a stage** opens it. The sentence under the control says when the selected stage reads the note.
+- **Implementation.** The files changed from `base` to `HEAD`, the patch, and the agent transcript. The patch is cut at 256 KiB and the page says when that happened. While `build` is open, new transcript lines arrive on the socket.
+- **QA.** Each acceptance line as `AC-1`, `AC-2`, the test declaration file and line, and `pass`, `fail`, or `unverified`. The command and its exit code sit on that same row. A story with no acceptance lines says the gate was skipped. A missing declaration is `unverified` and names no file.
+
+A refresh replays the run from disk. The socket's first message is the span object plus the last 1000 transcript lines. Later messages are `cursor`, `statement`, `transcript`, and `gate`. Transcript lines flush about every 500 ms. A dead socket does not fail the run. The statements on disk stay the record.
+
+`GET /spans/<id>/live` is that socket. Dev (`npm run dev` in `web/`) proxies HTTP and the socket to `127.0.0.1:8787`. The built page is served by `./span serve` from the same origin.
+
+### Routes
+
+| Method | Path | Effect |
+| --- | --- | --- |
+| GET | `/` | The desk |
+| GET | `/repos?path=` | Checkouts in that folder |
+| GET | `/jira?path=` | Whether that folder is logged in. The token is omitted |
+| POST | `/jira/account` | Fields `project`, `url`, `email`, `token`. Saves `<project>/.span/jira.json` |
+| POST | `/jira/logout` | Field `project`. Removes that folder's login |
+| GET | `/jira/issues/<key>?path=` | Brief for that key, using that folder's login |
+| GET | `/jira/search?path=&jql=` | Up to 20 issues. Empty `jql` lists issues assigned to the current user |
+| POST | `/quickstart` | Fields `workspace`, `repo`, `kind`, `issue`, `story`, and `file`. `202` and `{"id","stage"}` when a run starts. Configuration text stays `200` |
+| GET | `/spans` | `Accept: application/json` returns `{"spans":[...]}`. Any other accept is the desk |
+| GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, and gate. Any other accept is the span page |
+| GET | `/spans/<id>/implementation` | `git diff <base>...<head>` stat and a patch capped at 256 KiB |
+| GET | `/spans/<id>/acceptance` | Each acceptance line, its declaration, and the gate result |
+| GET | `/spans/<id>/live` | WebSocket. The first frame replays the run. Later frames wake the page |
+| GET | `/spans/<id>/agent` | Whether this process still has a worker for that run |
+| GET | `/agents` | The workers this process is running |
+| POST | `/spans/<id>/relaunch` | Starts a run again when the cursor is not paused, stopped, or waiting, and no worker is left. `202` |
+| POST | `/spans/<id>/answer` | JSON `{"answers":[{"question","body"}]}`. `202` and frame runs again |
+| POST | `/spans/<id>/story` | Reads the Jira issue again. `202` and frame runs again |
+| POST | `/spans/<id>/resume` | Continues a hold that is not waiting for an answer |
+| POST | `/spans/<id>/instructions` | Form fields `stage` and `body` |
+| POST | `/spans/<id>/instructions/<stage>` | `text/plain` body or form field `body` |
+
+A failed call returns JSON `{"error","message"}`. `unauthorized` is 401, `not_found` is 404, `unreachable` is 502, and the other codes are 400.
+
+Answer a waiting run, or read the Jira story again:
+
+```bash
+curl -sS -X POST -H 'content-type: application/json' \
+  -d '{"answers":[{"question":"Which permission atom?","body":"Pago.Ver is new."}]}' \
+  http://127.0.0.1:8787/spans/<id>/answer
+
+curl -sS -X POST http://127.0.0.1:8787/spans/<id>/story
+```
+
+Both answer `202` and run frame again on that same span. A stage instruction is still only a note for the next time that stage starts:
+
+```bash
+curl -sS -X POST --data-binary @note.md \
+  -H 'content-type: text/plain' \
+  http://127.0.0.1:8787/spans/<id>/instructions/frame
+```
+
+The binary and the agents live on the same machine. `serve` reads and writes files. It does not drive a Claude process on another computer.
+
+### Manifest
+
+`manifest.<stage>` lists skill, rule, and MCP names. Those names go into the prompt, and their digest goes into the statement, so the run can be repeated. Span does not download skills, does not run installers, and does not paste a skill body into the prompt.
+
+### What this version does not do
+
+- It does not deploy just because the yaml names an environment. It runs the command you wrote, and `hold` on that environment pauses before the command.
+- It does not resume a real `stop`, such as out of scope or a missing feature document. A run waiting on questions continues from **Answer and continue** or **Read the story again**.
+- It does not sign statements. The chain is the digest of the previous JSON.
+- It does not run a shell. If a check needs a pipe, put it in a script and declare the script path.
+- `go test ./...` in this repository does not call a live agent or a live `gh`.
+
+## Run checklist
+
+- [ ] `span.yaml` has a valid `feature`, prove commands, and environments.
+- [ ] The workspace is a git repo with `origin` when open is `auto`.
+- [ ] When the story comes from Jira, that same folder has its own `.span/jira.json`.
+- [ ] The chosen CLI is on `PATH` and Gentle AI is detected in its file.
+- [ ] The brief states the request without invented requirements.
+- [ ] After `hold`, you read `.span/runs/<id>/iter/<n>/<stage>.md` before `./span resume`.
+- [ ] After `stop`, you do not expect resume to continue.

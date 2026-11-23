@@ -1,0 +1,33 @@
+# Hand-written policy. ./span quickstart writes span.yaml only when that file is missing.
+# The Jira token is not in this file. Each folder keeps its own .span/jira.json.
+feature: payments
+rules: rules.md
+agent: any
+stages:
+  open: auto
+  merge: auto
+jira:
+  blockStatus: Block
+prove:
+  fast:
+    - go test ./...
+  acceptance: []
+qa:
+  command: go test ./...
+  browser: false
+promote:
+  environments:
+    - name: preview
+      command: echo preview
+      mode: auto
+manifest:
+  build:
+    skills: []
+    rules:
+      - rules.md
+    mcp: []
+  inspect:
+    skills: []
+    rules:
+      - rules.md
+    mcp: []
