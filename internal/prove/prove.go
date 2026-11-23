@@ -45,6 +45,15 @@ type Plan struct {
 	// Excuse, when set, lets a command that already failed the same way on the base
 	// commit report without blocking. nil keeps every failure blocking.
 	Excuse Excuse
+	// WideBlocks makes a wide failure that Excuse does not excuse fatal even when a focused
+	// band exists. It is set when the focused band was narrowed from the diff and a baseline
+	// says which wide failures are new: a new one is this change's, wherever it shows up.
+	// false keeps the wide band report-only.
+	WideBlocks bool
+	// FocusLabel, when set, names the focused band in its failure fingerprints instead of
+	// the focused command. A band narrowed from the diff names different packages after
+	// each repair; the same failure must still read as the same one.
+	FocusLabel string
 }
 
 // Runs tells whether a focused band is configured. When it is, the wide band reports
@@ -80,7 +89,7 @@ func countPreexisting(commands []statement.Command) int {
 func bands(ctx context.Context, check Checker, dir string, plan Plan) (Report, error) {
 	var collected []statement.Command
 	if plan.Runs() {
-		focused, err := band(ctx, check, dir, plan.Excuse, "focused", plan.Focused)
+		focused, err := band(ctx, check, dir, plan.Excuse, "focused", plan.FocusLabel, plan.Focused)
 		if err != nil {
 			return Report{}, err
 		}
@@ -90,7 +99,7 @@ func bands(ctx context.Context, check Checker, dir string, plan Plan) (Report, e
 			return focused, nil
 		}
 		if len(plan.Fast) == 0 {
-			acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", plan.Acceptance)
+			acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", "", plan.Acceptance)
 			if err != nil {
 				return Report{}, err
 			}
@@ -101,16 +110,21 @@ func bands(ctx context.Context, check Checker, dir string, plan Plan) (Report, e
 			}
 			return acc, nil
 		}
-		wide, err := band(ctx, check, dir, plan.Excuse, "wide", plan.Fast)
+		wide, err := band(ctx, check, dir, plan.Excuse, "wide", "", plan.Fast)
 		if err != nil {
 			return Report{}, err
 		}
 		collected = append(collected, wide.Commands...)
+		if wide.Outcome != statement.Advance && plan.WideBlocks {
+			// Not on the base commit, so this change caused it: it decides like a focused one.
+			wide.Commands = collected
+			return wide, nil
+		}
 		if wide.Outcome != statement.Advance {
 			// Reported, not fatal: the reason names it so the page and the log can be read.
 			return Report{Outcome: statement.Advance, Reason: "focused passed; " + wide.Reason + " outside this story", Commands: collected}, nil
 		}
-		acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", plan.Acceptance)
+		acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", "", plan.Acceptance)
 		if err != nil {
 			return Report{}, err
 		}
@@ -121,14 +135,14 @@ func bands(ctx context.Context, check Checker, dir string, plan Plan) (Report, e
 		}
 		return acc, nil
 	}
-	fastReport, err := band(ctx, check, dir, plan.Excuse, "fast", plan.Fast)
+	fastReport, err := band(ctx, check, dir, plan.Excuse, "fast", "", plan.Fast)
 	if err != nil {
 		return Report{}, err
 	}
 	if fastReport.Outcome != statement.Advance {
 		return fastReport, nil
 	}
-	acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", plan.Acceptance)
+	acc, err := band(ctx, check, dir, plan.Excuse, "acceptance", "", plan.Acceptance)
 	if err != nil {
 		return Report{}, err
 	}
@@ -139,7 +153,8 @@ func bands(ctx context.Context, check Checker, dir string, plan Plan) (Report, e
 	return acc, nil
 }
 
-func band(ctx context.Context, check Checker, dir string, excuse Excuse, name string, commands []string) (Report, error) {
+// band runs one band in order. label, when set, stands for each command in the fingerprint.
+func band(ctx context.Context, check Checker, dir string, excuse Excuse, name, label string, commands []string) (Report, error) {
 	rep := Report{Outcome: statement.Advance, Reason: name + " passed"}
 	if len(commands) == 0 {
 		rep.Reason = name + " had no commands"
@@ -164,7 +179,11 @@ func band(ctx context.Context, check Checker, dir string, excuse Excuse, name st
 		}
 		rep.Commands = append(rep.Commands, item)
 		if code.ExitCode != 0 {
-			item.Fingerprint = Fingerprint(command, code.Text)
+			named := command
+			if label != "" {
+				named = label
+			}
+			item.Fingerprint = Fingerprint(named, code.Text)
 			if excuse != nil && excuse(command, code) {
 				// Already failing this way on the base commit: kept and shown, not counted.
 				item.Preexisting = true
