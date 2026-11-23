@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: in a folder of several repositories, the agent and model picked on the desk were saved in the folder's `span.yaml`, but each repository runs with its own, written with `agent: any`, so the run ignored them (a story ran on `cursor-agent` although `pi` was chosen). A repository now takes the folder's agent and models for whatever it leaves unset; its own choices still win, and a run started in the repository itself is unchanged.
+
 - **Fixed**: when `qa` reused the passing result of `prove` and the criteria were still unverified, the hold said only "go test ./... already passed on this commit ... it was not run again" and hid the real cause. It now keeps the gate's own reason, for example "3 of 3 criteria have no test declaration".
 
 - **Fixed**: with parallel runs on one repository, a run could be held with "the agent changed the repository structure ... packed-refs" just because git repacked refs or another run added a branch or worktree. The pin now compares the values of the branches nobody has checked out, so those are tolerated, while an agent moving a branch or editing `packed-refs` is still caught.

@@ -270,6 +270,28 @@ func (f File) ConflictMode() string {
 	return "hold"
 }
 
+// Inherit is this policy with the folder's agent and models filled in where this one has
+// none. A checkout inside a folder of several repositories keeps its own choice; only what it
+// leaves unset ("any", or no model for a CLI) comes from the folder the run was launched from.
+// Neither input is changed.
+func (f File) Inherit(folder File) File {
+	if agent := strings.TrimSpace(f.Agent); (agent == "" || strings.EqualFold(agent, "any")) && strings.TrimSpace(folder.Agent) != "" {
+		f.Agent = folder.Agent
+	}
+	if len(folder.Models) == 0 {
+		return f
+	}
+	models := make(map[string]string, len(f.Models)+len(folder.Models))
+	for id, model := range folder.Models {
+		models[id] = model
+	}
+	for id, model := range f.Models {
+		models[id] = model
+	}
+	f.Models = models
+	return f
+}
+
 // ModelFor is the model chosen for a CLI id, or "" when the CLI keeps its own.
 func (f File) ModelFor(id string) string { return f.Models[id] }
 

@@ -1032,3 +1032,19 @@ func TestBuildIsToldWhyInspectSentTheChangeBack(t *testing.T) {
 		t.Fatalf("%d prompts carried inspect's reason, want only the second build's", told)
 	}
 }
+
+func TestARunRemembersTheFolderItWasLaunchedFrom(t *testing.T) {
+	opt, _, _, _, _, _ := baseOpt(t)
+	opt.Folder = "/work/folder"
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Load(opt.Root, got.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Cursor.Folder != "/work/folder" {
+		t.Fatalf("folder %q: a resumed run would lose the folder's agent and models", snap.Cursor.Folder)
+	}
+}
