@@ -315,6 +315,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("POST /spans/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, false, true)
 	})
+	mux.HandleFunc("POST /spans/{id}/approve", func(w http.ResponseWriter, r *http.Request) {
+		approveStage(wake, root, r.PathValue("id"), w, r)
+	})
 	mux.HandleFunc("POST /spans/{id}/relaunch", func(w http.ResponseWriter, r *http.Request) {
 		relaunch(wake, hub, root, r.PathValue("id"), w, r)
 	})
@@ -461,6 +464,32 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+}
+
+// approveStage releases a stage whose mode is hold and resumes the run. The approval is
+// recorded before the wake, so the stage that runs finds it.
+func approveStage(wake Wake, root, id string, w http.ResponseWriter, r *http.Request) {
+	if wake == nil || !safe(id) {
+		http.NotFound(w, r)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	if _, err := engine.Load(root, id); err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	if err := engine.Approve(root, id, r.PostForm.Get("stage"), r.PostForm.Get("environment")); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": err.Error()})
+		return
+	}
+	if err := wake(r.Context(), id, Signal{Resume: true}); err != nil {
+		writeBusy(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": r.PostForm.Get("stage")})
 }
 
 func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, r *http.Request) {

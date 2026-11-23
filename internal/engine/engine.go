@@ -1030,7 +1030,7 @@ func (r *runner) doInspect(ctx context.Context) (string, string, error) {
 }
 
 func (r *runner) doOpen(ctx context.Context) (string, string, error) {
-	if r.opt.Policy.OpenMode() == statement.Hold {
+	if r.gated(r.opt.Policy.OpenMode(), open, "") {
 		return r.record(open, statement.Hold, "open is hold", nil)
 	}
 	branch, err := r.opt.Source.Branch(ctx)
@@ -1056,6 +1056,7 @@ func (r *runner) doOpen(ctx context.Context) (string, string, error) {
 	}
 	r.cur.ChangeURL = url
 	r.cur.Pending = nil
+	r.spendApproval(open, "")
 	return r.record(open, statement.Advance, "change open", func(s *statement.Statement) {
 		s.ChangeURL = url
 		s.GitSHA = r.cur.GitSHA
@@ -1066,7 +1067,7 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if r.cur.ChangeURL == "" {
 		return r.record(merge, statement.Hold, "no change url", nil)
 	}
-	if r.opt.Policy.MergeMode() == statement.Hold {
+	if r.gated(r.opt.Policy.MergeMode(), merge, "") {
 		return r.record(merge, statement.Hold, "merge is hold", nil)
 	}
 	r.cur.Pending = &Pending{Kind: merge, SHA: r.cur.GitSHA}
@@ -1083,6 +1084,7 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 		}
 	}
 	r.cur.Pending = nil
+	r.spendApproval(merge, "")
 	return r.record(merge, statement.Advance, "merged", func(s *statement.Statement) {
 		s.ChangeURL = r.cur.ChangeURL
 	})
@@ -1095,7 +1097,7 @@ func (r *runner) doPromote(ctx context.Context) (string, string, error) {
 		if mode == "" {
 			mode = "auto"
 		}
-		if mode == statement.Hold {
+		if r.gated(mode, promote, env.Name) {
 			return r.record(promote, statement.Hold, env.Name+" is hold", func(s *statement.Statement) {
 				s.Environment = env.Name
 			})
@@ -1129,6 +1131,9 @@ func (r *runner) doPromote(ctx context.Context) (string, string, error) {
 			return "", "", err
 		}
 		done = append(done, env.Name)
+	}
+	for _, env := range r.opt.Policy.Promote.Environments {
+		r.spendApproval(promote, env.Name)
 	}
 	return r.record(promote, statement.Advance, "promoted "+strings.Join(done, ","), func(s *statement.Statement) {
 		s.Environment = strings.Join(done, ",")
