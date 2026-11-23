@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"span/internal/qa"
+	"span/internal/runlock"
 	"span/internal/statement"
 )
 
@@ -24,6 +26,10 @@ func Load(root, id string) (Snapshot, error) {
 	snap := Snapshot{Statements: []statement.Statement{}, Acceptance: []qa.Line{}}
 	if err := json.Unmarshal(raw, &snap.Cursor); err != nil {
 		return Snapshot{}, err
+	}
+	if interrupted(dir, snap.Cursor, filepath.Join(dir, "cursor.json")) {
+		snap.Cursor.Hold = true
+		snap.Cursor.Reason = interruptedReason
 	}
 	snap.Label = Label(snap.Cursor)
 	snap.Statements = readStatements(dir)
@@ -43,6 +49,29 @@ func Load(root, id string) (Snapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// interruptedReason is what a person reads when the process that drove a run ended without
+// the run finishing or pausing.
+const interruptedReason = "the run was interrupted: the process driving it ended. Resume to continue from this stage."
+
+// interruptedAfter is how old the cursor must be before a run with no driver counts as
+// interrupted. A run that was just opened has no lock yet for a moment.
+const interruptedAfter = 10 * time.Second
+
+// interrupted reports a run the cursor calls running while nobody holds its lock: a
+// SIGKILL, a crash or a power cut stopped its process before it could pause. On disk such a
+// run looks identical to a live one, so the page offered nothing to do with it.
+func interrupted(dir string, cur Cursor, cursorFile string) bool {
+	if cur.Hold || cur.Stop || cur.Done {
+		return false
+	}
+	info, err := os.Stat(cursorFile)
+	if err != nil || time.Since(info.ModTime()) < interruptedAfter {
+		return false
+	}
+	_, held := runlock.Probe(filepath.Join(dir, "lock"))
+	return !held
 }
 
 func validID(id string) bool {

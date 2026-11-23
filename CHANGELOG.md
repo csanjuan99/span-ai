@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: a run whose process was killed looked alive forever and `resume` refused it ("this run is not paused"). It is now shown as interrupted, with a reason, and can be resumed.
+- **Fixed**: an agent left running by a killed Span kept editing the tree. The next run of that tree ends it first, after checking the pid still names the agent.
 - **Fixed**: the `agent:` line of `span.yaml` was validated and shown but never used, so `agent: claude` still ran on the first ready CLI. A per-stage choice still wins; the policy is now the fallback.
 - **Fixed**: acceptance criterion ids (`AC-1`) were read as a Jira key and became the branch name (`feat/AC-1-...`). A real key such as `SAL-3` is still found.
 - **Fixed**: the frame prompt asked for `claims` without saying what they are, so a simple story came back with none and the run held with no way forward. The prompt now explains them and the hold says what to do.
