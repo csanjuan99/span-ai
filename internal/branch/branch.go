@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 const (
@@ -71,9 +70,11 @@ func Derive(story, issue, kind, base string) (Plan, error) {
 	}
 	title := slug(titleOf(story))
 	if key != "" {
-		title = strings.TrimPrefix(title, strings.ToLower(key)+"-")
-		title = strings.Trim(title, "-")
+		title = strings.Trim(strings.TrimPrefix(title, slug(key)+"-"), "-")
 	}
+	// The budget is for the title, after the story key is out of the way: capping the
+	// joined string wasted the prefix and cut the last word in half.
+	title = clip(title, maxSlug)
 	if title == "" {
 		title = "story"
 	}
@@ -135,11 +136,30 @@ func firstLine(story string) string {
 	return strings.TrimSpace(line)
 }
 
+// maxSlug is how long the title part of a branch may be.
+const maxSlug = 48
+
+// fold turns the accented letters a Spanish story actually uses into ASCII. A branch
+// name has to stay typeable, and it has to pass the same rule as a feature name.
+var fold = map[rune]rune{
+	'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a', 'å': 'a',
+	'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+	'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
+	'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
+	'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
+	'ñ': 'n', 'ç': 'c',
+}
+
+// slug is ASCII by construction: an accented letter loses its accent, and anything that
+// is still not a letter or a digit becomes a dash.
 func slug(s string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range strings.ToLower(s) {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		if mapped, ok := fold[r]; ok {
+			r = mapped
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
 			b.WriteRune(r)
 			dash = false
 			continue
@@ -149,9 +169,14 @@ func slug(s string) string {
 			dash = true
 		}
 	}
-	out := strings.Trim(b.String(), "-")
-	if len(out) > 48 {
-		out = strings.Trim(out[:48], "-")
+	return strings.Trim(b.String(), "-")
+}
+
+// clip cuts to n runes, never through the middle of one, and never leaves a dash.
+func clip(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) > n {
+		runes = runes[:n]
 	}
-	return out
+	return strings.Trim(string(runes), "-")
 }
