@@ -325,7 +325,7 @@ The agent is a CLI already on `PATH` with Gentle AI detectable:
 | `claude` | it is on `PATH` | `~/.claude/CLAUDE.md` contains `Organic Driven Development` |
 | `codex` | it is on `PATH` | `~/.codex/AGENTS.md` contains `Organic Driven Development` |
 
-With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--approve-for-me`, which already uses the workspace-write sandbox and cannot be combined with `--sandbox`. A prompt for permission would have no one to answer it.
+With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--approve-for-me`, which already uses the workspace-write sandbox and cannot be combined with `--sandbox`. A prompt for permission would have no one to answer it.
 
 Build requires Organic Driven Development. `odd/tasks/<feature>.md` (the run's feature, from its branch; see [What span.yaml is for](#what-spanyaml-is-for)) must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
 
