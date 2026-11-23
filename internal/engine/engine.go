@@ -1020,7 +1020,13 @@ func (r *runner) doQA(ctx context.Context) (string, string, error) {
 		gate := qa.Judge(lines, 0, covered, qa.Outcomes{})
 		gate.Command = command
 		gate.Evidence = "prove"
-		gate.Reason = command + " already passed on this commit in a clean tree; it was not run again"
+		// Only a pass is explained by the reuse. When the gate does not pass, its own reason is
+		// the one a person can act on (which criteria no test declares), so it stays.
+		if gate.Verdict == qa.Pass {
+			gate.Reason = command + " already passed on this commit in a clean tree; it was not run again"
+		} else {
+			gate.Reason += " (" + command + " already passed on this commit and was not run again)"
+		}
 		if err := r.writeGate(gate); err != nil {
 			return "", "", err
 		}

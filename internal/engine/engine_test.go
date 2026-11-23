@@ -859,6 +859,24 @@ func TestQADoesNotRunTheFastCommandAgainOnACleanTree(t *testing.T) {
 	}
 }
 
+func TestQAReuseNamesTheCriteriaNoTestDeclares(t *testing.T) {
+	opt, _, source, _, _, _ := baseOpt(t)
+	opt.Policy.Run = policy.Run{Weight: policy.Standard}
+	opt.Policy.QA = policy.QA{Command: "go test ./..."}
+	source.stayDirty = false
+	opt.Brief = "Charge the card.\n\nAcceptance criteria:\nCharges the card.\n"
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	if !strings.Contains(got.Reason, "no test declaration") {
+		t.Fatalf("the hold hides why the criteria are unverified: %q", got.Reason)
+	}
+}
+
 func TestASameCommitFlipIsInconclusiveAndDoesNotFailTheGate(t *testing.T) {
 	opt, _, source, _, _, check := baseOpt(t)
 	opt.Policy.Run = policy.Run{Weight: policy.Standard}
