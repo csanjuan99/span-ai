@@ -1,0 +1,498 @@
+import type {
+  AcceptanceView,
+  Cursor,
+  Gate,
+  ImplementationView,
+  LiveFrame,
+  QACase,
+  Snapshot,
+  Statement,
+  StatementCommand,
+  AgentChoice,
+  AgentState,
+  AgentStatus,
+  SpanHead,
+} from "@/lib/types"
+
+/** One run a submission started. A submission over several repos starts one per repo. */
+export interface StartedRun {
+  id: string
+  stage: string
+  /** The repo the run works in; empty when the server did not say. */
+  repo: string
+}
+
+/** What the desk gets back from starting a story. */
+export interface Started {
+  /** The first run, for a caller that follows one. */
+  id: string
+  stage: string
+  /** Every run that started, the first included. */
+  runs: StartedRun[]
+  /** Some repos started and some did not; `notes` says which. */
+  partial: boolean
+  notes: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function text(value: unknown): string {
+  return typeof value === "string" ? value : ""
+}
+
+function count(value: unknown): number {
+  return typeof value === "number" ? value : 0
+}
+
+function flag(value: unknown): boolean {
+  return value === true
+}
+
+function messageOf(value: unknown): string {
+  if (!isRecord(value)) {
+    return "request failed"
+  }
+  const message = value.message
+  if (typeof message === "string" && message !== "") {
+    return message
+  }
+  return "request failed"
+}
+
+function parseJSON(raw: string): unknown {
+  try {
+    const value: unknown = JSON.parse(raw)
+    return value
+  } catch {
+    throw new Error("the response was not JSON")
+  }
+}
+
+const tokenKey = "span.serveToken"
+
+/** The serve token kept for this browser tab. Localhost leaves it empty. */
+export function serveToken(): string {
+  return sessionStorage.getItem(tokenKey) ?? ""
+}
+
+/** Remembers the serve token. An empty value clears it. */
+export function rememberServeToken(value: string): void {
+  if (value === "") {
+    sessionStorage.removeItem(tokenKey)
+    return
+  }
+  sessionStorage.setItem(tokenKey, value)
+}
+
+function withAuth(headers: Headers): Headers {
+  const value = serveToken()
+  if (value !== "") {
+    headers.set("Authorization", `Bearer ${value}`)
+  }
+  return headers
+}
+
+/** The socket protocol coder/websocket expects when SPAN_TOKEN is set. */
+export function socketProtocol(): string {
+  const value = serveToken()
+  if (value === "") {
+    return ""
+  }
+  const bytes = new TextEncoder().encode(value)
+  let binary = ""
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  const encoded = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")
+  return `span.${encoded}`
+}
+
+function command(value: unknown): StatementCommand {
+  if (!isRecord(value)) {
+    return { command: "", exitCode: 0 }
+  }
+  const error = text(value.error)
+  return {
+    command: text(value.command),
+    exitCode: count(value.exitCode),
+    ...(error === "" ? {} : { error }),
+  }
+}
+
+function statement(value: unknown): Statement {
+  if (!isRecord(value)) {
+    throw new Error("statement is missing")
+  }
+  const commands = Array.isArray(value.commands) ? value.commands.map(command) : []
+  return {
+    stage: text(value.stage),
+    iteration: count(value.iteration),
+    verdict: text(value.verdict),
+    reason: text(value.reason),
+    time: text(value.time),
+    parentDigest: text(value.parentDigest),
+    gitSHA: text(value.gitSHA),
+    changeURL: text(value.changeURL),
+    commands,
+    digest: text(value.digest),
+  }
+}
+
+function cursor(value: unknown): Cursor {
+  if (!isRecord(value)) {
+    throw new Error("cursor is missing")
+  }
+  return {
+    id: text(value.id),
+    stage: text(value.stage),
+    iteration: count(value.iteration),
+    hold: flag(value.hold),
+    stop: flag(value.stop),
+    done: flag(value.done),
+    reason: text(value.reason),
+    gitSHA: text(value.gitSHA),
+    changeURL: text(value.changeURL),
+    branch: text(value.branch),
+    base: text(value.base),
+    workspace: text(value.workspace),
+    issue: text(value.issue),
+    questions: stringList(value.questions),
+  }
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter((item): item is string => typeof item === "string" && item !== "")
+}
+
+function gate(value: unknown): Gate | null {
+  if (value == null) {
+    return null
+  }
+  if (!isRecord(value)) {
+    throw new Error("gate is missing")
+  }
+  return {
+    verdict: text(value.verdict),
+    command: text(value.command),
+    exitCode: count(value.exitCode),
+  }
+}
+
+/** Reads the span object the socket and the page share. */
+export function snapshot(value: unknown): Snapshot {
+  if (!isRecord(value)) {
+    throw new Error("span payload is not a snapshot")
+  }
+  const statements = Array.isArray(value.statements) ? value.statements.map(statement) : []
+  const acceptance = Array.isArray(value.acceptance)
+    ? value.acceptance.filter(isRecord).map((line) => ({ id: text(line.id), text: text(line.text) }))
+    : []
+  return {
+    cursor: cursor(value.cursor),
+    statements,
+    acceptance,
+    gate: gate(value.gate),
+  }
+}
+
+function qaCase(value: unknown): QACase {
+  if (!isRecord(value)) {
+    throw new Error("acceptance case is missing")
+  }
+  return {
+    id: text(value.id),
+    text: text(value.text),
+    result: text(value.result),
+    file: text(value.file),
+    line: count(value.line),
+  }
+}
+
+/** Reads the QA tab payload. */
+export function acceptanceView(value: unknown): AcceptanceView {
+  if (!isRecord(value)) {
+    throw new Error("acceptance payload is missing")
+  }
+  return {
+    skipped: flag(value.skipped),
+    verdict: text(value.verdict),
+    command: text(value.command),
+    exitCode: count(value.exitCode),
+    lines: Array.isArray(value.lines) ? value.lines.map(qaCase) : [],
+  }
+}
+
+/** Reads the implementation tab payload. */
+export function implementationView(value: unknown): ImplementationView {
+  if (!isRecord(value)) {
+    throw new Error("implementation payload is missing")
+  }
+  return {
+    stat: text(value.stat),
+    patch: text(value.patch),
+    truncated: flag(value.truncated),
+  }
+}
+
+/** Reads one live frame. */
+export function liveFrame(value: unknown): LiveFrame {
+  if (!isRecord(value)) {
+    throw new Error("live frame is missing")
+  }
+  const frame: LiveFrame = { type: text(value.type) }
+  if (value.cursor != null) {
+    frame.cursor = cursor(value.cursor)
+  }
+  if (value.statement != null) {
+    frame.statement = statement(value.statement)
+  }
+  if (value.gate != null) {
+    frame.gate = gate(value.gate) ?? undefined
+  }
+  if (typeof value.stage === "string") {
+    frame.stage = value.stage
+  }
+  if (Array.isArray(value.lines)) {
+    frame.lines = value.lines.filter((line): line is string => typeof line === "string")
+  }
+  if (Array.isArray(value.transcript)) {
+    frame.transcript = value.transcript.filter((line): line is string => typeof line === "string")
+  }
+  if (value.span != null) {
+    frame.span = snapshot(value.span)
+  }
+  return frame
+}
+
+async function readBody(response: Response): Promise<unknown> {
+  const raw = await response.text()
+  if (raw === "") {
+    return null
+  }
+  return parseJSON(raw)
+}
+
+/** Fetches JSON and surfaces the server message beside the action that sent it. */
+export async function getJSON(url: string): Promise<unknown> {
+  const response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  const body = await readBody(response)
+  if (!response.ok) {
+    throw new Error(messageOf(body))
+  }
+  return body
+}
+
+/** Keeps the entries of a `runs` reply that are runs. The reply is untrusted input. */
+function startedRuns(value: unknown): StartedRun[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const items: unknown[] = value
+  const runs: StartedRun[] = []
+  for (const item of items) {
+    if (isRecord(item) && typeof item.id === "string" && typeof item.stage === "string") {
+      runs.push({ id: item.id, stage: item.stage, repo: text(item.repo) })
+    }
+  }
+  return runs
+}
+
+/** Posts the desk form. A 202 returns the new span. Other success is configuration text. */
+export async function startRun(form: FormData): Promise<Started | string> {
+  const response = await fetch("/quickstart", { method: "POST", body: form, headers: withAuth(new Headers()) })
+  const raw = await response.text()
+  if (response.status === 202) {
+    const body = parseJSON(raw)
+    if (!isRecord(body) || typeof body.id !== "string" || typeof body.stage !== "string") {
+      throw new Error("quickstart did not return a span id")
+    }
+    const listed = startedRuns(body.runs)
+    const runs = listed.length > 0 ? listed : [{ id: body.id, stage: body.stage, repo: "" }]
+    return { id: body.id, stage: body.stage, runs, partial: body.partial === true, notes: text(body.notes) }
+  }
+  if (!response.ok) {
+    let message = raw
+    try {
+      message = messageOf(parseJSON(raw))
+    } catch {
+      message = raw || "request failed"
+    }
+    throw new Error(message)
+  }
+  return raw
+}
+
+async function postJSON(url: string, body: unknown): Promise<void> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: withAuth(new Headers({ "Content-Type": "application/json", Accept: "application/json" })),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (response.status === 202 || response.ok) {
+    return
+  }
+  const raw = await response.text()
+  let message = raw
+  try {
+    message = messageOf(parseJSON(raw))
+  } catch {
+    message = raw || "request failed"
+  }
+  throw new Error(message)
+}
+
+/** Sends the answers and continues the waiting run. */
+export async function answerRun(id: string, answers: { question: string; body: string }[]): Promise<void> {
+  await postJSON(`/spans/${id}/answer`, { answers })
+}
+
+/** Reads the Jira story again and continues the waiting run. */
+export async function readStory(id: string): Promise<void> {
+  await postJSON(`/spans/${id}/story`, undefined)
+}
+
+/** Continues a paused run that is not waiting for an answer. */
+export async function resumeRun(id: string): Promise<void> {
+  await postJSON(`/spans/${id}/resume`, undefined)
+}
+
+/** Starts a run again when this process no longer has its worker. */
+export async function relaunchRun(id: string): Promise<void> {
+  await postJSON(`/spans/${id}/relaunch`, undefined)
+}
+
+/** Reads one agent review. */
+export function agentStatus(value: unknown): AgentStatus {
+  if (!isRecord(value)) {
+    throw new Error("agent status is missing")
+  }
+  return {
+    id: text(value.id),
+    running: flag(value.running),
+    relaunch: flag(value.relaunch),
+    name: text(value.name),
+    pid: count(value.pid),
+    stage: text(value.stage),
+    elapsed: text(value.elapsed),
+    summary: text(value.summary),
+  }
+}
+
+/** Reads the agents running in this process. */
+export function agentList(value: unknown): AgentStatus[] {
+  if (!isRecord(value) || !Array.isArray(value.agents)) {
+    return []
+  }
+  return value.agents.map((item) => agentStatus(item))
+}
+
+/** Posts a stage instruction and leaves the span page in place. */
+export async function saveInstruction(id: string, stage: string, body: string): Promise<void> {
+  const data = new URLSearchParams()
+  data.set("stage", stage)
+  data.set("body", body)
+  const response = await fetch(`/spans/${id}/instructions`, {
+    method: "POST",
+    headers: withAuth(new Headers({ "Content-Type": "application/x-www-form-urlencoded" })),
+    body: data,
+    redirect: "manual",
+  })
+  if (response.status === 303 || response.status === 0 || response.ok) {
+    return
+  }
+  const raw = await response.text()
+  throw new Error(raw || "the instruction was not saved")
+}
+
+/** Posts a form body and returns the JSON payload. */
+export async function postForm(url: string, body: URLSearchParams): Promise<unknown> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: withAuth(new Headers({ "Content-Type": "application/x-www-form-urlencoded" })),
+    body,
+  })
+  const payload = await readBody(response)
+  if (!response.ok) {
+    throw new Error(messageOf(payload))
+  }
+  return payload
+}
+
+function agentStateOf(value: unknown): AgentState {
+  const row = isRecord(value) ? value : {}
+  return {
+    id: text(row.id),
+    label: text(row.label),
+    binary: text(row.binary),
+    installed: flag(row.installed),
+    gentle: flag(row.gentle),
+    ready: flag(row.ready),
+    reason: text(row.reason),
+  }
+}
+
+/** Every CLI Span knows, which one the project asked for, and which would run. */
+export function agentChoice(value: unknown): AgentChoice {
+  const body = isRecord(value) ? value : {}
+  const rows = Array.isArray(body.agents) ? body.agents : []
+  return {
+    agents: rows.map(agentStateOf).filter((row) => row.id !== ""),
+    selected: text(body.selected) === "" ? "any" : text(body.selected),
+    chosen: text(body.chosen),
+    exists: flag(body.exists),
+    reason: text(body.reason),
+  }
+}
+
+/** Save the agent the project runs. The server rewrites one line of span.yaml. */
+export async function saveAgent(project: string, id: string): Promise<unknown> {
+  return postForm("/agent", new URLSearchParams({ project, agent: id }))
+}
+
+/** Save which CLI one stage of this run uses. An empty id clears the exception. */
+export async function setStageAgent(id: string, stage: string, agentId: string): Promise<unknown> {
+  return postForm(`/spans/${encodeURIComponent(id)}/agent`, new URLSearchParams({ stage, agent: agentId }))
+}
+
+/** Ask the run to hold before the next stage starts. Answers why it did or did not. */
+export async function pauseRun(id: string): Promise<string> {
+  const body = await postForm(`/spans/${encodeURIComponent(id)}/pause`, new URLSearchParams())
+  const record = isRecord(body) ? body : {}
+  return text(record.reason)
+}
+
+/** Restart the run at a stage. The note is what that stage reads when it starts. */
+export async function rewindRun(id: string, stage: string, note: string): Promise<unknown> {
+  return postForm(`/spans/${encodeURIComponent(id)}/rewind`, new URLSearchParams({ stage, note }))
+}
+
+/** Cancel the stage that is running now. Answers why it did or did not. */
+export async function stopRun(id: string): Promise<string> {
+  const body = await postForm(`/spans/${encodeURIComponent(id)}/stop`, new URLSearchParams())
+  const record = isRecord(body) ? body : {}
+  return text(record.reason)
+}
+
+function spanHeadOf(value: unknown): SpanHead {
+  const row = isRecord(value) ? value : {}
+  return {
+    id: text(row.id),
+    label: text(row.label),
+    issue: text(row.issue),
+    repo: text(row.repo),
+    stage: text(row.stage),
+    verdict: text(row.verdict),
+  }
+}
+
+/** The runs the desk lists, with the label a person reads instead of the bare id. */
+export function spanHeadsOf(value: unknown): SpanHead[] {
+  const body = isRecord(value) ? value : {}
+  const rows = Array.isArray(body.spans) ? body.spans : []
+  return rows.map(spanHeadOf).filter((row) => row.id !== "")
+}
