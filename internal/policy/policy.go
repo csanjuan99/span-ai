@@ -84,6 +84,9 @@ type Bands struct {
 	// Baseline runs the wide commands once on the base commit before the first build, so a
 	// failure that was already there reports instead of spending a repair. Absent means on.
 	Baseline *bool `yaml:"baseline"`
+	// Diff derives a focused band from the branch's diff when neither the criteria nor
+	// Focused name one, so a repair runs only the tests the change can affect. Absent means on.
+	Diff *bool `yaml:"diff"`
 }
 
 // Ladder is the promotion order.
@@ -253,6 +256,10 @@ func replaceAgent(body, value string) string {
 // BaselineOn reports whether failures already present on the base commit are recorded
 // and excused. It is on unless prove.baseline is false.
 func (f File) BaselineOn() bool { return f.Prove.Baseline == nil || *f.Prove.Baseline }
+
+// DiffScopeOn reports whether prove may narrow its focused band to what the branch's diff
+// can affect. On unless the policy says diff: false.
+func (f File) DiffScopeOn() bool { return f.Prove.Diff == nil || *f.Prove.Diff }
 
 // RepairCap is how many repairs a failing check may start.
 func (f File) RepairCap() int {

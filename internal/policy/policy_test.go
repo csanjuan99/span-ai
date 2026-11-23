@@ -68,3 +68,24 @@ func TestBaselineIsOnUnlessTurnedOff(t *testing.T) {
 		}
 	}
 }
+
+func TestDiffScopeIsOnUnlessTurnedOff(t *testing.T) {
+	dir := t.TempDir()
+	for body, want := range map[string]bool{
+		"feature: payments\n":                        true,
+		"feature: payments\nprove:\n  diff: true\n":  true,
+		"feature: payments\nprove:\n  diff: false\n": false,
+	} {
+		path := filepath.Join(dir, "span.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.DiffScopeOn() != want {
+			t.Fatalf("%q: diff scope on = %v, want %v", body, got.DiffScopeOn(), want)
+		}
+	}
+}
