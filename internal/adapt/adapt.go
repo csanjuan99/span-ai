@@ -92,6 +92,9 @@ func (b *tailBuffer) String() string {
 type Git struct {
 	Dir string
 	Pin *engine.RepoPin
+	// Allow lists paths a person checked and accepted for commit: exact paths, or folders
+	// written with a trailing slash. Everything else goes through the commit guard.
+	Allow []string
 }
 
 // IsWorktree reports whether dir is a linked worktree. A linked worktree has a .git
@@ -141,6 +144,14 @@ func (g Git) Commit(ctx context.Context, message string) (string, error) {
 	}
 	if _, err := g.output(ctx, args...); err != nil {
 		return "", err
+	}
+	more, err := g.guardStaged(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !more {
+		// Only build output was left behind, and it stays out of history.
+		return g.Head(ctx)
 	}
 	if _, err := g.output(ctx, "commit", "-m", message); err != nil {
 		return "", err
