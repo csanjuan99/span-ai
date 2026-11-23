@@ -1388,21 +1388,14 @@ func (g Git) PinRepo(ctx context.Context) (engine.RepoPin, error) {
 	return shape, nil
 }
 
-// refValue is a ref's value as the pin reads it: the hex of a loose file, or the packed
-// line. A loose file wins over the packed one, as in git.
+// headValues is the value of every local branch: loose files first, then the packed ones
+// for the names a loose file did not give. A loose file wins over the packed line, as in
+// git. The loose files are read first on purpose: git pack-refs copies a ref into the packed
+// file and only then deletes the loose one, so a ref is always in at least one of the two
+// when the second is read. The other order could read a stale packed file, then find the
+// loose file already pruned, and report a ref that never moved as gone.
 func headValues(commonDir string) (map[string]string, error) {
 	values := map[string]string{}
-	if raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs")); err == nil {
-		for _, line := range strings.Split(string(raw), "\n") {
-			sum, name, ok := strings.Cut(strings.TrimSpace(line), " ")
-			if !ok || strings.HasPrefix(sum, "#") || strings.HasPrefix(sum, "^") || !strings.HasPrefix(name, "refs/heads/") {
-				continue
-			}
-			values[name] = sum
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, err
-	}
 	root := filepath.Join(commonDir, "refs", "heads")
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -1415,6 +1408,9 @@ func headValues(commonDir string) (map[string]string, error) {
 			return nil
 		}
 		raw, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1425,7 +1421,26 @@ func headValues(commonDir string) (map[string]string, error) {
 		values[filepath.ToSlash(rel)] = strings.TrimSpace(string(raw))
 		return nil
 	})
-	return values, err
+	if err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return values, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		sum, name, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || strings.HasPrefix(sum, "#") || strings.HasPrefix(sum, "^") || !strings.HasPrefix(name, "refs/heads/") {
+			continue
+		}
+		if _, loose := values[name]; !loose {
+			values[name] = sum
+		}
+	}
+	return values, nil
 }
 
 // checkedOut is every branch some worktree of the repository has checked out: the main

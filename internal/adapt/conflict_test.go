@@ -1566,3 +1566,51 @@ func (r localReview) Find(ctx context.Context, spanID, branch string) ([]engine.
 func (r localReview) Open(ctx context.Context, spanID, branch, _, title, body string) (string, error) {
 	return r.LocalReview.Open(ctx, spanID, branch, title, body)
 }
+
+func TestVerifyFailsClosedWhenTheRunsOwnLinkedWorktreeIsGone(t *testing.T) {
+	dir := conflictedRepo(t)
+	git(t, dir, "merge", "--abort")
+	tree := filepath.Join(t.TempDir(), "wt")
+	git(t, dir, "worktree", "add", "-q", "-b", "feat/own", tree)
+	pin, err := Git{Dir: tree}.PinRepo(context.Background())
+	must(t, err)
+	must(t, Git{Dir: tree}.Verify(pin))
+	must(t, os.RemoveAll(pin.GitDir))
+	assertTampered(t, Git{Dir: tree}.Verify(pin), ".git")
+}
+
+func TestAPinFromBeforeHeadsStillComparesTheWholePackedRefsFile(t *testing.T) {
+	dir := conflictedRepo(t)
+	pin, err := Git{Dir: dir}.PinRepo(context.Background())
+	must(t, err)
+	pin.Heads = nil
+	pin.PackedRefs = "deadbeef"
+	assertTampered(t, Git{Dir: dir}.Verify(pin), "packed-refs")
+}
+
+func TestARefIsNeverMissingWhileGitMovesItFromLooseToPacked(t *testing.T) {
+	dir := conflictedRepo(t)
+	common := filepath.Join(dir, ".git")
+	want := git(t, dir, "rev-parse", "dev")
+	for i := 0; i < 20; i++ {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			_ = exec.Command("git", "-C", dir, "pack-refs", "--all").Run()
+		}()
+		for {
+			values, err := headValues(common)
+			must(t, err)
+			if got := values["refs/heads/dev"]; got != want {
+				t.Fatalf("round %d: dev read as %q while git packed it", i, got)
+			}
+			select {
+			case <-done:
+			default:
+				continue
+			}
+			break
+		}
+		git(t, dir, "update-ref", "refs/heads/dev", want) // loose again for the next round
+	}
+}

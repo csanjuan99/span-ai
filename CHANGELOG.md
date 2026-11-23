@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: with parallel runs on one repository, a run could be held with "the agent changed the repository structure ... packed-refs" just because git repacked refs or another run added a branch or worktree. The pin now compares the values of the branches nobody has checked out, so those are tolerated, while an agent moving a branch or editing `packed-refs` is still caught.
+
 - **Fixed**: the conflict phase could not fetch the base from a private origin on macOS, because it switched off the system git config that holds the keychain credential helper. Only the fetch keeps it now.
 - **Fixed**: right after a resolved merge commit was pushed, GitHub still called the change conflicting, so the run held with "merge conflict reported by the host, but origin/dev merges cleanly here". The merge is now retried for about half a minute in that case.
 - **Fixed**: a run whose process was killed looked alive forever and `resume` refused it ("this run is not paused"). It is now shown as interrupted, with a reason, and can be resumed.
