@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"span/internal/adapt"
 	"span/internal/engine"
@@ -15,9 +19,12 @@ import (
 	"span/internal/launch"
 	"span/internal/live"
 	"span/internal/policy"
+	"span/internal/proc"
+	"span/internal/runlock"
 	"span/internal/scope"
 	"span/internal/serve"
 	"span/internal/setup"
+	"span/internal/worktree"
 	"span/web"
 )
 
@@ -51,10 +58,18 @@ func run(args []string) int {
 	brief := fs.String("brief", "", "path to the brief")
 	spans := fs.String("spans", "", "state directory (default <workspace>/.span/runs)")
 	policyPath := fs.String("policy", "", "policy file (default <workspace>/span.yaml)")
+	branch := fs.String("branch", "", "branch to work on; with --worktree it gets its own tree")
+	base := fs.String("base", "", "base branch for a new branch (default dev)")
+	isolate := fs.Bool("worktree", false, "isolate the run in its own git worktree")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	opt, err := options(*workspace, *spans, *policyPath)
+	code, err := prepare(*workspace, *spans, *policyPath, *branch, *base, *isolate)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -65,7 +80,9 @@ func run(args []string) int {
 		return 1
 	}
 	opt.Brief = string(raw)
-	result, err := engine.Start(context.Background(), opt)
+	ctx, stop := interruptContext()
+	defer stop()
+	result, err := engine.Start(ctx, opt)
 	return printResult(result, err)
 }
 
@@ -81,12 +98,26 @@ func resume(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: span resume <id>")
 		return 2
 	}
-	opt, err := options(*workspace, *spans, *policyPath)
+	project := *workspace
+	tree, policyFile := *workspace, *policyPath
+	if snap, err := engine.Load(*spans, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
+		project = snap.Cursor.Project
+		// An isolated run is resumed in its own worktree, not in the project.
+		if snap.Cursor.Workspace != "" {
+			tree = snap.Cursor.Workspace
+		}
+		if policyFile == "" {
+			policyFile = projectPolicy(project)
+		}
+	}
+	opt, err := options(tree, *spans, policyFile, project)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	result, err := engine.Resume(context.Background(), opt, fs.Arg(0))
+	ctx, stop := interruptContext()
+	defer stop()
+	result, err := engine.Resume(ctx, opt, fs.Arg(0))
 	return printResult(result, err)
 }
 
@@ -104,6 +135,16 @@ func serveCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// Agents run in their own process group (proc.Tame), so Ctrl-C no longer reaches them
+	// through the terminal. Cancel every flight first so each one ends its own tree.
+	ctx, stop := interruptContext()
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		hub.StopAll()
+		hub.Drain(proc.Grace + 5*time.Second)
+		os.Exit(130)
+	}()
 	err = serve.Listen(*addr, *spans, token, func(ctx context.Context, req setup.Request) (serve.Outcome, error) {
 		return beginRuns(ctx, req, *spans, hub)
 	}, wakeRuns(*spans, hub), hub, pages)
@@ -115,19 +156,19 @@ func serveCmd(args []string) int {
 }
 
 func wakeRuns(spans string, hub *live.Hub) serve.Wake {
-	return func(ctx context.Context, id string, signal serve.Signal) error {
+	return func(ctx context.Context, id string, wakeup serve.Signal) error {
 		snap, err := engine.Load(spans, id)
 		if err != nil {
 			return err
 		}
-		opt, err := options(snap.Cursor.Workspace, spans, "")
+		opt, err := options(snap.Cursor.Workspace, spans, projectPolicy(snap.Cursor.Project), snap.Cursor.Project)
 		if err != nil {
 			return err
 		}
 		opt.Watch = hub
 		opt.Issue = snap.Cursor.Issue
 		var brief string
-		if signal.Reload {
+		if wakeup.Reload {
 			key := snap.Cursor.Issue
 			if key == "" {
 				raw, readErr := os.ReadFile(filepath.Join(spans, id, "brief.md"))
@@ -149,20 +190,36 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		if !hub.Claim(id, snap.Cursor.Stage) {
 			return live.ErrBusy
 		}
-		go func() {
-			defer hub.EndFlight(id)
-			if signal.Resume {
-				_, _ = engine.Resume(context.Background(), opt, id)
+		// The claim only covers this process. Another one (`span resume`) may hold the run;
+		// the engine would refuse inside the flight, where the answers are already lost.
+		if holder, busy := engine.RunBusy(spans, id); busy {
+			hub.EndFlight(id)
+			return &runlock.BusyError{Scope: runlock.Run, Holder: holder}
+		}
+		hub.Fly(id, func(flight context.Context) {
+			if wakeup.Resume {
+				_, _ = engine.Resume(flight, opt, id)
 				return
 			}
-			if signal.Reload {
-				_, _ = engine.Reload(context.Background(), opt, id, brief)
+			if wakeup.Reload {
+				_, _ = engine.Reload(flight, opt, id, brief)
 				return
 			}
-			_, _ = engine.Continue(context.Background(), opt, id, signal.Answers)
-		}()
+			_, _ = engine.Continue(flight, opt, id, wakeup.Answers)
+		})
 		return nil
 	}
+}
+
+// interruptContext ends on the first SIGINT, SIGTERM, or SIGHUP (closing the terminal) and then restores the default
+// handling, so a second Ctrl-C still kills the process if the graceful stop hangs.
+func interruptContext() (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
 }
 
 func quickstartCmd(args []string) int {
@@ -258,37 +315,84 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 		}
 	}
 	var text strings.Builder
-	var id, stage string
+	var runs []serve.RunRef
+	var failures []error
 	for _, target := range targets {
 		one := req
 		one.Workspace = target.Path
 		one.Story = target.Story
 		one.Issue = target.Issue
 		if strings.TrimSpace(one.Story) == "" {
-			res, err := setup.Configure(one)
+			res, claim, err := claimAndConfigure(one, "configuring")
 			if err != nil {
 				return serve.Outcome{}, err
 			}
+			claim.Release()
 			fmt.Fprintf(&text, "repo %s\npolicy %s\nbranch %s\nbase %s\nconfiguration ready\n", target.Name, res.PolicyPath, res.Branch, res.Base)
 			continue
 		}
 		gotID, gotStage, err := beginOne(one, spans, hub)
 		if err != nil {
-			return serve.Outcome{}, err
+			// Keep going: one busy checkout must not stop the other repos, and the runs that
+			// did start must be reported, not dropped.
+			failures = append(failures, fmt.Errorf("repo %s: %w", target.Name, err))
+			fmt.Fprintf(&text, "repo %s did not start: %v\n", target.Name, err)
+			continue
 		}
-		if id == "" {
-			id, stage = gotID, gotStage
-		}
+		runs = append(runs, serve.RunRef{ID: gotID, Stage: gotStage, Repo: target.Name})
 	}
-	return serve.Outcome{ID: id, Stage: stage, Text: text.String()}, nil
+	if len(runs) == 0 && len(failures) > 0 {
+		return serve.Outcome{}, errors.Join(failures...)
+	}
+	out := serve.Outcome{Text: text.String(), Runs: runs, Partial: len(failures) > 0}
+	if len(runs) > 0 {
+		out.ID, out.Stage = runs[0].ID, runs[0].Stage
+	}
+	return out, nil
+}
+
+// claimAndConfigure takes the checkout and then writes the project's configuration into
+// it. The order matters: no run can be editing the tree while span.yaml is rewritten. The
+// caller releases the claim, or hands it to a run in engine.Options.HeldWorkspace.
+func claimAndConfigure(req setup.Request, label string) (setup.Result, *runlock.Lock, error) {
+	claim, err := engine.ClaimWorkspace(req.Workspace, label)
+	if err != nil {
+		var busy *runlock.BusyError
+		if errors.As(err, &busy) {
+			return setup.Result{}, nil, fmt.Errorf("%w; wait for it or stop it first", busy)
+		}
+		return setup.Result{}, nil, err
+	}
+	res, err := setup.Configure(req)
+	if err != nil {
+		claim.Release()
+		return setup.Result{}, nil, err
+	}
+	return res, claim, nil
 }
 
 func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, error) {
-	res, err := setup.Configure(req)
+	// Take the checkout before anything is written into it. Checking first and writing
+	// after leaves a window in which two launches both pass the check and the second
+	// rewrites span.yaml and the brief under the run that is starting. A second story in a
+	// checkout another run is editing would also swap its branch and commit its files, so
+	// that run gets its own worktree instead and the two go side by side.
+	st, err := claimSite(req, spans, "starting a run")
 	if err != nil {
 		return "", "", err
 	}
-	opt, err := options(req.Workspace, spans, "")
+	res, claim := st.Result, st.Claim
+	handedOver, opened := false, false
+	defer func() {
+		if !handedOver {
+			claim.Release()
+		}
+		if !opened {
+			// No run exists, so nobody owns an isolated tree made for this launch.
+			st.discard()
+		}
+	}()
+	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project)
 	if err != nil {
 		return "", "", err
 	}
@@ -298,25 +402,32 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	opt.Base = res.Base
 	opt.Files = req.Files
 	opt.Watch = hub
+	opt.HeldWorkspace = claim
 	id, err := engine.Open(opt)
 	if err != nil {
 		return "", "", err
 	}
+	opened = true
+	claim.Relabel("run " + id)
 	if !hub.Claim(id, "intake") {
 		return "", "", live.ErrBusy
 	}
-	go func() {
-		defer hub.EndFlight(id)
-		_, _ = engine.Resume(context.Background(), opt, id)
-	}()
+	handedOver = true
+	// Fly wires the stop handle, so Stop works from the first frame and not only after
+	// the run has held once and been woken.
+	hub.Fly(id, func(flight context.Context) {
+		defer claim.Release()
+		_, _ = engine.Resume(flight, opt, id)
+	})
 	return id, "intake", nil
 }
 
 func runOne(ctx context.Context, req setup.Request) (string, int) {
-	res, err := setup.Configure(req)
+	res, claim, err := claimAndConfigure(req, "span run")
 	if err != nil {
 		return err.Error() + "\n", 1
 	}
+	defer claim.Release()
 	var b strings.Builder
 	fmt.Fprintf(&b, "policy %s\n", res.PolicyPath)
 	if res.Wrote {
@@ -327,7 +438,20 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 		return b.String(), 0
 	}
 	fmt.Fprintf(&b, "branch %s from %s\n", res.Branch, res.Base)
-	opt, err := options(req.Workspace, "", "")
+	// The run works on its branch in its own tree; the checkout the person pointed at is
+	// never switched, so a second story can run beside this one.
+	code, err := prepare(req.Workspace, "", "", res.Branch, res.Base, res.Branch != "")
+	if err != nil {
+		return b.String() + err.Error() + "\n", 1
+	}
+	isolated := code.Workspace != code.Project
+	if isolated {
+		fmt.Fprintf(&b, "worktree %s\n", code.Workspace)
+		// The claim only protected the configuration just written. The run edits its own
+		// tree, so the checkout is free for the next story at once.
+		claim.Release()
+	}
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
@@ -336,6 +460,9 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 	opt.Branch = res.Branch
 	opt.Base = res.Base
 	opt.Files = req.Files
+	if !isolated {
+		opt.HeldWorkspace = claim
+	}
 	result, err := engine.Start(ctx, opt)
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
@@ -490,7 +617,7 @@ func jiraFlags(name string, args []string, extra func(*flag.FlagSet)) (*flag.Fla
 	return fs, *project, 0
 }
 
-func options(workspace, spans, policyPath string) (engine.Options, error) {
+func options(workspace, spans, policyPath, project string) (engine.Options, error) {
 	workspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return engine.Options{}, err
@@ -514,8 +641,13 @@ func options(workspace, spans, policyPath string) (engine.Options, error) {
 		Source:    adapt.Git{Dir: workspace},
 		Review:    adapt.Host{Workspace: workspace, State: spans},
 		Release:   adapt.CommandRelease{},
+		Worktree:  adapt.IsWorktree(workspace),
+		Project:   project,
 	}
-	if account, err := jira.Load(workspace); err == nil {
+	if project == "" {
+		project = workspace
+	}
+	if account, err := jira.Load(project); err == nil {
 		opt.Issues = jira.Client{Account: account}
 		if account.Token != "" {
 			opt.Secrets = []string{account.Token}
@@ -566,4 +698,50 @@ func usage() {
 ./span run --brief brief.md [--workspace .]
 ./span resume <id> [--workspace .]
 ./span serve [--addr 127.0.0.1:8787] [--spans .span/runs]`)
+}
+
+// prepared is where a run writes: the checkout the person pointed at, and the code either
+// there or in a worktree of it.
+type prepared struct {
+	Workspace string
+	Project   string
+	Spans     string
+	Policy    string
+}
+
+// prepare isolates a run in its own git worktree when asked. The state directory and the
+// policy stay in the checkout the person pointed at, so the desk keeps one list of runs
+// and the policy is not copied into every tree.
+func prepare(workspace, spans, policyPath, branch, base string, isolate bool) (prepared, error) {
+	project, err := filepath.Abs(workspace)
+	if err != nil {
+		return prepared{}, err
+	}
+	out := prepared{Workspace: project, Project: project}
+	if spans == "" {
+		out.Spans = filepath.Join(project, ".span", "runs")
+	} else {
+		out.Spans = spans
+	}
+	if policyPath == "" {
+		out.Policy = filepath.Join(project, "span.yaml")
+	} else {
+		out.Policy = policyPath
+	}
+	if !isolate {
+		return out, nil
+	}
+	if strings.TrimSpace(branch) == "" {
+		return prepared{}, errors.New("--worktree needs --branch: the tree is the branch")
+	}
+	dir := worktree.Path(project, branch)
+	start := base
+	if start == "" {
+		start = "dev"
+	}
+	if err := worktree.Add(context.Background(), adapt.Git{Dir: project}, project, dir, branch, start); err != nil {
+		return prepared{}, err
+	}
+	out.Workspace = dir
+	return out, nil
 }

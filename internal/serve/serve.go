@@ -4,6 +4,7 @@ package serve
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,8 @@ import (
 	"span/internal/jira"
 	"span/internal/launch"
 	"span/internal/live"
+	"span/internal/policy"
+	"span/internal/runlock"
 	"span/internal/scope"
 	"span/internal/setup"
 )
@@ -35,6 +38,18 @@ type Outcome struct {
 	ID    string
 	Stage string
 	Text  string
+	// Runs lists every run started, one per repo. ID and Stage name the first so a client
+	// that follows one run keeps working.
+	Runs []RunRef
+	// Partial means some repos started and some did not; Text says which.
+	Partial bool
+}
+
+// RunRef is one run a submission started.
+type RunRef struct {
+	ID    string `json:"id"`
+	Stage string `json:"stage"`
+	Repo  string `json:"repo,omitempty"`
 }
 
 // Launch configures a project and, when the request includes a story, starts a run.
@@ -57,14 +72,14 @@ func Handler(root, token string) http.Handler {
 
 // New is Handler plus an optional quickstart launcher and the static page.
 func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.FS) http.Handler {
+	starts := newRecent()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /spans", func(w http.ResponseWriter, r *http.Request) {
 		if !wantsJSON(r) {
 			servePage(pages, w, r)
 			return
 		}
-		ids, _ := list(root)
-		writeJSON(w, http.StatusOK, map[string]any{"spans": ids})
+		writeJSON(w, http.StatusOK, map[string]any{"spans": engine.Heads(root)})
 	})
 	mux.HandleFunc("POST /quickstart", func(w http.ResponseWriter, r *http.Request) {
 		req, err := storyRequest(r)
@@ -73,13 +88,24 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			return
 		}
 		if launch != nil {
-			out, err := launch(context.Background(), req)
+			start := func() (Outcome, error) { return launch(context.Background(), req) }
+			out, err := dedupe(r, req, starts, start)
 			if err != nil {
 				writeErr(w, err)
 				return
 			}
 			if out.ID != "" {
-				writeJSON(w, http.StatusAccepted, map[string]string{"id": out.ID, "stage": out.Stage})
+				body := map[string]any{"id": out.ID, "stage": out.Stage}
+				if len(out.Runs) > 0 {
+					body["runs"] = out.Runs
+				}
+				if strings.TrimSpace(out.Text) != "" {
+					body["notes"] = out.Text
+				}
+				if out.Partial {
+					body["partial"] = true
+				}
+				writeJSON(w, http.StatusAccepted, body)
 				return
 			}
 			_, _ = io.WriteString(w, out.Text)
@@ -198,6 +224,94 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("POST /spans/{id}/story", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, true, false)
 	})
+	mux.HandleFunc("POST /spans/{id}/agent", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if err := r.ParseForm(); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if !safe(id) {
+			writeErr(w, errors.New("invalid span id"))
+			return
+		}
+		if err := engine.SetStageAgent(filepath.Join(root, id), r.PostForm.Get("stage"), r.PostForm.Get("agent"), agent.Home()); err != nil {
+			writeErr(w, err)
+			return
+		}
+		snap, err := engine.Load(root, id)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
+	})
+	mux.HandleFunc("POST /spans/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if !safe(id) {
+			writeErr(w, errors.New("invalid span id"))
+			return
+		}
+		// A click here is always valid: the answer says whether there was anything to stop.
+		// A 4xx would read as "the button is broken" when the run simply is not in flight.
+		if hub == nil || !hub.Stop(id) {
+			writeJSON(w, http.StatusOK, map[string]any{"stopped": false, "reason": "nothing is running this span"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stage in flight was cancelled; the run holds with the error"})
+	})
+	mux.HandleFunc("POST /spans/{id}/rewind", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if err := r.ParseForm(); err != nil {
+			writeErr(w, err)
+			return
+		}
+		stage := r.PostForm.Get("stage")
+		if !safe(id) || !safe(stage) {
+			writeErr(w, errors.New("invalid span or stage"))
+			return
+		}
+		if hub != nil {
+			if _, running := hub.Flight(id); running {
+				writeErr(w, errors.New("this span is running; stop it before restarting from a stage"))
+				return
+			}
+		}
+		if note := strings.TrimSpace(r.PostForm.Get("note")); note != "" {
+			if err := saveInstruction(root, id, stage, []byte(note)); err != nil {
+				writeErr(w, err)
+				return
+			}
+		}
+		if err := engine.Rewind(root, id, stage); err != nil {
+			writeErr(w, err)
+			return
+		}
+		snap, err := engine.Load(root, id)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
+	})
+	mux.HandleFunc("POST /spans/{id}/pause", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if hub != nil {
+			if _, running := hub.Flight(id); !running {
+				// A pause is consumed at a stage boundary. With nothing in flight there is
+				// no boundary coming, and the file would wait until a resume discarded it.
+				writeJSON(w, http.StatusOK, map[string]any{
+					"paused": false,
+					"reason": "this span is not running; a pause only applies to a stage in flight",
+				})
+				return
+			}
+		}
+		if err := engine.RequestPause(root, id); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"paused": true, "reason": "the run holds before the next stage"})
+	})
 	mux.HandleFunc("POST /spans/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, false, true)
 	})
@@ -214,6 +328,26 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	})
 	mux.HandleFunc("GET /agents", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"agents": agentList(hub, root)})
+	})
+	mux.HandleFunc("GET /agent", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, agentView(r.URL.Query().Get("path")))
+	})
+	mux.HandleFunc("POST /agent", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			writeErr(w, err)
+			return
+		}
+		project := r.PostForm.Get("project")
+		path := filepath.Join(project, policy.Name)
+		if _, err := os.Stat(path); err != nil {
+			writeErr(w, errors.New("span.yaml is not there yet. Start one run, or run ./span quickstart, then choose the agent."))
+			return
+		}
+		if err := policy.SetAgent(path, r.PostForm.Get("agent")); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, agentView(project))
 	})
 	mux.HandleFunc("POST /spans/{id}/instructions", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -253,7 +387,10 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /{path...}", func(w http.ResponseWriter, r *http.Request) {
 		servePage(pages, w, r)
 	})
-	return protect(token, mux)
+	// Every route that changes state is a POST, and a browser tab on any site can send one
+	// to 127.0.0.1. Refuse the ones the browser marks as cross-site; clients that send no
+	// Origin or Sec-Fetch-Site (curl, the CLI) pass.
+	return protect(token, http.NewCrossOriginProtection().Handler(mux))
 }
 
 // Listen checks the address policy and serves.
@@ -266,7 +403,13 @@ func Listen(addr, root, token string, launch Launch, wake Wake, hub *live.Hub, p
 	if (ip == nil || !ip.IsLoopback()) && token == "" {
 		return ErrToken
 	}
-	return http.ListenAndServe(addr, New(root, token, launch, wake, hub, pages))
+	handler := New(root, token, launch, wake, hub, pages)
+	if token == "" {
+		// Without a token the loopback bind is the only guard, and a page that rebinds its
+		// own DNS name to 127.0.0.1 looks same-origin to the check in New.
+		handler = loopbackOnly(handler)
+	}
+	return http.ListenAndServe(addr, handler)
 }
 
 func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request, reload, resume bool) {
@@ -461,12 +604,32 @@ func instructionBody(r *http.Request) ([]byte, error) {
 	return []byte(r.PostForm.Get("body")), nil
 }
 
+// loopbackOnly refuses a request whose Host names anything but this machine. A browser
+// sends the name the page was loaded from, so a DNS-rebinding page arrives as its own
+// domain and is stopped here.
+func loopbackOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		http.Error(w, "forbidden host", http.StatusForbidden)
+	})
+}
+
 func protect(token string, next http.Handler) http.Handler {
 	if token == "" {
 		return next
 	}
+	want := []byte("Bearer " + token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "Bearer "+token || subprotocol(r, token) {
+		got := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(got, want) == 1 || subprotocol(r, token) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -565,7 +728,15 @@ func writeErr(w http.ResponseWriter, err error) {
 	if errors.As(err, &coded) {
 		code = coded.SpanCode()
 	}
+	var busy *runlock.BusyError
+	if errors.As(err, &busy) {
+		code = "busy"
+	}
 	switch code {
+	case "busy":
+		status = http.StatusConflict
+	case "idempotency_mismatch":
+		status = http.StatusUnprocessableEntity
 	case "unauthorized":
 		status = http.StatusUnauthorized
 	case "not_found":
@@ -574,4 +745,12 @@ func writeErr(w http.ResponseWriter, err error) {
 		status = http.StatusBadGateway
 	}
 	writeJSON(w, status, map[string]string{"error": code, "message": err.Error()})
+}
+
+func dedupe(r *http.Request, req setup.Request, starts *recent, start func() (Outcome, error)) (Outcome, error) {
+	key, window, fingerprint := launchKey(r, req)
+	if key == "" {
+		return start()
+	}
+	return starts.do(r.Context(), key, fingerprint, window, start)
 }

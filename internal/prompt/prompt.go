@@ -15,7 +15,8 @@ type Input struct {
 	Instructions string
 	Answers      string
 	Handoffs     []string
-	ProveReport  string
+	Failure      string
+	Worktree     bool
 	Manifest     string
 	Standards    string
 	Acceptance   []string
@@ -31,7 +32,7 @@ Read the story in the language it is written. Carry what it already decides into
 acceptance lists each criterion the story already states, one entry, in the story's words.
 A question is allowed only when the story cannot be implemented without inventing a requirement.
 Do not invent a criterion the story does not state.
-Do not push, merge, or deploy.
+Do not edit files. Do not push, merge, or deploy.
 `
 }
 
@@ -41,6 +42,7 @@ func Build(in Input) string {
 	if len(in.Acceptance) > 0 {
 		fmt.Fprintf(&extra, "Add one test per acceptance id in the project's test runner: %s.\n", strings.Join(in.Acceptance, ", "))
 		extra.WriteString("Each id must appear on a test declaration line, as AC-1 or AC1. A comment is not enough. Use func Test, test(, it(, or def test_.\n")
+		extra.WriteString("A criterion the gate reports as unverified has no declaration yet. Add the test, do not change the brief.\n")
 	}
 	if in.Browser {
 		extra.WriteString("This repo is checked in a browser. Test user-visible behavior. Prefer getByRole. Use web-first expect assertions. Keep each test isolated. Record a trace on the first retry, not on every test.\n")
@@ -84,8 +86,13 @@ func preamble(in Input) string {
 	if len(in.Handoffs) > 0 {
 		fmt.Fprintf(&b, "Handoffs (open these workspace files; they are part of the story, including images):\n%s\n", strings.Join(in.Handoffs, "\n"))
 	}
-	if in.ProveReport != "" {
-		fmt.Fprintf(&b, "Previous prove report:\n%s\n", in.ProveReport)
+	if in.Worktree {
+		b.WriteString("This workspace is a git worktree on its own branch. The branch is already checked out.\n")
+		b.WriteString("Do not run git checkout, git switch, git worktree add, or git stash: they move or hide a tree another run may be using.\n")
+		b.WriteString("Read `git worktree list` if you need to see the other trees. Do not commit; Span commits.\n")
+	}
+	if in.Failure != "" {
+		fmt.Fprintf(&b, "Previous check failed:\n%s\n", in.Failure)
 	}
 	if in.Lessons != "" {
 		fmt.Fprintf(&b, "Lessons from earlier runs of this stage. Do not repeat them.\n%s\n", in.Lessons)

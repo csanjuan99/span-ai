@@ -83,15 +83,13 @@ func TestEnsureBranchCreatesFeatFromDevAndLeavesItAlone(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Span", "GIT_AUTHOR_EMAIL=span@example.test",
-			"GIT_COMMITTER_NAME=Span", "GIT_COMMITTER_EMAIL=span@example.test",
-		)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
 	run("init", "-b", "master")
+	run("config", "user.name", "Span Tests")
+	run("config", "user.email", "tests@example.test")
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("span\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
