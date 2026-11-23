@@ -768,7 +768,9 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		}
 	}
 	in := r.promptInput(frame, prev)
-	doc, err := r.opt.Agents.Frame(ctx, target, r.opt.Workspace, prompt.Frame(in))
+	call, cancel := r.agentCall(ctx)
+	defer cancel()
+	doc, err := r.opt.Agents.Frame(call, target, r.opt.Workspace, prompt.Frame(in))
 	if err != nil {
 		return r.agentBlocked(frame, err)
 	}
@@ -802,7 +804,9 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 		return r.record(build, statement.Hold, err.Error(), nil)
 	}
 	in := r.promptInput(build, r.failurePacket())
-	if err := r.opt.Agents.Build(ctx, target, r.opt.Workspace, prompt.Build(in)); err != nil {
+	call, cancel := r.agentCall(ctx)
+	defer cancel()
+	if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
 		return r.agentBlocked(build, err)
 	}
 	path := featurePath(r.opt.Workspace, r.cur.Feature)
@@ -892,9 +896,24 @@ func (r *runner) doProve(ctx context.Context) (string, string, error) {
 	})
 }
 
+// agentCall bounds one agent call by limits.stageTimeout. Without a limit the call keeps the
+// run's own context.
+func (r *runner) agentCall(ctx context.Context) (context.Context, context.CancelFunc) {
+	if limit := r.opt.Policy.StageTimeout(); limit > 0 {
+		return context.WithTimeout(ctx, limit)
+	}
+	return ctx, func() {}
+}
+
 // agentBlocked records an agent that ran out of quota or credentials. The reason
 // names the action a person has to take, because nothing in the project can fix it.
 func (r *runner) agentBlocked(stage string, err error) (string, string, error) {
+	if limit := r.opt.Policy.StageTimeout(); limit > 0 && errors.Is(err, context.DeadlineExceeded) {
+		// Not an account problem and not a failing check: the agent did not finish, so no
+		// repair is spent. A person decides between more time and a smaller story.
+		return r.record(stage, statement.Hold, fmt.Sprintf(
+			"%s ran past limits.stageTimeout (%s) and was stopped. Raise the limit or split the story, then resume.", stage, limit), nil)
+	}
 	blocked, ok := agent.AsBlocked(err)
 	if !ok {
 		return r.record(stage, statement.Hold, err.Error(), nil)
@@ -1087,7 +1106,9 @@ func (r *runner) doInspect(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(inspect, statement.Hold, err.Error(), nil)
 	}
-	doc, err := r.opt.Agents.Inspect(ctx, target, r.opt.Workspace, prompt.Inspect(r.promptInput(inspect, "")))
+	call, cancel := r.agentCall(ctx)
+	defer cancel()
+	doc, err := r.opt.Agents.Inspect(call, target, r.opt.Workspace, prompt.Inspect(r.promptInput(inspect, "")))
 	if err != nil {
 		return r.agentBlocked(inspect, err)
 	}

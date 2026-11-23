@@ -1243,3 +1243,16 @@ commit:
 ```
 
 These checks are heuristics, not a secret scanner: a secret that matches none of the shapes is committed. Run a scanner such as gitleaks in your own pipeline for coverage.
+
+## Limiting how long an agent may run
+
+`limits.stageTimeout` bounds one agent call: frame, build or inspect. It is a Go duration from `1s` to `48h`, for example `45m`. An absent limit is no limit.
+
+```yaml
+limits:
+  stageTimeout: 45m
+```
+
+When a call runs past it, Span stops the agent and the stage holds with `<stage> ran past limits.stageTimeout (45m0s) and was stopped. Raise the limit or split the story, then resume.` A timeout is not a failing check, so it does not spend a repair. Resuming starts that stage again.
+
+Not covered: a limit on spend. Span does not read token counts or cost from the CLIs, so there is no budget to set. The limit above bounds time only.
