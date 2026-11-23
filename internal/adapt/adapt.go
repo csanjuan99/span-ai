@@ -30,6 +30,8 @@ type Exec struct{}
 // text goes to the run log; only a short tail travels on the statement.
 const OutputCap = 1 << 20
 
+// Run executes one command in dir and keeps the tail of its output (see OutputCap). A failing
+// exit is reported in the output's ExitCode, not as an error; a cancelled context is an error.
 func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) {
 	env, fields, err := Argv(command)
 	if err != nil {
@@ -73,6 +75,7 @@ type tailBuffer struct {
 // Truncated reports whether the start of the output was dropped.
 func (b *tailBuffer) Truncated() bool { return b.written > b.max }
 
+// Write keeps the last max bytes written, dropping the start.
 func (b *tailBuffer) Write(p []byte) (int, error) {
 	b.written += len(p)
 	b.data = append(b.data, p...)
@@ -82,6 +85,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// String is what was kept.
 func (b *tailBuffer) String() string {
 	if len(b.data) <= b.max {
 		return string(b.data)
@@ -119,10 +123,12 @@ func (g Git) Git(ctx context.Context, dir string, args ...string) (string, error
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+// Head is the commit the checkout is on.
 func (g Git) Head(ctx context.Context) (string, error) {
 	return g.output(ctx, "rev-parse", "HEAD")
 }
 
+// Dirty reports whether the working tree has changes a commit would take.
 func (g Git) Dirty(ctx context.Context) (bool, error) {
 	// Span's own state lives at .span inside the workspace. Counting it here would
 	// make every run permanently dirty, which turns off evidence reuse and leaves a
@@ -134,6 +140,9 @@ func (g Git) Dirty(ctx context.Context) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
+// Commit stages what the run may change (never .span or span.yaml), commits it with message
+// and returns the commit the checkout is on. When only build output was left behind it makes
+// no commit and returns the current one.
 func (g Git) Commit(ctx context.Context, message string) (string, error) {
 	// span.yaml is the person's policy, not the story's work: committing it puts it on one
 	// branch only, and the next checkout of another branch loses it.
@@ -168,11 +177,13 @@ func (g Git) ignored(ctx context.Context, path string) bool {
 	return g.gitCmd(ctx, g.Dir, "check-ignore", "-q", "--", path).Run() == nil
 }
 
+// Push sends the current branch to origin.
 func (g Git) Push(ctx context.Context) error {
 	_, err := g.output(ctx, "push", "origin", "HEAD")
 	return err
 }
 
+// Branch is the name of the checked out branch.
 func (g Git) Branch(ctx context.Context) (string, error) {
 	return g.output(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 }
@@ -216,14 +227,7 @@ func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
 func (g Git) output(ctx context.Context, args ...string) (string, error) {
 	// The author is whoever this checkout is configured with. Span does not invent an
 	// identity and does not overwrite the user's: the commit is theirs.
-	cmd := g.gitCmd(ctx, g.Dir, args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr.String())
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	return g.Git(ctx, g.Dir, args...)
 }
 
 const patchLimit = 256 * 1024
@@ -323,6 +327,7 @@ func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bo
 	buf := make([]byte, limit+1)
 	n, readErr := io.ReadFull(stdout, buf)
 	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		// The read already failed and that error is the one returned; Wait only reaps the process.
 		_ = cmd.Wait()
 		return "", false, readErr
 	}
@@ -330,6 +335,7 @@ func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bo
 	if truncated {
 		n = limit
 	}
+	// What is left past the limit is dropped on purpose; draining it lets git exit.
 	_, _ = io.Copy(io.Discard, stdout)
 	if err := cmd.Wait(); err != nil {
 		return "", false, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr.String())
@@ -471,10 +477,12 @@ type ghError struct {
 	stderr string
 }
 
+// Error is the gh failure with what the CLI printed.
 func (e *ghError) Error() string {
 	return fmt.Sprintf("gh %s: %v: %s", strings.Join(e.args, " "), e.err, e.stderr)
 }
 
+// Unwrap is the underlying error.
 func (e *ghError) Unwrap() error { return e.err }
 
 func (h Host) gh(ctx context.Context, args ...string) (string, error) {
@@ -492,6 +500,7 @@ func (h Host) gh(ctx context.Context, args ...string) (string, error) {
 // LocalReview records the change inside the span directory when no forge CLI exists.
 type LocalReview struct{ Dir string }
 
+// Find returns the local change a run already opened, if any.
 func (r LocalReview) Find(_ context.Context, spanID, _ string) (string, bool, error) {
 	raw, err := os.ReadFile(filepath.Join(r.Dir, spanID, "change.url"))
 	if os.IsNotExist(err) {
@@ -503,6 +512,7 @@ func (r LocalReview) Find(_ context.Context, spanID, _ string) (string, bool, er
 	return strings.TrimSpace(string(raw)), true, nil
 }
 
+// Open records a local change for the run and returns its address.
 func (r LocalReview) Open(_ context.Context, spanID, branch, _, _ string) (string, error) {
 	url := "local:" + spanID + ":" + branch
 	dir := filepath.Join(r.Dir, spanID)
@@ -512,6 +522,7 @@ func (r LocalReview) Open(_ context.Context, spanID, branch, _, _ string) (strin
 	return url, os.WriteFile(filepath.Join(dir, "change.url"), []byte(url+"\n"), 0o644)
 }
 
+// Merged reports whether a person marked the local change merged.
 func (r LocalReview) Merged(_ context.Context, url string) (bool, error) {
 	dir, ok := r.spanDir(url)
 	if !ok {
@@ -524,6 +535,7 @@ func (r LocalReview) Merged(_ context.Context, url string) (bool, error) {
 	return err == nil, err
 }
 
+// Merge marks the local change merged.
 func (r LocalReview) Merge(_ context.Context, url string) error {
 	dir, ok := r.spanDir(url)
 	if !ok {
@@ -550,6 +562,7 @@ func (r LocalReview) spanDir(url string) (string, bool) {
 // CommandRelease runs the environment command declared by the project.
 type CommandRelease struct{}
 
+// Run executes the environment command for the commit sha; a failure carries its stderr.
 func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
 	env, fields, err := Argv(command)
 	if err != nil {
@@ -598,6 +611,7 @@ func (c CLIAgents) Model(binary string) string {
 // Bind copies later agent stdout to w.
 func (c *CLIAgents) Bind(w io.Writer) { c.sink = w }
 
+// Select picks the CLI to run: the one asked for, else the first ready one.
 func (c CLIAgents) Select(want string) (agent.Selection, error) {
 	home := c.Home
 	if home == "" {
@@ -606,6 +620,7 @@ func (c CLIAgents) Select(want string) (agent.Selection, error) {
 	return agent.Select(want, home)
 }
 
+// Frame asks the agent to frame the story and reads its JSON reply.
 func (c CLIAgents) Frame(ctx context.Context, name, workspace, text string) (engine.FrameDoc, error) {
 	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, c.sink)
 	if err != nil {
@@ -618,11 +633,13 @@ func (c CLIAgents) Frame(ctx context.Context, name, workspace, text string) (eng
 	return doc, nil
 }
 
+// Build asks the agent to write the change in workspace.
 func (c CLIAgents) Build(ctx context.Context, name, workspace, text string) error {
 	_, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, c.sink)
 	return err
 }
 
+// Inspect asks the agent to review the change and reads its JSON verdict.
 func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (engine.InspectDoc, error) {
 	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, c.sink)
 	if err != nil {
