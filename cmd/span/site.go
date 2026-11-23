@@ -121,6 +121,26 @@ func projectPolicy(project string) string {
 	return filepath.Join(project, "span.yaml")
 }
 
+// resolvePolicy picks the policy file for a run that is woken again. The project's file
+// wins; a run recorded before projects were stored falls back to the checkout, then to the
+// project that owns the state directory (<project>/.span/runs). "" keeps the default, so the
+// error still names the file that is missing.
+func resolvePolicy(spans, workspace, project string) string {
+	if project != "" {
+		return filepath.Join(project, "span.yaml")
+	}
+	candidates := []string{filepath.Join(workspace, "span.yaml")}
+	if spans != "" {
+		candidates = append(candidates, filepath.Join(filepath.Dir(filepath.Dir(spans)), "span.yaml"))
+	}
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
 // discard undoes an isolated site whose launch failed before a run existed, so the next
 // attempt does not find a tree and a branch nobody owns. The branch is deleted with -d:
 // it was created for this launch at the base commit, so it carries no work, and git refuses
