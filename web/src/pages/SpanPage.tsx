@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
 import { answerRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
@@ -29,21 +29,19 @@ export function SpanPage() {
   const params = useParams()
   const id = params.id ?? ""
   const state = useSpan(id)
-  const [stage, setStage] = useState("")
-  const [picked, setPicked] = useState(false)
   const [showNote, setShowNote] = useState(false)
   const [body, setBody] = useState("")
   const [note, setNote] = useState("")
   const cursor = state.span?.cursor
   const current = cursor?.stage || "intake"
   const paused = Boolean(cursor?.hold || cursor?.stop)
-  const selected = stage || noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
-
-  useEffect(() => {
-    if (!picked) {
-      setStage(noteStage({ current, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) }))
-    }
-  }, [picked, current, cursor?.hold, cursor?.stop])
+  // The stage a note targets follows the run until the person touches the form; touching it
+  // pins the stage they were looking at, so it does not move under them.
+  const [stage, setStage] = useState("")
+  const selected =
+    stage ||
+    noteStage({ current, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) }) ||
+    noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
   const verdict = cursor?.done ? "done" : cursor?.stop ? "stop" : cursor?.hold ? "hold" : "running"
   const line =
     state.agent?.summary === "not running"
@@ -242,7 +240,6 @@ export function SpanPage() {
                 <Select
                   value={selected}
                   onValueChange={(value) => {
-                    setPicked(true)
                     setStage(value)
                   }}
                 >
@@ -261,7 +258,7 @@ export function SpanPage() {
                   aria-label="Instruction body"
                   value={body}
                   onChange={(event) => {
-                    setPicked(true)
+                    setStage(selected)
                     setBody(event.target.value)
                   }}
                   rows={6}
@@ -283,7 +280,7 @@ export function SpanPage() {
                   variant="secondary"
                   className="self-start"
                   onClick={() => {
-                    setPicked(true)
+                    setStage(selected)
                     setShowNote(true)
                   }}
                 >

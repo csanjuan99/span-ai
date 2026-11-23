@@ -316,15 +316,18 @@ export async function startRun(form: FormData): Promise<Started | string> {
     return { id: body.id, stage: body.stage, runs, partial: body.partial === true, notes: text(body.notes) }
   }
   if (!response.ok) {
-    let message = raw
-    try {
-      message = messageOf(parseJSON(raw))
-    } catch {
-      message = raw || "request failed"
-    }
-    throw new Error(message)
+    throw new Error(failureText(raw))
   }
   return raw
+}
+
+/** The message a failed response carries, or the raw body when it is not the error JSON. */
+function failureText(raw: string): string {
+  try {
+    return messageOf(parseJSON(raw))
+  } catch {
+    return raw || "request failed"
+  }
 }
 
 async function postJSON(url: string, body: unknown): Promise<void> {
@@ -337,12 +340,7 @@ async function postJSON(url: string, body: unknown): Promise<void> {
     return
   }
   const raw = await response.text()
-  let message = raw
-  try {
-    message = messageOf(parseJSON(raw))
-  } catch {
-    message = raw || "request failed"
-  }
+  const message = failureText(raw)
   throw new Error(message)
 }
 
