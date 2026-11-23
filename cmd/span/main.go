@@ -167,11 +167,17 @@ func serveCmd(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	spans := fs.String("spans", ".span/runs", "state directory, relative to where serve starts (not to a workspace)")
+	maxParallel := fs.Int("max-parallel", 0, "runs driven at once; more are refused until one ends (0 is no limit)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *maxParallel < 0 {
+		fmt.Fprintln(os.Stderr, "--max-parallel must be 0 or more")
 		return 2
 	}
 	token := os.Getenv("SPAN_TOKEN")
 	hub := live.New()
+	hub.SetLimit(*maxParallel)
 	pages, err := web.Pages()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -229,8 +235,8 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 			}
 			brief = story.Brief
 		}
-		if !hub.Claim(id, snap.Cursor.Stage) {
-			return live.ErrBusy
+		if err := hub.Admit(id, snap.Cursor.Stage); err != nil {
+			return err
 		}
 		// The claim only covers this process. Another one (`span resume`) may hold the run;
 		// the engine would refuse inside the flight, where the answers are already lost.
@@ -452,6 +458,12 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	// rewrites span.yaml and the brief under the run that is starting. A second story in a
 	// checkout another run is editing would also swap its branch and commit its files, so
 	// that run gets its own worktree instead and the two go side by side.
+	// A process at its --max-parallel limit refuses first, before anything is claimed,
+	// written or created. Admit below is the atomic check; this one only keeps a refused
+	// launch from leaving a run behind.
+	if err := hub.Room(); err != nil {
+		return "", "", err
+	}
 	st, err := claimSite(req, spans, "starting a run")
 	if err != nil {
 		return "", "", err
@@ -484,8 +496,8 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	}
 	opened = true
 	claim.Relabel("run " + id)
-	if !hub.Claim(id, "intake") {
-		return "", "", live.ErrBusy
+	if err := hub.Admit(id, "intake"); err != nil {
+		return "", "", err
 	}
 	handedOver = true
 	// Fly wires the stop handle, so Stop works from the first frame and not only after

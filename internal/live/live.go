@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,6 +14,23 @@ import (
 
 // ErrBusy means this process already has a worker for that span.
 var ErrBusy = errors.New("an agent is already running")
+
+// FullError means the process is already driving as many runs as --max-parallel allows.
+// It reads as ErrBusy, so every place that maps a busy run to a conflict maps this too.
+type FullError struct {
+	Limit int
+}
+
+// Error says what is full, which flag sets it, and what to do about it.
+func (e *FullError) Error() string {
+	return fmt.Sprintf("span serve is at its limit of %d runs at once (--max-parallel %d): wait for a run to finish, or raise --max-parallel", e.Limit, e.Limit)
+}
+
+// Unwrap lets errors.Is(err, ErrBusy) hold.
+func (e *FullError) Unwrap() error { return ErrBusy }
+
+// SpanCode is the error code the HTTP layer answers with.
+func (e *FullError) SpanCode() string { return "busy" }
 
 // Flight is one engine worker owned by this process.
 type Flight struct {
@@ -30,6 +48,8 @@ type Hub struct {
 	flights map[string]Flight
 	stops   map[string]context.CancelFunc
 	closed  bool
+	// limit is how many flights may be claimed at once. Zero is no limit.
+	limit int
 }
 
 // New returns an empty hub.
@@ -156,24 +176,57 @@ func (h *Hub) Seq(id string) uint64 {
 	return h.seqs[id]
 }
 
-// Claim reserves id for one worker. A second claim fails until EndFlight.
-func (h *Hub) Claim(id, stage string) bool {
+// SetLimit caps how many runs this process drives at once. Zero or less removes the cap.
+func (h *Hub) SetLimit(limit int) {
 	if h == nil {
-		return true
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.limit = max(limit, 0)
+}
+
+// Room reports whether another run could be admitted now, as a *FullError when the cap is
+// reached. A launch asks before it creates anything; Admit is still the atomic check.
+func (h *Hub) Room() error {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.limit > 0 && len(h.flights) >= h.limit {
+		return &FullError{Limit: h.limit}
+	}
+	return nil
+}
+
+// Admit reserves id for one worker and says why when it cannot: ErrBusy for a run that is
+// already flying, a *FullError past the cap. A closed hub refuses with ErrBusy.
+func (h *Hub) Admit(id, stage string) error {
+	if h == nil {
+		return nil
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
-		return false
+		return ErrBusy
 	}
 	if h.flights == nil {
 		h.flights = map[string]Flight{}
 	}
 	if _, ok := h.flights[id]; ok {
-		return false
+		return ErrBusy
+	}
+	if h.limit > 0 && len(h.flights) >= h.limit {
+		return &FullError{Limit: h.limit}
 	}
 	h.flights[id] = Flight{Stage: stage, Since: time.Now()}
-	return true
+	return nil
+}
+
+// Claim reserves id for one worker. A second claim fails until EndFlight.
+func (h *Hub) Claim(id, stage string) bool {
+	return h.Admit(id, stage) == nil
 }
 
 // EndFlight releases id. A nil hub does nothing.
