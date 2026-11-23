@@ -1101,7 +1101,7 @@ func (g Git) baseRef(ctx context.Context, base string) (string, string, string) 
 	if _, err := g.hout(ctx, "remote", "get-url", "origin"); err == nil {
 		// The same refresh worktree.StartPoint does: origin's copy only, never refs/heads.
 		remote := "refs/remotes/origin/" + base
-		if _, err := g.hout(ctx, "fetch", "--quiet", "--no-tags", "origin", "--", "+refs/heads/"+base+":"+remote); err != nil {
+		if _, err := g.fetch(ctx, "--quiet", "--no-tags", "origin", "--", "+refs/heads/"+base+":"+remote); err != nil {
 			return "", "", "the base " + base + " could not be fetched from origin: " + err.Error()
 		}
 		return "origin/" + base, remote, ""
@@ -1514,10 +1514,33 @@ func (g Git) hout(ctx context.Context, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// fetch is the one command of the conflict phase that reaches the network. It keeps the
+// hardened options but not GIT_CONFIG_NOSYSTEM: on macOS the keychain credential helper is
+// set only in the system config, so without it a private origin asks for a password that
+// git is forbidden to prompt for, and the run holds. The system config is the machine's,
+// not the repository's, so an agent that ran in the checkout cannot have written to it.
+func (g Git) fetch(ctx context.Context, args ...string) (string, error) {
+	cmd := g.command(ctx, append([]string{"fetch"}, args...)...)
+	kept := cmd.Env[:0:0]
+	for _, entry := range cmd.Env {
+		if entry != "GIT_CONFIG_NOSYSTEM=1" {
+			kept = append(kept, entry)
+		}
+	}
+	cmd.Env = kept
+	out, err := g.runCommand(cmd, nil, append([]string{"fetch"}, args...))
+	return strings.TrimSpace(string(out)), err
+}
+
 // raw runs one hardened git command with optional stdin and returns stdout untrimmed, for -z
 // output.
 func (g Git) raw(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	cmd := g.command(ctx, args...)
+	return g.runCommand(g.command(ctx, args...), stdin, args)
+}
+
+// runCommand runs a prepared git command and returns its stdout, or an error that carries
+// git's stderr.
+func (g Git) runCommand(cmd *exec.Cmd, stdin []byte, args []string) ([]byte, error) {
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
