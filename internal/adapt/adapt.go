@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"span/internal/agent"
@@ -197,6 +198,56 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 		return Diff{}, err
 	}
 	return Diff{Stat: stat, Patch: patch, Truncated: truncated}, nil
+}
+
+// ErrBroadChange means the branch deleted, renamed, copied or retyped a path. What used to
+// import or load that path is not in a list of changed names, so the caller proves the
+// whole suite instead of a narrowed one.
+var ErrBroadChange = errors.New("the change deletes, renames, copies or retypes a path")
+
+// Changed lists the files this branch added or modified since it left base, as git diff
+// base...HEAD prints them, sorted. base is tried as given, then as origin/<base>; neither
+// resolving is an error. Any other kind of change returns ErrBroadChange.
+func (g Git) Changed(ctx context.Context, base string) ([]string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return nil, errors.New("no base branch")
+	}
+	ref := ""
+	for _, candidate := range []string{base, "origin/" + base} {
+		if _, err := g.output(ctx, "rev-parse", "--verify", "--quiet", candidate+"^{commit}"); err == nil {
+			ref = candidate
+			break
+		}
+	}
+	if ref == "" {
+		return nil, fmt.Errorf("base branch %s is missing", base)
+	}
+	// -z keeps every path byte for byte: no quoting of unusual names to undo.
+	out, err := g.output(ctx, "diff", "--name-status", "-z", "-M", ref+"...HEAD")
+	if err != nil {
+		return nil, err
+	}
+	files := []string{}
+	fields := strings.Split(strings.Trim(out, "\x00"), "\x00")
+	for i := 0; i < len(fields); i++ {
+		status := fields[i]
+		if status == "" {
+			continue
+		}
+		switch status[0] {
+		case 'A', 'M':
+			if i+1 >= len(fields) {
+				return nil, fmt.Errorf("git diff printed %q without a path", status)
+			}
+			i++
+			files = append(files, fields[i])
+		default:
+			return nil, ErrBroadChange
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bool, error) {
