@@ -11,6 +11,7 @@ import (
 	"span/internal/adapt"
 	"span/internal/branch"
 	"span/internal/engine"
+	"span/internal/policy"
 	"span/internal/runlock"
 	"span/internal/setup"
 	"span/internal/worktree"
@@ -41,6 +42,7 @@ func claimSite(req setup.Request, spans, label string) (site, error) {
 			claim.Release()
 			return site{}, err
 		}
+		code.Folder = req.Folder
 		if res.Branch != "" {
 			claim.Relabel(label + " " + res.Branch)
 		}
@@ -102,6 +104,7 @@ func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 	if err != nil {
 		return site{}, fmt.Errorf("%w; its own worktree could not be made: %v", busy, err)
 	}
+	code.Folder = req.Folder
 	res := setup.Result{PolicyPath: policyPath, Branch: plan.Name, Base: plan.Base, Feature: plan.Feature}
 	return site{Result: res, Code: code}, nil
 }
@@ -132,6 +135,35 @@ func branchTaken(project, spans, name string, busy error) (bool, error) {
 	}
 	_, err := adapt.Git{Dir: project}.Git(context.Background(), project, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
 	return err == nil, nil
+}
+
+// inheritFolder fills the agent and models a repository's policy leaves unset from the
+// span.yaml of the folder the launch started from. A folder without a readable span.yaml
+// changes nothing: the repository's own policy stands.
+func inheritFolder(file policy.File, folder string) policy.File {
+	if folder == "" {
+		return file
+	}
+	parent, err := policy.Load(filepath.Join(folder, policy.Name))
+	if err != nil {
+		return file
+	}
+	return file.Inherit(parent)
+}
+
+// launchFolder is the folder to remember for a run in target: the folder the launch started
+// from when target is a repository inside it, and "" when the run starts in the repository
+// itself (a single repository, or the repository chosen directly).
+func launchFolder(folder, target string) string {
+	from, err := filepath.Abs(folder)
+	if err != nil {
+		return ""
+	}
+	to, err := filepath.Abs(target)
+	if err != nil || filepath.Clean(from) == filepath.Clean(to) {
+		return ""
+	}
+	return from
 }
 
 // projectPolicy is the policy of the project a run belongs to. span.yaml is not tracked, so

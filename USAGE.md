@@ -725,6 +725,22 @@ anything else is refused, so the picker never leaves a file in a home directory.
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
 
+### A folder of several repositories
+
+Span works from one repository or from a folder that holds several. Where a run starts decides
+which `span.yaml` speaks:
+
+- **One repository, started in it** (`--workspace` is the repository, or the desk's Folder is
+  the repository): its own `span.yaml` is the policy. Nothing else is read.
+- **A folder, one repository selected, or several:** each selected repository runs with its own
+  `span.yaml`. What that file leaves unset comes from the folder's `span.yaml`: an `agent` of
+  `any` (or none), and the `models` of any CLI it names no model for. An agent or a model the
+  repository chose itself always wins. The agent and model picked on the desk are saved in the
+  folder's file, so they reach every repository that has not chosen its own.
+
+The run remembers the folder it was launched from, so `resume` and a resume from the page apply
+the same policy. A folder with no `span.yaml` changes nothing.
+
 ### Choosing the model of each agent
 
 **Gentle AI and its configuration are required.** Span does not pick models by itself:

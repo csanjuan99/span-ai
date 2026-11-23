@@ -25,6 +25,9 @@ type Request struct {
 	Repos     []string
 	Files     []handoff.File
 	Force     bool
+	// Folder is the folder the launch started from when Workspace is a repository inside it.
+	// It is not read here; the run carries it so the folder's agent and models apply.
+	Folder string
 }
 
 // Result is what quickstart wrote and the branch the run should use.

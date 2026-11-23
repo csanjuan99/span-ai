@@ -101,7 +101,7 @@ func runOptions(f runFlags) (engine.Options, error) {
 	if err != nil {
 		return engine.Options{}, err
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Explicit)
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Folder, code.Explicit)
 	if err != nil {
 		return engine.Options{}, err
 	}
@@ -137,7 +137,7 @@ func resume(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: span resume <id>")
 		return 2
 	}
-	project := *workspace
+	project, folder := *workspace, ""
 	tree, policyFile := *workspace, *policyPath
 	// Without --spans the runs are in the workspace, as options() reads them. Looking in ""
 	// found nothing, so an isolated run resumed in the project instead of its own worktree.
@@ -146,7 +146,7 @@ func resume(args []string) int {
 		root = filepath.Join(*workspace, ".span", "runs")
 	}
 	if snap, err := engine.Load(root, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
-		project = snap.Cursor.Project
+		project, folder = snap.Cursor.Project, snap.Cursor.Folder
 		// An isolated run is resumed in its own worktree, not in the project.
 		if snap.Cursor.Workspace != "" {
 			tree = snap.Cursor.Workspace
@@ -160,7 +160,7 @@ func resume(args []string) int {
 	if policyFile == "" {
 		policyFile = resolvePolicy(*spans, tree, "")
 	}
-	opt, err := options(tree, *spans, policyFile, project, *policyPath != "")
+	opt, err := options(tree, *spans, policyFile, project, folder, *policyPath != "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -217,7 +217,7 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		if err != nil {
 			return err
 		}
-		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project, false)
+		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project, snap.Cursor.Folder, false)
 		if err != nil {
 			return err
 		}
@@ -365,6 +365,7 @@ func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
 	for _, target := range targets {
 		one := req
 		one.Workspace = target.Path
+		one.Folder = launchFolder(req.Workspace, target.Path)
 		one.Story = target.Story
 		one.Issue = target.Issue
 		one, err := withBase(one)
@@ -402,6 +403,7 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 	for _, target := range targets {
 		one := req
 		one.Workspace = target.Path
+		one.Folder = launchFolder(req.Workspace, target.Path)
 		one.Story = target.Story
 		one.Issue = target.Issue
 		one, err := withBase(one)
@@ -487,7 +489,7 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 			st.discard()
 		}
 	}()
-	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project, st.Code.Explicit)
+	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project, st.Code.Folder, st.Code.Explicit)
 	if err != nil {
 		return "", "", err
 	}
@@ -539,6 +541,7 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
+	code.Folder = req.Folder
 	isolated := code.Workspace != code.Project
 	if isolated {
 		fmt.Fprintf(&b, "worktree %s\n", code.Workspace)
@@ -546,7 +549,7 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 		// tree, so the checkout is free for the next story at once.
 		claim.Release()
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Explicit)
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Folder, code.Explicit)
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
@@ -715,7 +718,7 @@ func jiraFlags(name string, args []string, extra func(*flag.FlagSet)) (*flag.Fla
 // options builds a run's engine options. explicit says the person named policyPath
 // (--policy): that file must exist. The implicit span.yaml is optional, and without it the
 // run gets the policy quickstart would write.
-func options(workspace, spans, policyPath, project string, explicit bool) (engine.Options, error) {
+func options(workspace, spans, policyPath, project, folder string, explicit bool) (engine.Options, error) {
 	workspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return engine.Options{}, err
@@ -734,6 +737,7 @@ func options(workspace, spans, policyPath, project string, explicit bool) (engin
 	if err != nil {
 		return engine.Options{}, err
 	}
+	file = inheritFolder(file, folder)
 	opt := engine.Options{
 		Workspace: workspace,
 		Root:      spans,
@@ -745,6 +749,7 @@ func options(workspace, spans, policyPath, project string, explicit bool) (engin
 		Release:   adapt.CommandRelease{},
 		Worktree:  adapt.IsWorktree(workspace),
 		Project:   project,
+		Folder:    folder,
 		// A host calls a branch conflicting for a few seconds after the resolution is pushed.
 		HostSettle: engine.DefaultHostSettle,
 	}
@@ -812,8 +817,10 @@ func usage() {
 type prepared struct {
 	Workspace string
 	Project   string
-	Spans     string
-	Policy    string
+	// Folder is the folder of several repositories the launch started from, or "".
+	Folder string
+	Spans  string
+	Policy string
 	// Explicit is true when the person named the policy file (--policy). Only the implicit
 	// <project>/span.yaml may be missing.
 	Explicit bool

@@ -171,6 +171,10 @@ type Options struct {
 	// Project is the checkout the run belongs to. The policy and the Jira account live
 	// there, while the code lives in the worktree.
 	Project string
+	// Folder is the folder the launch was started from when the run's checkout lives inside
+	// it (a folder of several repositories). Its span.yaml fills in the agent and models the
+	// checkout's own policy leaves unset. Empty when the run was started in the checkout.
+	Folder string
 }
 
 // Result is how far the span got.
@@ -213,6 +217,7 @@ type Cursor struct {
 	WideSHA         string      `json:"wideSHA,omitempty"`
 	Worktree        bool        `json:"worktree,omitempty"`
 	Project         string      `json:"project,omitempty"`
+	Folder          string      `json:"folder,omitempty"`
 	Weight          string      `json:"weight,omitempty"`
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
@@ -321,7 +326,7 @@ func Open(opt Options) (string, error) {
 	cur := Cursor{
 		ID: id, Iteration: 1, Stage: intake, StartedAt: now,
 		Branch: opt.Branch, Base: opt.Base, Workspace: opt.Workspace,
-		Issue: strings.TrimSpace(opt.Issue), Worktree: opt.Worktree, Project: opt.Project,
+		Issue: strings.TrimSpace(opt.Issue), Worktree: opt.Worktree, Project: opt.Project, Folder: opt.Folder,
 		Feature: branch.FeatureOf(opt.Branch),
 	}
 	r := &runner{opt: opt, cur: cur}
