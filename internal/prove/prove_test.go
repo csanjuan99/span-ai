@@ -146,6 +146,66 @@ func TestAWideFailureOnlyReportsWhenAFocusedBandExists(t *testing.T) {
 	}
 }
 
+func TestAWideFailureBlocksWhenWideBlocksIsSet(t *testing.T) {
+	text := "--- FAIL: TestCharge (0.01s)\nFAIL\tspan/pay\t0.1s\n"
+	s := &script{fail: map[string]int{"go test ./...": 1}, output: map[string]string{"go test ./...": text}}
+	got, err := Bands(context.Background(), s, t.TempDir(), Plan{
+		Focused:    []string{"go test span/a"},
+		Fast:       []string{"go test ./..."},
+		WideBlocks: true,
+		Excuse:     func(string, Output) bool { return false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != "iterate" {
+		t.Fatalf("outcome = %s reason %q", got.Outcome, got.Reason)
+	}
+	if want := Fingerprint("go test ./...", text); got.Fingerprint != want {
+		t.Fatalf("fingerprint %q, want the wide one %q", got.Fingerprint, want)
+	}
+	if got.Reason != "go test ./... exited 1" {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+	if len(got.Commands) != 2 || got.Commands[0].Band != "focused" || got.Commands[1].Band != "wide" {
+		t.Fatalf("commands = %+v", got.Commands)
+	}
+}
+
+func TestAnExcusedWideFailureStillAdvancesWhenWideBlocksIsSet(t *testing.T) {
+	s := &script{fail: map[string]int{"go test ./...": 1}}
+	got, err := Bands(context.Background(), s, t.TempDir(), Plan{
+		Focused:    []string{"go test span/a"},
+		Fast:       []string{"go test ./..."},
+		WideBlocks: true,
+		Excuse:     func(string, Output) bool { return true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != statement.Advance || got.Fingerprint != "" {
+		t.Fatalf("%+v", got)
+	}
+	if !got.Commands[1].Preexisting {
+		t.Fatalf("commands = %+v", got.Commands)
+	}
+}
+
+func TestWideBlocksOffKeepsTheReportOnlyReason(t *testing.T) {
+	s := &script{fail: map[string]int{"npm test": 1}}
+	got, err := Bands(context.Background(), s, t.TempDir(), Plan{
+		Focused: []string{"npm test -- a.test.ts"},
+		Fast:    []string{"npm test"},
+		Excuse:  func(string, Output) bool { return false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != statement.Advance || got.Reason != "focused passed; npm test exited 1 outside this story" {
+		t.Fatalf("outcome %s reason %q", got.Outcome, got.Reason)
+	}
+}
+
 func TestTheWideSuiteStillDecidesWithoutAFocusedBand(t *testing.T) {
 	s := &script{fail: map[string]int{"npm test": 1}}
 	got, err := Bands(context.Background(), s, t.TempDir(), Plan{Fast: []string{"npm test"}})
@@ -186,5 +246,46 @@ func TestDeriveFocusGivesUpHonestly(t *testing.T) {
 	}
 	if got := DeriveFocus([]string{"npm test"}, nil); got != nil {
 		t.Fatalf("a scope appeared without files: %v", got)
+	}
+}
+
+func TestAWideCommandThatCannotStartHoldsWhenWideBlocksIsSet(t *testing.T) {
+	s := &script{err: map[string]error{"go test ./...": errors.New("executable not found")}}
+	got, err := Bands(context.Background(), s, t.TempDir(), Plan{
+		Focused:    []string{"go test m/a"},
+		Fast:       []string{"go test ./..."},
+		WideBlocks: true,
+		Excuse:     func(string, Output) bool { return false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Outcome != statement.Hold {
+		t.Fatalf("outcome = %s reason %q", got.Outcome, got.Reason)
+	}
+}
+
+func TestAFocusLabelKeepsTheFingerprintAcrossNarrowedCommands(t *testing.T) {
+	text := "--- FAIL: TestCharge (0.01s)\nFAIL\tm/b\t0.1s\n"
+	fingerprint := func(focused string) string {
+		s := &script{fail: map[string]int{focused: 1}, output: map[string]string{focused: text}}
+		got, err := Bands(context.Background(), s, t.TempDir(), Plan{
+			Focused:    []string{focused},
+			Fast:       []string{"go test ./..."},
+			FocusLabel: "go test ./...",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Outcome != "iterate" || got.Commands[0].Command != focused || got.Commands[0].Fingerprint != got.Fingerprint {
+			t.Fatalf("%+v", got)
+		}
+		return got.Fingerprint
+	}
+	if fingerprint("go test m/a m/b") != fingerprint("go test m/b") {
+		t.Fatal("the same failure got two fingerprints because the package list changed")
+	}
+	if fingerprint("go test m/b") != Fingerprint("go test ./...", text) {
+		t.Fatal("the label was not used for the fingerprint")
 	}
 }

@@ -25,6 +25,11 @@ prove:
   # Run the wide commands once on the base commit before the first build. A failure that
   # was already there is shown as preexisting and does not spend a repair. Default true.
   baseline: true
+  # With no focused band from the criteria or above, and a recorded baseline, derive one
+  # from the branch's diff:
+  # go test runs the changed packages and their importers, vitest and jest their related
+  # tests. The wide band still runs once per commit. Default true.
+  # diff: true
 qa:
   command: go test ./...
   browser: false

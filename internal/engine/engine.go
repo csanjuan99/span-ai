@@ -798,6 +798,7 @@ func (r *runner) provePlan() prove.Plan {
 func (r *runner) doProve(ctx context.Context) (string, string, error) {
 	plan := r.provePlan()
 	plan.Excuse = r.excuse()
+	plan = r.focusOnDiff(ctx, plan)
 	r.cur.Weight = r.weight()
 	rep, err := prove.Bands(ctx, r.opt.Check, r.opt.Workspace, plan)
 	if err != nil {
