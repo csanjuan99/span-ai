@@ -6,6 +6,20 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+### Repairs prove only what the change can affect
+
+- **A focused band from the diff.** When neither the criteria nor `prove.focused` name one
+  and a baseline was recorded, prove derives it from `git diff <base>...HEAD`: `go test` runs the changed packages and
+  every package that imports them, test-only imports included; `vitest` runs
+  `related --run` and `jest` runs `--findRelatedTests` on the changed files. Anything it
+  cannot reason about (a deleted or renamed path, `go.mod`, a `.md` inside a package, config
+  files, lockfiles, assets, `-args`, more than 200 files, an unknown runner, Python, no
+  baseline) keeps the wide band deciding as before.
+- **The wide band still guards.** It runs once per commit after the focused band passes, and
+  a wide failure the base commit did not have blocks and spends a repair. The fingerprint
+  ignores the narrowed package list, so the same failure twice is still `no progress`.
+- **Off switch.** `prove.diff: false` turns the derivation off.
+
 ### A second Ctrl-C ends every command Span started
 
 - **Graceful first, forced second.** The first interrupt still cancels and gives each command

@@ -456,6 +456,51 @@ No declaration means no scope. If the story's criteria are not on test declarati
 there is nothing to focus on and the wide band decides, which is the honest outcome: the
 change has not said what it is supposed to prove.
 
+### Prove only what the change can affect
+
+When neither the criteria nor `prove.focused` give a focused band, and a
+[baseline](#failures-the-base-commit-already-had) was recorded, Span derives one from the
+branch's diff, `git diff <base>...HEAD`, so a repair reruns the tests the change can reach
+instead of the whole suite. It reads the first `fast` command it knows:
+
+| Wide command | Focused on the diff |
+| --- | --- |
+| `go test [flags] ./...` | `go test [flags] <changed packages and every package that imports them>` |
+| `vitest`, `vitest run`, `npx`/`pnpm`/`pnpm exec`/`yarn vitest` | `<runner> related --run [flags] <changed files>` |
+| `jest`, `npx`/`pnpm`/`yarn jest` | `<command> --findRelatedTests <changed files>` |
+
+For Go, importers are found with `go list` and include test-only imports, transitively. Flags
+are kept; `-tags` is passed to `go list` too. A failure keeps the same fingerprint when the
+package list changes between repairs, so the same failure twice still holds as `no progress`.
+
+Only imports are followed. A test that runs `go run ../cmd/app`, reads a file at runtime, or
+starts another process depends on code the narrowing cannot see. That is why a diff focus
+needs a recorded baseline and why the wide band still runs and blocks.
+
+It is conservative: whenever it cannot be sure, there is no diff focus and the wide band
+decides exactly as before. That happens when the diff deletes, renames, copies, or retypes a
+path; when it touches anything besides source files and Markdown outside every Go package
+directory (`go.mod`, `go.sum`, `testdata`, a `.md` a test could embed, `package.json`,
+lockfiles, `vite.config.*`, `vitest.config.*`, `vitest.workspace.*` and other config or setup
+files, `__mocks__`, styles, assets);
+when it has more than 200 files; when the Go command names packages other than `./...`,
+passes `-args`, `-mod`, `-modfile` or `-C`, or a flag Span does not know takes a value; when a JavaScript command has positional words; when
+`go list` fails; when every package would run anyway; when no baseline was recorded
+(`baseline: false`, or a checkout with uncommitted changes); and for any other runner, `npm test`
+and `pnpm test` scripts included. Python is not supported. The transcript says which way it
+went: `prove: focused on the diff: ...` or `prove: not focused on the diff: <reason>`.
+
+The wide band still runs after the focused one passes, once per commit. A wide failure the
+base commit did not have blocks and spends a repair like a focused one, and a wide command
+that cannot start holds: the diff focus may have missed what the change broke.
+
+Turn it off with:
+
+```yaml
+prove:
+  diff: false
+```
+
 ### Tests and the repair loop
 
 `fast` runs first. If a `fast` command fails, `acceptance` does not start.
