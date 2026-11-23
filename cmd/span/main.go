@@ -676,8 +676,11 @@ func options(workspace, spans, policyPath, project string) (engine.Options, erro
 	if account, err := jira.Load(project); err == nil {
 		opt.Issues = jira.Client{Account: account}
 		if account.Token != "" {
-			opt.Secrets = []string{account.Token}
+			opt.Secrets = append(opt.Secrets, account.Token)
 		}
+	}
+	if serveToken := os.Getenv("SPAN_TOKEN"); serveToken != "" {
+		opt.Secrets = append(opt.Secrets, serveToken)
 	}
 	return opt, nil
 }

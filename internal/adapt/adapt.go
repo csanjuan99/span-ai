@@ -307,14 +307,20 @@ func (h Host) Open(ctx context.Context, spanID, branch, title, body string) (str
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Open(ctx, spanID, branch, title, body)
 	}
-	return h.gh(ctx, "pr", "create", "--head", branch, "--title", title, "--body", body)
+	out, err := h.gh(ctx, "pr", "create", "--head", branch, "--title", title, "--body", body)
+	if err != nil {
+		return "", err
+	}
+	// gh prints the URL and a newline. Kept, the newline makes a later `gh pr view <url>`
+	// read the argument as a branch name.
+	return strings.TrimSpace(out), nil
 }
 
 func (h Host) Merged(ctx context.Context, url string) (bool, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merged(ctx, url)
 	}
-	out, err := h.gh(ctx, "pr", "view", url, "--json", "state", "--jq", ".state")
+	out, err := h.gh(ctx, "pr", "view", strings.TrimSpace(url), "--json", "state", "--jq", ".state")
 	if err != nil {
 		return false, err
 	}
@@ -325,7 +331,7 @@ func (h Host) Merge(ctx context.Context, url string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merge(ctx, url)
 	}
-	_, err := h.gh(ctx, "pr", "merge", url, "--merge")
+	_, err := h.gh(ctx, "pr", "merge", strings.TrimSpace(url), "--merge")
 	var refused *ghError
 	if errors.As(err, &refused) && IsConflictMessage(refused.stderr) {
 		// A conflict is a known outcome: nothing was merged, so the run can resolve it

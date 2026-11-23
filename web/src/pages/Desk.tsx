@@ -43,6 +43,10 @@ function reposOf(value: unknown): Repo[] {
   return names.map((name) => ({ name, checked: names.length === 1 }))
 }
 
+function reasonText(reason: unknown, fallback: string): string {
+  return reason instanceof Error ? reason.message : fallback
+}
+
 function sessionOf(value: unknown): JiraSession {
   if (!isRecord(value)) {
     return { configured: false, email: "", baseUrl: "" }
@@ -168,15 +172,20 @@ export function Desk() {
 
   async function findRepos() {
     setFolderNote("")
-    try {
-      const [repoBody, jiraBody] = await Promise.all([
-        getJSON(`/repos?path=${encodeURIComponent(workspace)}`),
-        getJSON(`/jira?path=${encodeURIComponent(workspace)}`),
-      ])
-      setRepos(reposOf(repoBody))
-      setSession(sessionOf(jiraBody))
-    } catch (err: unknown) {
-      setFolderNote(err instanceof Error ? err.message : "the folder could not be read")
+    // Settled one by one: a Jira outage must not hide the repositories, nor the reverse.
+    const [repoResult, jiraResult] = await Promise.allSettled([
+      getJSON(`/repos?path=${encodeURIComponent(workspace)}`),
+      getJSON(`/jira?path=${encodeURIComponent(workspace)}`),
+    ])
+    if (repoResult.status === "fulfilled") {
+      setRepos(reposOf(repoResult.value))
+    } else {
+      setFolderNote(reasonText(repoResult.reason, "the folder could not be read"))
+    }
+    if (jiraResult.status === "fulfilled") {
+      setSession(sessionOf(jiraResult.value))
+    } else {
+      setJiraNote(reasonText(jiraResult.reason, "the session could not be read"))
     }
   }
 

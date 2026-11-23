@@ -308,7 +308,7 @@ export function implementationView(value: unknown): ImplementationView {
   }
 }
 
-/** Reads one live frame. */
+/** Reads one live frame. Throws on a non-object; the socket handler treats that as noise. */
 export function liveFrame(value: unknown): LiveFrame {
   if (!isRecord(value)) {
     throw new Error("live frame is missing")
@@ -339,7 +339,17 @@ export function liveFrame(value: unknown): LiveFrame {
   if (conflict !== undefined) {
     frame.conflict = conflict
   }
+  if (isWholeCount(value.seq)) {
+    frame.seq = value.seq
+  }
+  if (isWholeCount(value.offset)) {
+    frame.offset = value.offset
+  }
   return frame
+}
+
+function isWholeCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }
 
 async function readBody(response: Response): Promise<unknown> {

@@ -242,6 +242,10 @@ export interface LiveFrame {
   span?: Snapshot
   /** The `conflict` frame: the resolution changed state. Absent means it was cleared. */
   conflict?: Conflict
+  /** Orders the frames of one run; a replay names the seq the stream resumes after. */
+  seq?: number
+  /** transcript.log size after this frame's lines; on a replay, where its tail ends. */
+  offset?: number
 }
 
 /** What the latest agent review found for one run. */

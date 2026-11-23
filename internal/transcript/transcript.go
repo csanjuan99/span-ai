@@ -2,6 +2,8 @@
 package transcript
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,23 +13,48 @@ import (
 
 const flushEvery = 500 * time.Millisecond
 
+// Batch is one flush of the log: the lines and the byte range they fill in the file,
+// [Start, End). Each line takes len(line)+1 bytes, its text and a newline.
+type Batch struct {
+	Stage string
+	Lines []string
+	Start int64
+	End   int64
+}
+
 // Log is the durable agent stdout for one run.
 type Log struct {
 	mu      sync.Mutex
 	file    *os.File
+	out     io.Writer
 	secrets []string
 	pending string
 	partial string
 	stage   string
-	batch   []string
-	publish func(stage string, lines []string)
-	stop    chan struct{}
-	stopped chan struct{}
-	closed  bool
+	lines   []string
+	// size is the file size after the last write; start and end bound the lines not yet
+	// taken. They move under mu with the bytes, so a batch's range is exact.
+	size  int64
+	start int64
+	end   int64
+	// err is the first write failure. Write never returns it, because failing the
+	// agent's stdout would stall the agent; Close reports it.
+	err     error
+	publish func(Batch)
+	// sendMu is taken before mu is released, so batches are published in take order.
+	// publish must never call back into the log.
+	sendMu sync.Mutex
+	// afterTake and beforePublish let tests force interleavings; both are nil otherwise.
+	afterTake     func(lines []string)
+	beforePublish func()
+	stop          chan struct{}
+	stopped       chan struct{}
+	closed        bool
 }
 
-// Open creates or appends path and flushes new lines about every 500ms.
-func Open(path string, secrets []string, publish func(stage string, lines []string)) (*Log, error) {
+// Open creates or appends path and flushes new lines about every 500ms. publish gets the
+// batches in the order they were taken, each with its exact byte range in the file.
+func Open(path string, secrets []string, publish func(Batch)) (*Log, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -35,8 +62,16 @@ func Open(path string, secrets []string, publish func(stage string, lines []stri
 	if err != nil {
 		return nil, err
 	}
+	var size int64
+	if info, err := file.Stat(); err == nil {
+		size = info.Size()
+	}
 	log := &Log{
 		file:    file,
+		out:     file,
+		size:    size,
+		start:   size,
+		end:     size,
 		secrets: secrets,
 		publish: publish,
 		stop:    make(chan struct{}),
@@ -49,10 +84,9 @@ func Open(path string, secrets []string, publish func(stage string, lines []stri
 // SetStage flushes the previous stage and tags the next lines.
 func (l *Log) SetStage(stage string) {
 	l.mu.Lock()
-	prev, lines := l.take()
+	prev := l.take()
 	l.stage = stage
-	l.mu.Unlock()
-	l.send(prev, lines)
+	l.handOff(prev)
 }
 
 // Write redacts secrets before they reach the file.
@@ -74,16 +108,19 @@ func (l *Log) Close() error {
 		l.drain(true)
 		l.closed = true
 	}
-	stage, lines := l.take()
-	l.mu.Unlock()
-	l.send(stage, lines)
+	last := l.take()
+	l.handOff(last)
 	select {
 	case <-l.stop:
 	default:
 		close(l.stop)
 	}
 	<-l.stopped
-	return l.file.Close()
+	closeErr := l.file.Close()
+	l.mu.Lock()
+	writeErr := l.err
+	l.mu.Unlock()
+	return errors.Join(writeErr, closeErr)
 }
 
 func (l *Log) loop() {
@@ -96,9 +133,7 @@ func (l *Log) loop() {
 			return
 		case <-tick.C:
 			l.mu.Lock()
-			stage, lines := l.take()
-			l.mu.Unlock()
-			l.send(stage, lines)
+			l.handOff(l.take())
 		}
 	}
 }
@@ -127,21 +162,61 @@ func (l *Log) drain(finish bool) {
 	if len(lines) == 0 {
 		return
 	}
-	_, _ = l.file.WriteString(strings.Join(lines, "\n") + "\n")
-	l.batch = append(l.batch, lines...)
+	n, err := io.WriteString(l.out, strings.Join(lines, "\n")+"\n")
+	l.keep(lines, n)
+	if err != nil && l.err == nil {
+		l.err = err
+	}
 }
 
-func (l *Log) take() (string, []string) {
-	lines := l.batch
-	l.batch = nil
-	return l.stage, lines
+// keep records what one write put in the file: n bytes, of which only the lines that
+// were written whole join the batch. A torn tail still counts toward size, so the next
+// batch starts where the file really ends.
+func (l *Log) keep(lines []string, n int) {
+	if len(l.lines) == 0 {
+		l.start = l.size
+		l.end = l.size
+	}
+	left := n
+	for _, line := range lines {
+		width := len(line) + 1
+		if width > left {
+			break
+		}
+		left -= width
+		l.lines = append(l.lines, line)
+		l.end += int64(width)
+	}
+	l.size += int64(n)
 }
 
-func (l *Log) send(stage string, lines []string) {
-	if len(lines) == 0 || l.publish == nil {
+// take empties the batch; the caller holds mu.
+func (l *Log) take() Batch {
+	batch := Batch{Stage: l.stage, Lines: l.lines, Start: l.start, End: l.end}
+	l.lines = nil
+	l.start = l.size
+	l.end = l.size
+	if len(batch.Lines) > 0 && l.afterTake != nil {
+		l.afterTake(batch.Lines)
+	}
+	return batch
+}
+
+// handOff publishes a taken batch. It is called with mu held and releases it, taking
+// sendMu first so a later take cannot be published before this one.
+func (l *Log) handOff(batch Batch) {
+	if len(batch.Lines) == 0 || l.publish == nil {
+		l.mu.Unlock()
 		return
 	}
-	l.publish(stage, lines)
+	hook := l.beforePublish
+	l.sendMu.Lock()
+	l.mu.Unlock()
+	defer l.sendMu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	l.publish(batch)
 }
 
 func scrub(text string, secrets []string) string {

@@ -234,6 +234,17 @@ type Event struct {
 	Transcript []string             `json:"transcript,omitempty"`
 	Span       *Snapshot            `json:"span,omitempty"`
 	Conflict   *Conflict            `json:"conflict,omitempty"`
+	// Seq orders the live frames of one run so the page can tell a duplicate or a gap
+	// from the next frame. Zero means the event was not published through the hub.
+	Seq uint64 `json:"seq,omitempty"`
+	// Offset is the size of transcript.log once the lines of this frame are in it, and on
+	// a replay the size its transcript tail was read up to. The page drops a transcript
+	// frame at or below the replay's offset: its lines are already in the tail.
+	Offset int64 `json:"offset,omitempty"`
+	// Start is the size of transcript.log before the first line of a transcript frame. It
+	// is a pointer so a batch at the very start of the file still says 0. The socket uses
+	// it to cut the lines a connection's replay tail already holds.
+	Start *int64 `json:"start,omitempty"`
 }
 
 // Snapshot is the durable reading of one run.
@@ -553,9 +564,7 @@ func (r *runner) run(ctx context.Context) (Result, error) {
 
 func (r *runner) loop(ctx context.Context) (Result, error) {
 	ctx = agent.WithSpan(ctx, r.cur.ID)
-	log, err := transcript.Open(filepath.Join(r.spanDir(), "transcript.log"), r.opt.Secrets, func(stage string, lines []string) {
-		r.publish(Event{Type: "transcript", Stage: stage, Lines: lines})
-	})
+	log, err := OpenTranscript(filepath.Join(r.spanDir(), "transcript.log"), r.opt.Secrets, r.publish)
 	if err != nil {
 		return Result{}, err
 	}
@@ -1446,6 +1455,16 @@ func (r *runner) writeGate(gate qa.Gate) error {
 	sealed := gate
 	r.publish(Event{Type: "gate", Gate: &sealed})
 	return nil
+}
+
+// OpenTranscript opens a run's transcript and publishes each batch as a transcript
+// event carrying its byte range: Start before its first line, Offset after its last.
+// The run uses it, and the socket tests drive the same wiring.
+func OpenTranscript(path string, secrets []string, publish func(Event)) (*transcript.Log, error) {
+	return transcript.Open(path, secrets, func(batch transcript.Batch) {
+		start := batch.Start
+		publish(Event{Type: "transcript", Stage: batch.Stage, Lines: batch.Lines, Offset: batch.End, Start: &start})
+	})
 }
 
 func (r *runner) publish(event Event) {

@@ -1,23 +1,25 @@
 package serve
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 
 	"span/internal/adapt"
 	"span/internal/engine"
 	"span/internal/live"
 	"span/internal/qa"
-	"span/internal/transcript"
 )
 
 func wantsJSON(r *http.Request) bool {
@@ -111,6 +113,11 @@ func readImplementation(ctx context.Context, root, id string) (adapt.Diff, error
 	return (adapt.Git{Dir: snap.Cursor.Workspace}).Diff(ctx, snap.Cursor.Base, snap.Cursor.GitSHA)
 }
 
+// liveWriteTimeout bounds one socket write, in nanoseconds; tests shorten it.
+var liveWriteTimeout atomic.Int64
+
+func init() { liveWriteTimeout.Store(int64(10 * time.Second)) }
+
 func serveLive(hub *live.Hub, root, token, id string, w http.ResponseWriter, r *http.Request) {
 	if !safe(id) {
 		http.NotFound(w, r)
@@ -131,12 +138,26 @@ func serveLive(hub *live.Hub, root, token, id string, w http.ResponseWriter, r *
 	defer conn.CloseNow()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Subscribe, then read the seq, then load: every frame published after the
+	// subscription carries a larger seq than the replay, and the page drops the ones at
+	// or below it as already covered by the snapshot.
 	frames, unsub := hub.Subscribe(id)
 	defer unsub()
-	snap, err := engine.Load(root, id)
-	if err == nil {
-		lines, _ := transcript.Tail(filepath.Join(root, id, "transcript.log"), 1000)
-		_ = wsjson.Write(ctx, conn, engine.Event{Type: "replay", Span: &snap, Transcript: lines})
+	resume := hub.Seq(id)
+	// The replay is sent even when the run cannot be loaded: it is the baseline the page
+	// compares seq against, and without it a reconnecting page would skip or gap forever.
+	// The transcript does not depend on the snapshot, so it is replayed either way.
+	replay := engine.Event{Type: "replay", Seq: resume}
+	replay.Transcript, replay.Offset = transcriptTail(filepath.Join(root, id, "transcript.log"), 1000)
+	if snap, err := engine.Load(root, id); err == nil {
+		replay.Span = &snap
+	}
+	if raw, err := json.Marshal(replay); err == nil {
+		if raw, ok := redactFrame(raw, token); ok {
+			if err := writeLive(ctx, conn, raw); err != nil {
+				return
+			}
+		}
 	}
 	go func() {
 		for {
@@ -155,19 +176,145 @@ func serveLive(hub *live.Hub, root, token, id string, w http.ResponseWriter, r *
 			if !ok {
 				return
 			}
-			if token != "" {
-				raw = scrubToken(raw, token)
+			// Cut before redacting: the cut counts the bytes the log wrote.
+			clean, valid := redactFrame(trimCovered(raw, replay.Offset), token)
+			if !valid {
+				continue
 			}
-			if err := conn.Write(ctx, websocket.MessageText, raw); err != nil {
+			if err := writeLive(ctx, conn, clean); err != nil {
 				return
 			}
 		}
 	}
 }
 
-func scrubToken(raw []byte, token string) []byte {
-	if token == "" {
+// trimCovered drops, from one encoded transcript frame, the lines this connection's
+// replay tail already holds. A batch flushed after the replay can begin before it; its
+// frame still goes out, with fewer or no lines, so the page sees no seq hole.
+func trimCovered(raw []byte, replayOffset int64) []byte {
+	if replayOffset <= 0 {
 		return raw
 	}
-	return []byte(strings.ReplaceAll(string(raw), token, "[redacted]"))
+	var event engine.Event
+	if err := json.Unmarshal(raw, &event); err != nil || event.Type != "transcript" {
+		return raw
+	}
+	cut := cutCovered(event, replayOffset)
+	if len(cut.Lines) == len(event.Lines) {
+		return raw
+	}
+	out, err := json.Marshal(cut)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// cutCovered keeps the lines of a transcript frame that end past replayOffset. The log
+// writes each line as its bytes plus one newline from Start, so line i ends at Start plus
+// the widths of lines 0..i. A frame without Start is left alone.
+func cutCovered(event engine.Event, replayOffset int64) engine.Event {
+	if event.Type != "transcript" || event.Start == nil || replayOffset <= *event.Start {
+		return event
+	}
+	end := *event.Start
+	var kept []string
+	for _, line := range event.Lines {
+		end += int64(len(line)) + 1
+		if end > replayOffset {
+			kept = append(kept, line)
+		}
+	}
+	event.Lines = kept
+	return event
+}
+
+// writeLive sends one frame with a deadline, so a client that stops reading cannot hold
+// this goroutine until TCP gives up.
+func writeLive(ctx context.Context, conn *websocket.Conn, raw []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(liveWriteTimeout.Load()))
+	defer cancel()
+	return conn.Write(ctx, websocket.MessageText, raw)
+}
+
+// transcriptTail reads the last n lines of the transcript and the byte offset they end
+// at. Both come from one read, cut at the last newline, so the tail never holds a byte
+// past the offset; a later transcript frame at or below it repeats lines the page has.
+func transcriptTail(path string, n int) ([]string, int64) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0
+	}
+	end := strings.LastIndexByte(string(raw), '\n') + 1
+	raw = raw[:end]
+	offset := int64(end)
+	const maxBytes = 1 << 20
+	if len(raw) > maxBytes {
+		raw = raw[len(raw)-maxBytes:]
+		if i := strings.IndexByte(string(raw), '\n'); i >= 0 {
+			raw = raw[i+1:]
+		}
+	}
+	text := strings.TrimRight(string(raw), "\n")
+	if text == "" {
+		return nil, offset
+	}
+	lines := strings.Split(text, "\n")
+	if n > 0 && len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return lines, offset
+}
+
+// minRedactLen is the shortest serve token the socket redacts. A shorter token is too
+// likely to be an ordinary word ("type", "done") to replace in run output; such a token
+// still guards the socket, it is just not scrubbed from the frames.
+const minRedactLen = 8
+
+// redactFrame replaces the serve token inside the string values of one JSON frame. It
+// works on decoded values, never on the encoded bytes: keys stay intact, and a token
+// that JSON escapes (a quote, a backslash, `<`, `&`) is still found. ok is false when
+// the frame cannot be decoded; the caller drops it rather than send it unredacted.
+func redactFrame(raw []byte, token string) ([]byte, bool) {
+	if len(token) < minRedactLen {
+		return raw, true
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, false
+	}
+	out, err := json.Marshal(redactValue(value, token))
+	if err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// protocolKeys hold the closed values the page routes on (frame type, stage name,
+// verdict). A token that happens to equal one of them must not turn it into
+// "[redacted]"; these fields never carry run output.
+var protocolKeys = map[string]bool{"type": true, "stage": true, "verdict": true}
+
+func redactValue(value any, token string) any {
+	switch typed := value.(type) {
+	case string:
+		return strings.ReplaceAll(typed, token, "[redacted]")
+	case []any:
+		for i, item := range typed {
+			typed[i] = redactValue(item, token)
+		}
+		return typed
+	case map[string]any:
+		for key, item := range typed {
+			if protocolKeys[key] {
+				continue
+			}
+			typed[key] = redactValue(item, token)
+		}
+		return typed
+	default:
+		return value
+	}
 }

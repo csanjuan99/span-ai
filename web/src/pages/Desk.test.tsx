@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -24,6 +24,14 @@ vi.mock("@/lib/api", () => ({
 import { Desk } from "@/pages/Desk"
 
 afterEach(cleanup)
+
+// The repository checkboxes measure themselves; jsdom has no ResizeObserver.
+class NoResize {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+vi.stubGlobal("ResizeObserver", NoResize)
 
 beforeEach(() => {
   getJSON.mockReset()
@@ -82,5 +90,63 @@ describe("Desk", () => {
     })
     expect(screen.getByText("No session for this folder.")).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
+  })
+
+  it("keeps the repositories when Jira fails", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/repos?path=")) {
+        return Promise.resolve({ repos: [{ name: "api" }, { name: "web" }] })
+      }
+      if (url.startsWith("/jira?path=")) {
+        return Promise.reject(new Error("jira is down"))
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Find repos" }))
+    await waitFor(() => {
+      expect(screen.getByText("api")).toBeTruthy()
+    })
+    expect(screen.getByText("web")).toBeTruthy()
+    expect(screen.getByText("jira is down")).toBeTruthy()
+  })
+
+  it("keeps the Jira session when the repositories fail", async () => {
+    let jiraCalls = 0
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/repos?path=")) {
+        return Promise.reject(new Error("the folder is gone"))
+      }
+      if (url.startsWith("/jira?path=")) {
+        jiraCalls += 1
+        return Promise.resolve(jiraCalls === 1 ? { configured: false } : { configured: true, email: "later@example.test", baseUrl: "https://x.test" })
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>,
+    )
+    await waitFor(() => {
+      expect(jiraCalls).toBe(1)
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Find repos" }))
+    await waitFor(() => {
+      expect(screen.getByText("the folder is gone")).toBeTruthy()
+    })
+    await waitFor(() => {
+      expect(screen.getByText(/later@example\.test/)).toBeTruthy()
+    })
   })
 })
