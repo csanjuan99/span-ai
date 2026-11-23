@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { approveStage, startRun } from "@/lib/api"
+import { approveStage, liveFrame, startRun } from "@/lib/api"
 
 function reply(status: number, body: unknown) {
   vi.stubGlobal(
@@ -88,5 +88,26 @@ describe("approveStage", () => {
   it("surfaces the server's reason when the run is not held there", async () => {
     reply(409, { error: "invalid", message: "this run is not held at merge" })
     await expect(approveStage("span-1", "merge", "")).rejects.toThrow("this run is not held at merge")
+  })
+})
+
+describe("liveFrame seq", () => {
+  it("keeps a finite non-negative integer seq", () => {
+    expect(liveFrame({ type: "cursor", seq: 0 }).seq).toBe(0)
+    expect(liveFrame({ type: "cursor", seq: 42 }).seq).toBe(42)
+  })
+
+  it("drops a seq that is not a whole non-negative number", () => {
+    for (const seq of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "3", null]) {
+      expect(liveFrame({ type: "cursor", seq }).seq).toBeUndefined()
+    }
+  })
+})
+
+describe("liveFrame offset", () => {
+  it("keeps a whole non-negative offset and drops anything else", () => {
+    expect(liveFrame({ type: "transcript", offset: 16 }).offset).toBe(16)
+    expect(liveFrame({ type: "transcript", offset: -1 }).offset).toBeUndefined()
+    expect(liveFrame({ type: "transcript", offset: "16" }).offset).toBeUndefined()
   })
 })
