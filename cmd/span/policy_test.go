@@ -177,3 +177,42 @@ func TestLaunchFolderIsRememberedOnlyForARepositoryInsideIt(t *testing.T) {
 		t.Fatalf("a repository inside the folder remembered %q, want %q", got, folder)
 	}
 }
+
+// A model picked on the desk after a run started is the one the next stage uses. Before, the
+// models were read once at launch, so the run kept the default nobody had chosen.
+func TestAModelPickedAfterLaunchIsTheOneTheNextStageUses(t *testing.T) {
+	folder := t.TempDir()
+	repo := filepath.Join(folder, "api")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(dir, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(folder, "agent: pi\nrules: harness\n")
+	write(repo, "agent: any\nrules: harness\n")
+	opt, err := options(repo, "", filepath.Join(repo, "span.yaml"), repo, folder, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := opt.Agents.(interface{ Model(string) string }).Model("pi"); got != "" {
+		t.Fatalf("no model was chosen yet, got %q", got)
+	}
+
+	write(folder, "agent: pi\nrules: harness\nmodels:\n  pi: ollama/m\n")
+	if got := opt.Agents.(interface{ Model(string) string }).Model("pi"); got != "ollama/m" {
+		t.Fatalf("the model chosen after launch was not used: %q", got)
+	}
+	if opt.Fresh == nil || opt.Fresh().Models["pi"] != "ollama/m" {
+		t.Fatal("the engine cannot reread the policy")
+	}
+
+	// A file that cannot be read at that moment leaves the run on what it started with.
+	write(folder, "agent: [unterminated\n")
+	if opt.Fresh().Agent != "pi" {
+		t.Fatalf("an unreadable span.yaml replaced the policy: %q", opt.Fresh().Agent)
+	}
+}

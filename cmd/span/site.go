@@ -141,14 +141,28 @@ func branchTaken(project, spans, name string, busy error) (bool, error) {
 // span.yaml of the folder the launch started from. A folder without a readable span.yaml
 // changes nothing: the repository's own policy stands.
 func inheritFolder(file policy.File, folder string) policy.File {
-	if folder == "" {
-		return file
-	}
-	parent, err := policy.Load(filepath.Join(folder, policy.Name))
+	merged, err := inheritFolderChecked(file, folder)
 	if err != nil {
 		return file
 	}
-	return file.Inherit(parent)
+	return merged
+}
+
+// inheritFolderChecked is inheritFolder that says when the folder's span.yaml exists but
+// cannot be read, so a caller rereading it mid-run can keep what it had instead of letting a
+// half-written file change the agent. A missing file is no error: there is nothing to inherit.
+func inheritFolderChecked(file policy.File, folder string) (policy.File, error) {
+	if folder == "" {
+		return file, nil
+	}
+	parent, err := policy.Load(filepath.Join(folder, policy.Name))
+	if errors.Is(err, os.ErrNotExist) {
+		return file, nil
+	}
+	if err != nil {
+		return file, err
+	}
+	return file.Inherit(parent), nil
 }
 
 // launchFolder is the folder to remember for a run in target: the folder the launch started

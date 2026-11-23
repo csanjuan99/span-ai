@@ -147,20 +147,23 @@ type Options struct {
 	Workspace     string
 	Root          string
 	Policy        policy.File
-	Brief         string
-	Issue         string
-	Branch        string
-	Base          string
-	Files         []handoff.File
-	Issues        IssueBoard
-	Now           func() time.Time
-	Agents        Agents
-	Check         prove.Checker
-	Source        Source
-	Review        Review
-	Release       Releaser
-	Watch         Publisher
-	Secrets       []string
+	// Fresh, when set, returns the policy as its file says now. The desk writes span.yaml
+	// while a run is going; the agent a later stage asks for follows it. Nil keeps Policy.
+	Fresh   func() policy.File
+	Brief   string
+	Issue   string
+	Branch  string
+	Base    string
+	Files   []handoff.File
+	Issues  IssueBoard
+	Now     func() time.Time
+	Agents  Agents
+	Check   prove.Checker
+	Source  Source
+	Review  Review
+	Release Releaser
+	Watch   Publisher
+	Secrets []string
 	// Worktree is true when the workspace is a linked git worktree, so parallel runs do
 	// not share a tree. The prompt says so and the agent may not switch branches.
 	Worktree bool

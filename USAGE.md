@@ -769,6 +769,14 @@ can offer and accepts any valid name, so a model the list does not show can stil
 | Claude | the aliases `opus`, `sonnet` and `haiku` (it cannot list models) |
 | Codex | none: it cannot list models, so the name is typed |
 
+`span.yaml` is read again before each stage, not once when the run starts. An agent or model
+picked on the desk while a run is going is the one the next stage uses; a stage already
+running keeps what it started with. If the file cannot be read at that moment (a half-written
+save), the stage keeps the policy the run began with. Every agent stage writes an `agent.run`
+line to the run's journal with the CLI and the model it ran with, and the run page shows them
+under **ran with**. A CLI with no model chosen shows "no model chosen, Gentle AI default"
+instead of a name Span cannot know.
+
 Clearing the field removes the entry, and the block when it is empty. A model name is
 letters, digits and `. _ : / @ + -`, up to 100 characters, and never starts with a dash, so a
 value cannot be read as a flag; it is checked when `span.yaml` loads, when the page saves,

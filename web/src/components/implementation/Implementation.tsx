@@ -1,4 +1,5 @@
 import { DiffFileCard } from "@/components/implementation/DiffFileCard"
+import { RanWithList } from "@/components/implementation/report/RanWith"
 import { Audit } from "@/components/implementation/report/Audit"
 import { Evidence } from "@/components/implementation/report/Evidence"
 import { Reasoning } from "@/components/implementation/report/Reasoning"
@@ -61,6 +62,7 @@ export function Implementation({
     <div className="flex flex-col gap-8">
       <section aria-label="Report" className="flex flex-col gap-6">
         <Verdict report={report} />
+        <RanWithList events={run.journal.events} />
         <Risks risks={report.risks} reported={run.feature?.risks ?? []} />
         <Reasoning feature={run.feature} groups={report.groups} />
         <Evidence evidence={report.evidence} gaps={report.gaps} />
