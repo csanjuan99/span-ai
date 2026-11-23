@@ -67,3 +67,66 @@ func TestConfigureDoesNotOverwriteAnExistingPolicy(t *testing.T) {
 		t.Fatalf("policy changed %q", raw)
 	}
 }
+
+func TestConfigureNoLongerWritesAFeatureLine(t *testing.T) {
+	dir := t.TempDir()
+	got, err := Configure(Request{Workspace: dir, Story: "SAL-7 Pay with the wallet"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(got.PolicyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "feature:") {
+		t.Fatalf("span.yaml still names a feature:\n%s", raw)
+	}
+	if got.Feature != "sal-7-pay-with-the-wallet" {
+		t.Fatalf("result feature %q", got.Feature)
+	}
+}
+
+func TestLoadOrDefaultUsesTheQuickstartDefaultsWhenTheFileIsMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "span.yaml")
+	got, err := LoadOrDefault(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent != "any" || got.Rules != "harness" || got.OpenMode() != "auto" || got.MergeMode() != "hold" {
+		t.Fatalf("%+v", got)
+	}
+	if len(got.Prove.Fast) != 1 || got.Prove.Fast[0] != "go test ./..." {
+		t.Fatalf("checks %+v", got.Prove.Fast)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("reading the defaults wrote span.yaml: %v", err)
+	}
+}
+
+func TestLoadOrDefaultPrefersTheFileThatExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "span.yaml")
+	if err := os.WriteFile(path, []byte("feature: hermes\nagent: pi\nprove:\n  fast:\n    - make check\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadOrDefault(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Agent != "pi" || len(got.Prove.Fast) != 1 || got.Prove.Fast[0] != "make check" {
+		t.Fatalf("%+v", got)
+	}
+	if err := os.WriteFile(path, []byte("stages:\n  merge: whenever\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrDefault(path, dir); err == nil {
+		t.Fatal("an invalid span.yaml was replaced by the defaults")
+	}
+}

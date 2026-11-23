@@ -93,7 +93,7 @@ func runOptions(f runFlags) (engine.Options, error) {
 	if err != nil {
 		return engine.Options{}, err
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Explicit)
 	if err != nil {
 		return engine.Options{}, err
 	}
@@ -144,7 +144,7 @@ func resume(args []string) int {
 	if policyFile == "" {
 		policyFile = resolvePolicy(*spans, tree, "")
 	}
-	opt, err := options(tree, *spans, policyFile, project)
+	opt, err := options(tree, *spans, policyFile, project, *policyPath != "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -195,7 +195,7 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		if err != nil {
 			return err
 		}
-		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project)
+		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project, false)
 		if err != nil {
 			return err
 		}
@@ -459,7 +459,7 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 			st.discard()
 		}
 	}()
-	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project)
+	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project, st.Code.Explicit)
 	if err != nil {
 		return "", "", err
 	}
@@ -518,7 +518,7 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 		// tree, so the checkout is free for the next story at once.
 		claim.Release()
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Explicit)
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
@@ -684,7 +684,10 @@ func jiraFlags(name string, args []string, extra func(*flag.FlagSet)) (*flag.Fla
 	return fs, *project, 0
 }
 
-func options(workspace, spans, policyPath, project string) (engine.Options, error) {
+// options builds a run's engine options. explicit says the person named policyPath
+// (--policy): that file must exist. The implicit span.yaml is optional, and without it the
+// run gets the policy quickstart would write.
+func options(workspace, spans, policyPath, project string, explicit bool) (engine.Options, error) {
 	workspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return engine.Options{}, err
@@ -695,7 +698,11 @@ func options(workspace, spans, policyPath, project string) (engine.Options, erro
 	if policyPath == "" {
 		policyPath = filepath.Join(workspace, "span.yaml")
 	}
-	file, err := policy.Load(policyPath)
+	load := setup.LoadOrDefault
+	if explicit {
+		load = func(path, _ string) (policy.File, error) { return policy.Load(path) }
+	}
+	file, err := load(policyPath, workspace)
 	if err != nil {
 		return engine.Options{}, err
 	}
@@ -777,6 +784,9 @@ type prepared struct {
 	Project   string
 	Spans     string
 	Policy    string
+	// Explicit is true when the person named the policy file (--policy). Only the implicit
+	// <project>/span.yaml may be missing.
+	Explicit bool
 }
 
 // prepare isolates a run in its own git worktree when asked. The state directory and the
@@ -796,7 +806,7 @@ func prepare(workspace, spans, policyPath, name, base string, isolate bool) (pre
 	if policyPath == "" {
 		out.Policy = filepath.Join(project, "span.yaml")
 	} else {
-		out.Policy = policyPath
+		out.Policy, out.Explicit = policyPath, true
 	}
 	if !isolate {
 		return out, nil

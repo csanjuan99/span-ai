@@ -6,6 +6,8 @@
 package branch
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -104,6 +106,91 @@ func Derive(story, issue, kind, base string) (Plan, error) {
 		return Plan{}, fmt.Errorf("branch %q is not a span branch", name)
 	}
 	return Plan{Kind: kind, Base: base, Name: name, Feature: strings.ToLower(suffix)}, nil
+}
+
+// maxFeature is how long a feature name may be, hash included.
+const maxFeature = 80
+
+// FeatureOf is the run identity a span branch gives, unique per branch name. The suffix after
+// feat/ is used as is; fix/ and hotfix/ put their kind in front (fix-<suffix>), so the same
+// suffix on two kinds never names one document. When the name had to change to become a
+// feature (case, slashes, characters outside the rule, clipping, or a feat suffix that would
+// read as another kind), the first six hex digits of the SHA-1 of the whole branch name are
+// appended, so feat/x/y and feat/x-y stay apart. A Windows device name (con, nul, com1...)
+// gets a dash after it. A branch that is not feat/, fix/ or hotfix/ (dev, main, HEAD) is
+// shared by many runs and names nothing: the result is "" and the caller uses the run id.
+func FeatureOf(name string) string {
+	name = strings.TrimSpace(name)
+	kind, suffix, ok := strings.Cut(name, "/")
+	if !ok || suffix == "" || (kind != Feat && kind != Fix && kind != Hotfix) {
+		return ""
+	}
+	core := strings.ToLower(suffix)
+	if !ValidFeature(core) {
+		core = slug(core)
+	}
+	if core == "" {
+		return ""
+	}
+	// A case-only difference is not a change: a story key in capitals keeps its plain name.
+	// Two branches that differ only in case cannot coexist on a case-insensitive checkout.
+	changed := core != strings.ToLower(suffix)
+	if kind == Feat {
+		changed = changed || strings.HasPrefix(core, Fix+"-") || strings.HasPrefix(core, Hotfix+"-")
+	} else {
+		core = kind + "-" + core
+	}
+	if len(core) > maxFeature {
+		changed = true
+	}
+	if changed {
+		sum := sha1.Sum([]byte(name))
+		tag := "-" + hex.EncodeToString(sum[:])[:6]
+		core = strings.TrimRight(clip(core, maxFeature-len(tag)), "-.") + tag
+	}
+	return unreserved(core)
+}
+
+// reserved are the names Windows keeps for devices, whatever the extension.
+var reserved = map[string]bool{"con": true, "prn": true, "aux": true, "nul": true}
+
+func init() {
+	for i := '1'; i <= '9'; i++ {
+		reserved["com"+string(i)] = true
+		reserved["lpt"+string(i)] = true
+	}
+}
+
+// unreserved puts a dash after a Windows device name, so odd/tasks/<feature>.md can be
+// checked out there: con becomes con-, nul.x becomes nul-.x.
+func unreserved(feature string) string {
+	stem, rest, dotted := strings.Cut(feature, ".")
+	if !reserved[stem] {
+		return feature
+	}
+	if dotted {
+		return stem + "-." + rest
+	}
+	return stem + "-"
+}
+
+// ValidFeature reports whether name may name a feature document: letters, digits, dots,
+// dashes, or underscores, and never "." or "..".
+func ValidFeature(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Valid reports whether name is one of the three prefixes on a base that is a valid branch

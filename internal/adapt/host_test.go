@@ -71,12 +71,13 @@ func ghArgs(t *testing.T, log string) []string {
 
 func TestOpenTargetsTheRunsBaseNotTheDefaultBranch(t *testing.T) {
 	log := fakeGH(t, "https://github.com/o/r/pull/12\n")
-	if _, err := (Host{Workspace: t.TempDir()}).Open(context.Background(), "s", "feat/SAL-4", "feat/SAL-3", "t", "b"); err != nil {
+	if _, err := (Host{Workspace: t.TempDir()}).Open(context.Background(), "s", "feat/SAL-4", "feat/SAL-3", "-t", "- b"); err != nil {
 		t.Fatal(err)
 	}
 	args := ghArgs(t, log)
-	// --base=<x> is one argv element, so the value can never be read as a flag of its own.
-	want := []string{"[pr]", "[create]", "[--base=feat/SAL-3]", "[--head=feat/SAL-4]", "[--title]", "[t]", "[--body]", "[b]"}
+	// Every value is one argv element with its flag, so a base, a title, or a brief that
+	// starts with "-" can never be read as a flag of its own.
+	want := []string{"[pr]", "[create]", "[--base=feat/SAL-3]", "[--head=feat/SAL-4]", "[--title=-t]", "[--body=- b]"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("gh %v, want %v", args, want)
 	}

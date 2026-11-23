@@ -1,6 +1,8 @@
 package branch
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -248,5 +250,56 @@ func TestChooseKindAndBase(t *testing.T) {
 	}
 	if _, _, err := Choose("x", "", "", "HEAD"); err == nil {
 		t.Fatal("HEAD was accepted as a project base")
+	}
+}
+
+func shortHash(name string) string {
+	sum := sha1.Sum([]byte(name))
+	return hex.EncodeToString(sum[:])[:6]
+}
+
+func TestFeatureOfNamesEveryBranchApart(t *testing.T) {
+	long := "feat/" + strings.Repeat("a", 120)
+	for name, want := range map[string]string{
+		"feat/a.b":              "a.b",
+		"fix/a.b":               "fix-a.b",
+		"hotfix/a.b":            "hotfix-a.b",
+		"feat/sal-1-x":          "sal-1-x",
+		"feat/SAL-1-x":          "sal-1-x",
+		"feat/x-y":              "x-y",
+		"feat/x/y":              "x-y-" + shortHash("feat/x/y"),
+		"feat/fix-a.b":          "fix-a.b-" + shortHash("feat/fix-a.b"),
+		"fix/Añadir tarjeta":    "fix-anadir-tarjeta-" + shortHash("fix/Añadir tarjeta"),
+		"  feat/sal-9-refund  ": "sal-9-refund",
+		"feat/con":              "con-",
+		"feat/nul.x":            "nul-.x",
+		"feat/com1":             "com1-",
+		long:                    strings.Repeat("a", 73) + "-" + shortHash(long),
+		"dev":                   "",
+		"main":                  "",
+		"HEAD":                  "",
+		"chore/x":               "",
+		"feat/":                 "",
+		"feat/..":               "",
+		"":                      "",
+	} {
+		if got := FeatureOf(name); got != want {
+			t.Fatalf("FeatureOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+	pairs := [][2]string{
+		{"feat/a.b", "fix/a.b"}, {"feat/a.b", "hotfix/a.b"}, {"fix/a.b", "hotfix/a.b"},
+		{"feat/x/y", "feat/x-y"}, {"feat/fix-a.b", "fix/a.b"},
+	}
+	for _, pair := range pairs {
+		if FeatureOf(pair[0]) == FeatureOf(pair[1]) {
+			t.Fatalf("%s and %s share the feature %q", pair[0], pair[1], FeatureOf(pair[0]))
+		}
+	}
+	if got := FeatureOf(long); len(got) != 80 || !ValidFeature(got) {
+		t.Fatalf("long feature %q (%d)", got, len(got))
+	}
+	if !ValidFeature("sal-4.cards_x") || ValidFeature("../x") || ValidFeature("") || ValidFeature("..") {
+		t.Fatal("ValidFeature does not follow the feature rule")
 	}
 }

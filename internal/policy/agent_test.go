@@ -68,7 +68,7 @@ func TestSetAgentRejectsAnUnknownAgentAndLeavesTheFileAlone(t *testing.T) {
 }
 
 func TestSetAgentRefusesToWriteAFileThatWouldNotLoad(t *testing.T) {
-	original := "feature: two words\nagent: any\n"
+	original := "agent: any\nstages:\n  merge: whenever\n"
 	path := write(t, original)
 	if err := SetAgent(path, "pi"); err == nil {
 		t.Fatal("an invalid policy was written")
