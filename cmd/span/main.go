@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -254,21 +255,22 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		}
 		hub.Fly(id, func(flight context.Context) {
 			if wakeup.Resume {
-				_, _ = engine.Resume(flight, opt, id)
+				_, err := engine.Resume(flight, opt, id)
+				reportRun(id, err)
 				return
 			}
 			if wakeup.Reload {
-				_, _ = engine.Reload(flight, opt, id, brief)
+				_, err := engine.Reload(flight, opt, id, brief)
+				reportRun(id, err)
 				return
 			}
-			_, _ = engine.Continue(flight, opt, id, wakeup.Answers)
+			_, err := engine.Continue(flight, opt, id, wakeup.Answers)
+			reportRun(id, err)
 		})
 		return nil
 	}
 }
 
-// interruptContext ends on the first SIGINT, SIGTERM, or SIGHUP (closing the terminal) and then restores the default
-// handling, so a second Ctrl-C still kills the process if the graceful stop hangs.
 // forceExit is what the second interrupt does: end every command Span started, then go.
 // A variable so a test can observe it without ending the test process.
 var forceExit = func() {
@@ -346,29 +348,57 @@ func quickstartCmd(args []string) int {
 	return code
 }
 
-func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
+// errFilesNeedStory is what a launch with attached files and no story is refused with.
+var errFilesNeedStory = errors.New("invalid: files need a story")
+
+// resolveTargets turns a launch request into the repositories it runs in, and refuses attached
+// files when a target has no story to hang them on. Both launch paths share it.
+func resolveTargets(ctx context.Context, req setup.Request) ([]launch.Target, error) {
 	targets, err := launch.Resolve(ctx, launch.Request{
 		Path: req.Workspace, Names: req.Repos, Issue: req.Issue, Story: req.Story,
 	}, nil)
 	if err != nil {
-		return err.Error() + "\n", 1
+		return nil, err
 	}
 	if len(req.Files) > 0 {
 		for _, target := range targets {
 			if strings.TrimSpace(target.Story) == "" {
-				return "invalid: files need a story\n", 1
+				return nil, errFilesNeedStory
 			}
 		}
+	}
+	return targets, nil
+}
+
+// targetRequest is the request for one repository of a launch: its path, the folder the
+// launch started from, its own story and issue, and its base.
+func targetRequest(req setup.Request, target launch.Target) (setup.Request, error) {
+	one := req
+	one.Workspace = target.Path
+	one.Folder = launchFolder(req.Workspace, target.Path)
+	one.Story = target.Story
+	one.Issue = target.Issue
+	return withBase(one)
+}
+
+// reportRun logs how a run's worker ended. A run that was stopped ends on a cancelled
+// context, which is not a failure; the run's own record already holds any other reason, so
+// this only keeps it visible in the serve log.
+func reportRun(id string, err error) {
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("run %s: %v", id, err)
+	}
+}
+
+func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
+	targets, err := resolveTargets(ctx, req)
+	if err != nil {
+		return err.Error() + "\n", 1
 	}
 	var b strings.Builder
 	code := 0
 	for _, target := range targets {
-		one := req
-		one.Workspace = target.Path
-		one.Folder = launchFolder(req.Workspace, target.Path)
-		one.Story = target.Story
-		one.Issue = target.Issue
-		one, err := withBase(one)
+		one, err := targetRequest(req, target)
 		if err != nil {
 			fmt.Fprintf(&b, "repo %s\n%s\n", target.Name, err)
 			code = 1
@@ -384,29 +414,15 @@ func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
 }
 
 func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.Hub) (serve.Outcome, error) {
-	targets, err := launch.Resolve(ctx, launch.Request{
-		Path: req.Workspace, Names: req.Repos, Issue: req.Issue, Story: req.Story,
-	}, nil)
+	targets, err := resolveTargets(ctx, req)
 	if err != nil {
 		return serve.Outcome{}, err
-	}
-	if len(req.Files) > 0 {
-		for _, target := range targets {
-			if strings.TrimSpace(target.Story) == "" {
-				return serve.Outcome{}, fmt.Errorf("invalid: files need a story")
-			}
-		}
 	}
 	var text strings.Builder
 	var runs []serve.RunRef
 	var failures []error
 	for _, target := range targets {
-		one := req
-		one.Workspace = target.Path
-		one.Folder = launchFolder(req.Workspace, target.Path)
-		one.Story = target.Story
-		one.Issue = target.Issue
-		one, err := withBase(one)
+		one, err := targetRequest(req, target)
 		if err != nil {
 			return serve.Outcome{}, fmt.Errorf("repo %s: %w", target.Name, err)
 		}
@@ -514,7 +530,8 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	// the run has held once and been woken.
 	hub.Fly(id, func(flight context.Context) {
 		defer claim.Release()
-		_, _ = resumeRun(flight, opt, id)
+		_, err := resumeRun(flight, opt, id)
+		reportRun(id, err)
 	})
 	return id, "intake", nil
 }
@@ -572,10 +589,13 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 	return b.String(), 1
 }
 
+// repeated is a flag that can be given more than once.
 type repeated []string
 
+// String joins the values given so far.
 func (r *repeated) String() string { return strings.Join(*r, ",") }
 
+// Set adds one more value.
 func (r *repeated) Set(value string) error {
 	*r = append(*r, value)
 	return nil
@@ -602,9 +622,12 @@ func reposCmd(args []string) int {
 	return 0
 }
 
+// jiraUsage is what `span jira` prints when it is called without a known verb.
+const jiraUsage = "usage: ./span jira configure|status|logout|issue|search [--project .]"
+
 func jiraCmd(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: ./span jira configure|status|logout|issue|search [--project .]")
+		fmt.Fprintln(os.Stderr, jiraUsage)
 		return 2
 	}
 	switch args[0] {
@@ -697,7 +720,7 @@ func jiraCmd(args []string) int {
 		}
 		return 0
 	default:
-		fmt.Fprintln(os.Stderr, "usage: ./span jira configure|status|logout|issue|search [--project .]")
+		fmt.Fprintln(os.Stderr, jiraUsage)
 		return 2
 	}
 }
