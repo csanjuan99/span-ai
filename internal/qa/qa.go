@@ -2,13 +2,22 @@
 package qa
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 )
 
 const marker = "Acceptance criteria:"
+
+// The three results one criterion can carry.
+const (
+	Pass       = "pass"
+	Fail       = "fail"
+	Unverified = "unverified"
+)
 
 // Line is one acceptance criterion.
 type Line struct {
@@ -22,11 +31,15 @@ type Check struct {
 	Result string `json:"result"`
 }
 
-// Gate is the acceptance result stored on the run.
+// Gate is the acceptance result stored on the run. Verdict describes the
+// criteria, not the process: an exit code alone never turns an id into a failure.
 type Gate struct {
 	Verdict  string  `json:"verdict"`
 	Command  string  `json:"command,omitempty"`
 	ExitCode int     `json:"exitCode"`
+	Evidence string  `json:"evidence,omitempty"`
+	Report   string  `json:"report,omitempty"`
+	Reason   string  `json:"reason,omitempty"`
 	Checks   []Check `json:"checks"`
 }
 
@@ -91,28 +104,63 @@ func HasAcceptance(brief string) bool {
 	return len(Lines(brief)) > 0
 }
 
-// Judge scores each id. A failing command marks covered ids fail.
-// A missing declaration is unverified. The verdict is fail when the command failed, unverified when an id is missing, otherwise pass.
-func Judge(lines []Line, exit int, ran bool, covered map[string]bool) Gate {
-	gate := Gate{ExitCode: exit, Checks: make([]Check, 0, len(lines))}
-	missing := false
+// Judge scores each id against the evidence that actually exists. A per-test
+// report names which criteria ran and failed. Without one, a zero exit passes the
+// declared criteria and a non-zero exit makes them unverified, never fail: the
+// process failing is not evidence that a named criterion failed.
+func Judge(lines []Line, exit int, covered map[string]bool, outcomes Outcomes) Gate {
+	gate := Gate{ExitCode: exit, Checks: make([]Check, 0, len(lines)), Evidence: "exit-only"}
+	if outcomes.Known() {
+		gate.Evidence = outcomes.Source
+	}
+	pass, fail, unverified, uncovered := 0, 0, 0, 0
 	for _, line := range lines {
-		result := "pass"
-		if !covered[line.ID] {
-			result = "unverified"
-			missing = true
-		} else if !ran || exit != 0 {
-			result = "fail"
+		result := Unverified
+		switch {
+		case !covered[line.ID]:
+			result = Unverified
+			uncovered++
+		case outcomes.Known():
+			failed, ok := outcomes.forID(line.ID)
+			switch {
+			case !ok:
+				result = Unverified
+			case failed:
+				result = Fail
+			default:
+				result = Pass
+			}
+		case exit == 0:
+			result = Pass
+		default:
+			result = Unverified
+		}
+		switch result {
+		case Pass:
+			pass++
+		case Fail:
+			fail++
+		default:
+			unverified++
 		}
 		gate.Checks = append(gate.Checks, Check{ID: line.ID, Result: result})
 	}
 	switch {
-	case !ran || exit != 0:
-		gate.Verdict = "fail"
-	case missing:
-		gate.Verdict = "unverified"
+	case fail > 0:
+		gate.Verdict = Fail
+		gate.Reason = fmt.Sprintf("%d of %d criteria failed", fail, len(lines))
+	case !outcomes.Known() && exit != 0:
+		gate.Verdict = Unverified
+		gate.Reason = fmt.Sprintf("exit %d with no per-test report; none of %d criteria is attributable", exit, len(lines))
+	case uncovered > 0:
+		gate.Verdict = Unverified
+		gate.Reason = fmt.Sprintf("%d of %d criteria have no test declaration", uncovered, len(lines))
+	case unverified > 0:
+		gate.Verdict = Unverified
+		gate.Reason = fmt.Sprintf("%d of %d criteria were declared but the report did not run them", unverified, len(lines))
 	default:
-		gate.Verdict = "pass"
+		gate.Verdict = Pass
+		gate.Reason = fmt.Sprintf("all %d criteria passed", pass)
 	}
 	return gate
 }
@@ -233,6 +281,8 @@ func testFile(name string) bool {
 		return true
 	case strings.HasSuffix(name, ".spec.ts"), strings.HasSuffix(name, ".spec.tsx"), strings.HasSuffix(name, ".spec.js"), strings.HasSuffix(name, ".spec.jsx"):
 		return true
+	case strings.HasSuffix(name, ".test.ts"), strings.HasSuffix(name, ".test.tsx"), strings.HasSuffix(name, ".test.js"), strings.HasSuffix(name, ".test.jsx"):
+		return true
 	case strings.HasPrefix(name, "test_") && strings.HasSuffix(name, ".py"):
 		return true
 	case strings.HasSuffix(name, "_test.py"):
@@ -321,4 +371,25 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(digits)
+}
+
+// Scope is the test files that declare these criteria, unique and sorted. It is the
+// story's own test surface: what a check must run to answer for this story alone.
+// A criterion with no declaration contributes nothing.
+func Scope(root string, lines []Line) ([]string, error) {
+	places, err := Locate(root, lines)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(places))
+	out := make([]string, 0, len(places))
+	for _, place := range places {
+		if place.File == "" || seen[place.File] {
+			continue
+		}
+		seen[place.File] = true
+		out = append(out, place.File)
+	}
+	sort.Strings(out)
+	return out, nil
 }
