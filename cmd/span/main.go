@@ -720,7 +720,7 @@ func options(workspace, spans, policyPath, project string, explicit bool) (engin
 		Policy:    file,
 		Agents:    &adapt.CLIAgents{Models: file.Models},
 		Check:     adapt.Exec{},
-		Source:    adapt.Git{Dir: workspace},
+		Source:    adapt.Git{Dir: workspace, Allow: file.Commit.Allow},
 		Review:    adapt.Host{Workspace: workspace, State: spans},
 		Release:   adapt.CommandRelease{},
 		Worktree:  adapt.IsWorktree(workspace),

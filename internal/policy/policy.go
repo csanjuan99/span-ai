@@ -42,6 +42,15 @@ type File struct {
 	Repair   Repair              `yaml:"repair"`
 	Run      Run                 `yaml:"run"`
 	Manifest map[string]Manifest `yaml:"manifest"`
+	Commit   Commit              `yaml:"commit"`
+}
+
+// Commit tunes what a stage's commit may take. Span never commits build output, and it
+// stops on a file that looks like a secret; Allow lists the paths a person checked.
+type Commit struct {
+	// Allow is exact paths, or folders written with a trailing slash, relative to the
+	// repository. A path that leaves the repository is refused when the policy loads.
+	Allow []string `yaml:"allow"`
 }
 
 // Jira names the status used when a story cannot be implemented yet.
@@ -180,6 +189,12 @@ func (f File) Validate() error {
 		}
 		if !agent.ValidModel(model) {
 			return fmt.Errorf("models.%s: %q is not a model name", id, model)
+		}
+	}
+	for _, entry := range f.Commit.Allow {
+		clean := filepath.ToSlash(filepath.Clean(entry))
+		if strings.TrimSpace(entry) == "" || filepath.IsAbs(entry) || strings.HasPrefix(entry, "/") || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return fmt.Errorf("commit.allow: %q is not a path inside the repository", entry)
 		}
 	}
 	if f.Base != "" {

@@ -1222,3 +1222,20 @@ The report also lists what it could not check (a cut patch, no prove or QA run, 
 Build is asked to write two kinds of line in the feature document's `## Log`: `Decision: <what> because <why>` and `Risk: <what could go wrong> (<how likely, and what would catch it>)`. The report shows them as "assumed by the agent" and "reported by the agent". A run whose log has none says so.
 
 Sources for the shape: Architecture Decision Records (Nygard) and MADR for decisions with their reasons, Google's change-description and small-change guidance, SmartBear/Cisco on review size, SLSA provenance for the audit trail (who ran what, on which commit, when), CodeRabbit's walkthrough and merge-risk presentation, and Martin Fowler's Ship/Show/Ask for matching review depth to risk.
+
+## What a commit takes
+
+After a stage that edits files, Span stages everything the agent left (except `.span` and `span.yaml`) and then checks it before committing:
+
+- Build output and caches are left in the working tree and not committed, without stopping the run: `__pycache__/`, `*.pyc`, `*.pyo`, `node_modules/` and `.DS_Store`.
+- A file that looks like a secret stops the commit. Nothing is committed, the index is cleared, and the run holds with the file and the reason. The match is never printed. The checks are the name (`.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa`, `id_ed25519` and the like; `.env.example`, `.sample`, `.template` and `.dist` are allowed) and the added lines (an AWS access key id, a private key block, a GitHub token, or a quoted credential of 20 or more characters).
+- To let a reviewed path through, list it in `span.yaml`, then resume. An entry is an exact path or a folder written with a trailing slash, relative to the repository; a path that leaves the repository is refused when the policy loads. A listed path skips both checks.
+
+```yaml
+commit:
+  allow:
+    - fixtures/keys/
+    - .env.test
+```
+
+These checks are heuristics, not a secret scanner: a secret that matches none of the shapes is committed. Run a scanner such as gitleaks in your own pipeline for coverage.

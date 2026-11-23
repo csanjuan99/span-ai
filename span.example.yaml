@@ -16,6 +16,11 @@ agent: any
 # configuration are required: a CLI without an entry keeps the model Gentle AI set up.
 # models:
 #   claude: opus
+# Paths a person checked and accepts for commit. Span never commits build output, and it
+# holds on a file that looks like a secret. Exact paths, or folders with a trailing slash.
+# commit:
+#   allow:
+#     - fixtures/keys/
 stages:
   open: auto
   merge: auto
