@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -111,6 +112,45 @@ func readImplementation(ctx context.Context, root, id string) (adapt.Diff, error
 		return adapt.Diff{}, nil
 	}
 	return (adapt.Git{Dir: snap.Cursor.Workspace}).Diff(ctx, snap.Cursor.Base, snap.Cursor.GitSHA)
+}
+
+// featureLimit bounds the feature document the report reads.
+const featureLimit = 64 * 1024
+
+// featureView is the ODD document the build stage wrote, for the report.
+type featureView struct {
+	Path      string `json:"path"`
+	Markdown  string `json:"markdown"`
+	Truncated bool   `json:"truncated"`
+}
+
+// readFeature reads odd/tasks/<feature>.md from the run's workspace. A run with no document
+// yet, or a feature name that is not a plain file name, is an empty report and not an error.
+func readFeature(root, id string) (featureView, error) {
+	snap, err := engine.Load(root, id)
+	if err != nil {
+		return featureView{}, err
+	}
+	feature := snap.Cursor.Feature
+	if snap.Cursor.Workspace == "" || !safe(feature) {
+		return featureView{}, nil
+	}
+	rel := filepath.Join("odd", "tasks", feature+".md")
+	file, err := os.Open(filepath.Join(snap.Cursor.Workspace, rel))
+	if err != nil {
+		return featureView{Path: filepath.ToSlash(rel)}, nil
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, featureLimit+1))
+	if err != nil {
+		return featureView{}, err
+	}
+	view := featureView{Path: filepath.ToSlash(rel), Markdown: string(raw)}
+	if len(raw) > featureLimit {
+		view.Markdown = string(raw[:featureLimit])
+		view.Truncated = true
+	}
+	return view, nil
 }
 
 // liveWriteTimeout bounds one socket write, in nanoseconds; tests shorten it.

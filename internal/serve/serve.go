@@ -205,6 +205,14 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, diff)
 	})
+	mux.HandleFunc("GET /spans/{id}/feature", func(w http.ResponseWriter, r *http.Request) {
+		body, err := readFeature(root, r.PathValue("id"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, body)
+	})
 	mux.HandleFunc("GET /spans/{id}/acceptance", func(w http.ResponseWriter, r *http.Request) {
 		body, err := readAcceptance(root, r.PathValue("id"))
 		if err != nil {

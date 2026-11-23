@@ -84,3 +84,12 @@ func TestFrameForbidsEditingFiles(t *testing.T) {
 		t.Fatalf("frame prompt:\n%s", got)
 	}
 }
+
+func TestBuildAsksForDecisionAndRiskLinesInTheLog(t *testing.T) {
+	got := Build(Input{Stage: "build", FeaturePath: "odd/tasks/payments.md"})
+	for _, want := range []string{`"Decision: <what> because <why>"`, `"Risk: <what could go wrong>`, `"Risk: none found" only when you looked`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the build prompt does not ask for %s:\n%s", want, got)
+		}
+	}
+}

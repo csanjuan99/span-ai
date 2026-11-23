@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: the Implementation tab opens with a report: a risk verdict, every risk Span detects (size, sensitive paths, dependencies, committed build output, missing tests, secret-shaped strings, repeated inspect returns), what the story asked, the decisions and risks the agent recorded, the checks that ran, and what could not be checked. The audit trail and the raw transcript are below it, closed. `GET /spans/<id>/feature` serves the feature document.
+- **Changed**: build is asked to write `Decision:` and `Risk:` lines in the feature document log, which the report shows as assumed or reported by the agent.
 - **Fixed**: restarting a run from a stage kept the commit and the change link of the earlier attempt. The run now reads the commit the branch is on when it continues, and a restart before open drops the old change link. The branch and working tree are never reset.
 - **Changed**: the Ledger tab groups records into rounds (a new round starts when a stage repeats), with a verdict icon, short copyable commit and digest chips, the pull request as `PR #n`, and each command as a terminal line that shows its output when it fails.
 - **Changed**: the Implementation tab shows the patch as a code diff: one card per file with its status, `+n −n` counts and a change bar, hunks with line numbers on both sides, and the files a cut patch did not reach listed with their counts.
