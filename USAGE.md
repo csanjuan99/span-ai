@@ -419,7 +419,9 @@ manifest:
 `open: hold` or `merge: hold` pauses before that effect, and only a person releases it: the page shows **Approve merge** (or **Approve open**, or **Approve promote to <env>**) instead of a retry, because a retry reaches the same hold. The approval is bound to the commit the page showed, so a new commit is held again, and it is spent only when the stage advances. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
 `open: hold` or `merge: hold` pauses before that effect. `conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts). Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
 
-`prove` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, shell quotes, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
+`prove`, `qa` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
+
+Two things a shell would do are understood without one. Single or double quotes group words, so `pytest -k "a and b"` passes one argument (inside double quotes `\"` and `\\` are escapes, and outside quotes a backslash is a plain character, so a Windows path is safe). Words of the form `NAME=value` before the program are environment for that command only, so `CI=1 pnpm test` works. There is no `cd`: point the tool at the folder instead, for example `npm --prefix web test`, `pnpm -C web test`, `go -C service test ./...`, or `make -C web test`.
 
 Promote receives the sha in `SPAN_SHA`.
 

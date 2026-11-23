@@ -31,17 +31,20 @@ type Exec struct{}
 const OutputCap = 1 << 20
 
 func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return prove.Output{}, errors.New("empty command")
+	env, fields, err := Argv(command)
+	if err != nil {
+		return prove.Output{}, err
 	}
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
 	proc.Tame(cmd)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	kept := &tailBuffer{max: OutputCap}
 	cmd.Stdout = kept
 	cmd.Stderr = kept
-	err := proc.Run(cmd)
+	err = proc.Run(cmd)
 	out := prove.Output{Text: kept.String(), Truncated: kept.Truncated()}
 	if err == nil {
 		return out, nil
@@ -548,14 +551,14 @@ func (r LocalReview) spanDir(url string) (string, bool) {
 type CommandRelease struct{}
 
 func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
-	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return errors.New("empty release command")
+	env, fields, err := Argv(command)
+	if err != nil {
+		return fmt.Errorf("release command: %w", err)
 	}
 	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
 	proc.Tame(cmd)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "SPAN_SHA="+sha)
+	cmd.Env = append(append(os.Environ(), env...), "SPAN_SHA="+sha)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := proc.Run(cmd); err != nil {
