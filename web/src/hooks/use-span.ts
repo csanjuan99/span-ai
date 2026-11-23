@@ -302,6 +302,10 @@ export function useSpan(id: string): SpanState {
         setSpan((current) => (current ? { ...current, cursor: next } : current))
         remember(frame)
       }
+      if (frame.type === "conflict") {
+        const conflict = frame.conflict
+        setSpan((current) => (current ? { ...current, cursor: { ...current.cursor, conflict } } : current))
+      }
       if (frame.type === "statement" && frame.statement) {
         const next = frame.statement
         loadDiff(next.gitSHA ?? "")

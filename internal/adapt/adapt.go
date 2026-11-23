@@ -86,8 +86,13 @@ func (b *tailBuffer) String() string {
 	return string(b.data[len(b.data)-b.max:])
 }
 
-// Git is the workspace source.
-type Git struct{ Dir string }
+// Git is the workspace source. Every git command it runs is hardened (no hooks, no
+// fsmonitor, no pager, no ext:: transport, no submodule recursion). Pin, when set, names the
+// repository explicitly so a redirected .git is not followed.
+type Git struct {
+	Dir string
+	Pin *engine.RepoPin
+}
 
 // IsWorktree reports whether dir is a linked worktree. A linked worktree has a .git
 // file that points at the shared repository, so the check is exact and needs no git call.
@@ -98,8 +103,7 @@ func IsWorktree(dir string) bool {
 
 // Git runs one git command in dir for the packages that own a command surface.
 func (g Git) Git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
+	cmd := g.gitCmd(ctx, dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -184,8 +188,7 @@ func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
 func (g Git) output(ctx context.Context, args ...string) (string, error) {
 	// The author is whoever this checkout is configured with. Span does not invent an
 	// identity and does not overwrite the user's: the commit is theirs.
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = g.Dir
+	cmd := g.gitCmd(ctx, g.Dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -279,8 +282,7 @@ func (g Git) Changed(ctx context.Context, base string) ([]string, error) {
 }
 
 func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bool, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = g.Dir
+	cmd := g.gitCmd(ctx, g.Dir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
@@ -395,6 +397,16 @@ func (h Host) Merge(ctx context.Context, url string) error {
 		return err
 	}
 	_, err = h.gh(ctx, "pr", "merge", "--merge", "--", clean)
+	var refused *ghError
+	if errors.As(err, &refused) && IsConflictMessage(refused.stderr) {
+		// A conflict is a known outcome: nothing was merged, so the run can resolve it
+		// instead of holding on an unknown one. Only gh's own words are read: the command
+		// line carries the URL, and a repository can be named after conflicts.
+		return fmt.Errorf("%w: %s", ErrConflict, err.Error())
+	}
+	if errors.As(err, &refused) && IsBehindMessage(refused.stderr) {
+		return fmt.Errorf("%w: %s", engine.ErrBehind, err.Error())
+	}
 	return err
 }
 
@@ -408,6 +420,19 @@ func changeURL(url string) (string, error) {
 	return clean, nil
 }
 
+// ghError is a gh command that failed, with its stderr kept apart from the command line.
+type ghError struct {
+	args   []string
+	err    error
+	stderr string
+}
+
+func (e *ghError) Error() string {
+	return fmt.Sprintf("gh %s: %v: %s", strings.Join(e.args, " "), e.err, e.stderr)
+}
+
+func (e *ghError) Unwrap() error { return e.err }
+
 func (h Host) gh(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
 	cmd.Dir = h.Workspace
@@ -415,7 +440,7 @@ func (h Host) gh(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, stderr.String())
+		return "", &ghError{args: args, err: err, stderr: stderr.String()}
 	}
 	return stdout.String(), nil
 }
@@ -545,4 +570,18 @@ func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (e
 		return engine.InspectDoc{}, err
 	}
 	return doc, nil
+}
+
+// Propose asks the agent for conflict options. Its stdout is not copied to the run
+// transcript: the reply carries file contents, which belong in the plan, not the log.
+func (c CLIAgents) Propose(ctx context.Context, name, workspace, text string) (engine.ConflictReply, error) {
+	out, err := agent.RunWriter(ctx, name, workspace, text, nil)
+	if err != nil {
+		return engine.ConflictReply{}, err
+	}
+	var reply engine.ConflictReply
+	if err := agent.ParseJSON(out, &reply); err != nil {
+		return engine.ConflictReply{}, err
+	}
+	return reply, nil
 }

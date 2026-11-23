@@ -200,6 +200,13 @@ type Cursor struct {
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
 	Feature string `json:"feature,omitempty"`
+	// Conflict is a merge of the base into the branch waiting on a person or in progress.
+	Conflict *Conflict `json:"conflict,omitempty"`
+	// Resolutions counts the conflicts this run resolved; the base cannot move forever.
+	Resolutions int `json:"resolutions,omitempty"`
+	// Unpushed is a merge commit that is only local. It is pushed right before the host is
+	// asked to merge, once prove, QA and inspect passed on it.
+	Unpushed bool `json:"unpushed,omitempty"`
 }
 
 // AgentBlock is an agent CLI that cannot work until a person acts. It is a hold,
@@ -246,6 +253,7 @@ type Event struct {
 	Lines      []string             `json:"lines,omitempty"`
 	Transcript []string             `json:"transcript,omitempty"`
 	Span       *Snapshot            `json:"span,omitempty"`
+	Conflict   *Conflict            `json:"conflict,omitempty"`
 	// Seq orders the live frames of one run so the page can tell a duplicate or a gap
 	// from the next frame. Zero means the event was not published through the hub.
 	Seq uint64 `json:"seq,omitempty"`
@@ -667,6 +675,13 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 		case "rebuild":
 			r.cur.Stage = build
 			r.cur.Reason = reason
+		case "reprove":
+			// The merge changed the head. A new iteration keeps the old statements as history
+			// and proves the bytes that will be merged.
+			r.cur.Iteration++
+			r.cur.Stage = proveSt
+			r.cur.InspectBlocks = 0
+			r.cur.Reason = reason
 		default:
 			return Result{}, fmt.Errorf("unknown verdict %s", verdict)
 		}
@@ -681,7 +696,7 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 }
 
 func (r *runner) finish(verdict string) Result {
-	if verdict == "iterate" || verdict == "rebuild" {
+	if verdict == "iterate" || verdict == "rebuild" || verdict == "reprove" {
 		verdict = statement.Hold
 	}
 	return Result{ID: r.cur.ID, Stage: r.cur.Stage, Verdict: verdict, Reason: r.cur.Reason, ChangeURL: r.cur.ChangeURL}
@@ -1127,6 +1142,9 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if r.cur.ChangeURL == "" {
 		return r.record(merge, statement.Hold, "no change url", nil)
 	}
+	if r.cur.Conflict != nil {
+		return r.continueConflict(ctx)
+	}
 	if r.gated(r.opt.Policy.MergeMode(), merge, "") {
 		return r.record(merge, statement.Hold, "merge is hold", nil)
 	}
@@ -1138,14 +1156,46 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(merge, statement.Hold, "merge lookup failed: "+err.Error(), nil)
 	}
+	note := ""
 	if !merged {
+		// A conflict with the base is found here, without touching the checkout, instead of
+		// being a refusal from the host. A clean base is left to the host, as before.
+		verdict, reason, handled, why, err := r.preflightBase(ctx)
+		if err != nil || handled {
+			return verdict, reason, err
+		}
+		note = why
+		if r.cur.Unpushed {
+			// A resolved merge commit is published only now, once it passed prove, QA and
+			// inspect, so a failing check never reaches the change.
+			if err := r.opt.Source.Push(ctx); err != nil {
+				return r.record(merge, statement.Hold, "the merge commit was not pushed: "+err.Error()+". Resume to push it again.", nil)
+			}
+			r.cur.Unpushed = false
+			if err := r.save(); err != nil {
+				return "", "", err
+			}
+		}
 		if err := r.opt.Review.Merge(ctx, r.cur.ChangeURL); err != nil {
+			if errors.Is(err, ErrConflict) {
+				// The base moved after the check above. Nothing was merged, so this is known.
+				return r.refused(ctx, err)
+			}
+			if errors.Is(err, ErrBehind) {
+				// Nothing was merged: the host wants the change updated first.
+				r.cur.Pending = nil
+				return r.record(merge, statement.Hold, BehindReason, nil)
+			}
 			return r.record(merge, statement.Hold, "merge outcome unknown: "+err.Error(), nil)
 		}
 	}
 	r.cur.Pending = nil
 	r.spendApproval(merge, "")
-	return r.record(merge, statement.Advance, "merged", func(s *statement.Statement) {
+	reason := "merged"
+	if note != "" {
+		reason += " (" + note + ")"
+	}
+	return r.record(merge, statement.Advance, reason, func(s *statement.Statement) {
 		s.ChangeURL = r.cur.ChangeURL
 	})
 }

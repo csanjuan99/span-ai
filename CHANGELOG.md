@@ -21,6 +21,47 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 - **Fixed**: a stage held by its mode (`merge: hold`, `open: hold`, a promote environment in `hold`) could never be released: the page offered "Fix and retry", which reached the same hold again. The page now offers an approval (`POST /spans/{id}/approve`), bound to the commit it showed and spent when the stage advances.
 - **Fixed**: `span.yaml` was staged into the story's branch by the commit, so a checkout of another branch lost it and a run recorded without a project could not be resumed (`open .../span.yaml: no such file`).
 
+### Merge conflicts are resolved on cards
+
+- **Detected before the merge, without touching the tree.** The merge stage runs `git
+  merge-tree --write-tree HEAD origin/<base>` after fetching the base (single-branch clones
+  included). A clean base is left to the host exactly as before: no merge commit, no extra
+  prove. No base, no fetch, or a git older than 2.38 skips the check and says so. A `gh pr
+  merge` refused for conflicts (read from gh's stderr only) is classified as a conflict, never
+  as `merge outcome unknown`; branch policy, required checks and reviews stay plain failures.
+- **Any conflict.** Content, add/add, modify/delete, rename/rename, rename/delete, mode,
+  binary, lockfiles, generated files, and type conflicts (file against symlink or directory,
+  submodules), which keep their real path and mode. The build agent groups the files and
+  proposes 2 to 4 options per group; span computes each option's diff from the bytes.
+- **Span's risk, not the agent's.** `combine` and `keep` can be low, `ours` is at least
+  medium, `theirs`, `delete` and `regenerate` are always high.
+- **Nothing written without a choice, nothing published without prove.** The run holds with
+  `conflict: choose how to resolve`. Choose per group, give the agent a hint, or abort
+  (`git merge --abort`, with tracked leftovers put back). Applying stages through git itself,
+  commits the merge and sends the run back to `prove`; the merge commit is pushed only right
+  before the host merge, once prove, QA and inspect passed on it. At most three resolutions
+  per run.
+- **The checkout stays honest.** What the agent or a regenerate command changes is put back:
+  files, the index, commits, resets, branch checkouts, the merge state, every ref, hooks,
+  config and `.git/info`, the git directory first and without running git, then with hardened
+  git commands (no hooks, fsmonitor, pager or `ext::`) and never through a planted symlink;
+  ignored files are named, never deleted. The merge commit runs no hooks and is accepted only
+  with the run's head and the base as its parents. No resolution writes or deletes through a
+  symlink, including a parent that becomes one while the choice is applied.
+- **A pinned repository.** The conflict phase pins `.git` and its git directories, checks their
+  shape without git before running git again, and fails closed (no git, no abort) when the
+  agent redirected or replaced them. Every git command span runs, ordinary commits and pushes
+  included, is hardened: no fsmonitor, pager, `ext::` transport or submodule recursion. Repository
+  hooks are off only during the conflict phase; span's own commits and pushes still run them.
+- **Behind is not unknown.** A host refusal because the change is behind its base holds with
+  its own reason; span does not update the change.
+- **Regenerate, never on its own.** Lockfiles and generated files can offer a `regenerate`
+  command from an allowlist of package managers and build tools, shown on the card and run
+  without a shell only after it is chosen.
+- **Policy.** `stages.conflict: hold|auto`, default `hold`. `auto` applies the first options
+  only when span's risk for every group is low.
+- **Routes.** `POST /spans/<id>/conflict/choose`, `/hint` and `/abort`; the cursor carries
+  `conflict`, `resolutions` and `unpushed`, and the socket sends `conflict` frames.
 ### The desk survives a dropped socket, lost frames, a render crash and a failing endpoint
 
 - **Reconnect with backoff.** The span page reopens a closed socket after 0.5 s, doubling to

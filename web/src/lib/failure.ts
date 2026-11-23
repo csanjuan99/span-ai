@@ -1,3 +1,4 @@
+import type { ConflictHoldKind } from "@/lib/conflict"
 import { stages, type Cursor, type Statement, type StatementCommand } from "@/lib/types"
 
 /** The check that failed, and what a person needs before choosing an action. */
@@ -99,6 +100,17 @@ export function activeFailure(input: { statements: Statement[]; cursor: Cursor |
   }
 }
 
+/** `choose` has the conflict panel's controls; an abort only needs the normal resume. */
+function conflictAction(kind: ConflictHoldKind): HoldAction | null {
+  if (kind === "choose") {
+    return null
+  }
+  return {
+    label: "Resume",
+    hint: "The merge was aborted and the branch is as it was before. Resume tries the merge stage again.",
+  }
+}
+
 /**
  * The one action a paused run offers. Inconclusive asks for verification before a
  * change; a failed check hands the output to build; a question goes to frame.
@@ -112,9 +124,16 @@ export function holdAction(input: {
   idle?: boolean
   /** The run holds only because another run is editing its checkout. */
   busy?: boolean
+  /** The run holds in the merge-conflict phase. The conflict panel owns `choose`. */
+  conflict?: ConflictHoldKind | null
 }): HoldAction | null {
   if (input.done || input.stop) {
     return null
+  }
+  // A conflict hold is not a failed check: the merge statement is on disk, but what the
+  // run waits for is a choice on the cards, which has its own controls.
+  if (input.conflict != null) {
+    return conflictAction(input.conflict)
   }
   // A busy checkout outranks an old failure: the failing statement is still on disk, but
   // the run is waiting for the other run, not for a fix.

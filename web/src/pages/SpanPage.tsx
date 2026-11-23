@@ -3,12 +3,14 @@ import { Link, useParams } from "react-router"
 
 import { answerRun, approveStage, branchLine, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
+import { conflictHold, proposalKey } from "@/lib/conflict"
 import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
 import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
 import { stages } from "@/lib/types"
 import { useSpan } from "@/hooks/use-span"
+import { ConflictPanel } from "@/components/conflict/ConflictPanel"
 import { FailureCard } from "@/components/failure/FailureCard"
 import { Implementation } from "@/components/implementation/Implementation"
 import { Ledger } from "@/components/ledger/Ledger"
@@ -87,6 +89,9 @@ export function SpanPage() {
   // the page that there is nothing to do. The agent poll can.
   const idle = state.agent?.summary === "not running"
   const busy = isCheckoutBusy(cursor?.reason ?? "")
+  // A conflict hold is answered on the conflict cards, not by fixing a failed check.
+  const conflictKind = conflictHold(cursor?.reason ?? "")
+  const conflict = cursor?.conflict
   const action = holdAction({
     failure,
     questions: questions.length,
@@ -94,6 +99,7 @@ export function SpanPage() {
     done: Boolean(cursor?.done),
     idle,
     busy,
+    conflict: conflictKind,
   })
   const canAct = Boolean(cursor?.hold) || idle
   const approval = waiting ? null : approvalOf(cursor ?? null)
@@ -209,7 +215,11 @@ export function SpanPage() {
             <p className="text-pretty text-sm text-muted-foreground">{approval.hint}</p>
           </div>
         ) : null}
-        {failure !== null && !busy && approval === null ? <FailureCard failure={failure} /> : null}
+        {failure !== null && !busy && approval === null && conflictKind === null ? <FailureCard failure={failure} /> : null}
+        {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
+        {conflict === undefined && conflictKind === "choose" ? (
+          <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
+        ) : null}
         {!waiting && approval === null && canAct && action !== null ? (
           <div className="flex flex-col gap-2">
             <Button type="button" className="self-start" onClick={() => void resume()}>
