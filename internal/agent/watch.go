@@ -2,10 +2,10 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"sync"
-	"syscall"
 	"time"
+
+	"span/internal/proc"
 )
 
 type spanKey struct{}
@@ -57,11 +57,7 @@ func Current(id string) (Proc, bool) {
 
 // Alive reports whether pid is still a process. A permission error still counts.
 func Alive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || errors.Is(err, syscall.EPERM)
+	return proc.Alive(pid)
 }
 
 func observe(ctx context.Context, name string, pid int) func() {

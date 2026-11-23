@@ -213,13 +213,33 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 
 // interruptContext ends on the first SIGINT, SIGTERM, or SIGHUP (closing the terminal) and then restores the default
 // handling, so a second Ctrl-C still kills the process if the graceful stop hangs.
+// forceExit is what the second interrupt does: end every command Span started, then go.
+// A variable so a test can observe it without ending the test process.
+var forceExit = func() {
+	proc.KillAll()
+	os.Exit(130)
+}
+
+// interruptContext cancels on the first SIGINT, SIGTERM or SIGHUP, which is a graceful
+// stop: commands get their grace period to end. A second signal does not wait: it kills
+// whatever Span started and exits, so an agent cannot outlive a person who pressed Ctrl-C
+// twice. Finishing normally cancels the context without arming the exit.
 func interruptContext() (context.Context, context.CancelFunc) {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	ctx, cancel := context.WithCancel(context.Background())
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		<-ctx.Done()
-		stop()
+		defer signal.Stop(sigs)
+		select {
+		case <-sigs:
+			cancel()
+		case <-ctx.Done():
+			return
+		}
+		<-sigs
+		forceExit()
 	}()
-	return ctx, stop
+	return ctx, cancel
 }
 
 func quickstartCmd(args []string) int {

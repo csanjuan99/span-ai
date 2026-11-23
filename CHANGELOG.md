@@ -6,6 +6,15 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+### A second Ctrl-C ends every command Span started
+
+- **Graceful first, forced second.** The first interrupt still cancels and gives each command
+  its grace period. A second one kills every tracked process tree at once and exits with 130,
+  so an agent or test runner cannot keep editing the tree after Span is gone. Before, the
+  second Ctrl-C killed Span and left them running.
+- **Windows builds again.** The process check moved to `proc.Alive`, which has a Windows
+  implementation; `internal/agent` no longer calls `syscall.Kill` directly.
+
 ### Parallel stories run side by side instead of queueing
 
 - **The lock follows the tree.** A second story launched from the page while a checkout is
