@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { startRun } from "@/lib/api"
+import { approveStage, startRun } from "@/lib/api"
 
 function reply(status: number, body: unknown) {
   vi.stubGlobal(
@@ -71,5 +71,22 @@ describe("startRun", () => {
   it("shows the server's busy message, not a bare status", async () => {
     reply(409, { error: "busy", message: "another run is active in this checkout (pid 4 run span-3)" })
     await expect(startRun(new FormData())).rejects.toThrow("another run is active in this checkout")
+  })
+})
+
+describe("approveStage", () => {
+  it("posts the stage and the environment as a form", async () => {
+    const fetchSpy = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ id: "s", stage: "promote" }), { status: 202 })))
+    vi.stubGlobal("fetch", fetchSpy)
+    await approveStage("span-1", "promote", "preview")
+    const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
+    expect(call[0]).toBe("/spans/span-1/approve")
+    expect(call[1].method).toBe("POST")
+    expect(String(call[1].body)).toBe("stage=promote&environment=preview")
+  })
+
+  it("surfaces the server's reason when the run is not held there", async () => {
+    reply(409, { error: "invalid", message: "this run is not held at merge" })
+    await expect(approveStage("span-1", "merge", "")).rejects.toThrow("this run is not held at merge")
   })
 })

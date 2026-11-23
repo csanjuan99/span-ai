@@ -272,7 +272,7 @@ manifest:
     mcp: []
 ```
 
-`open: hold` or `merge: hold` pauses before that effect. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
+`open: hold` or `merge: hold` pauses before that effect, and only a person releases it: the page shows **Approve merge** (or **Approve open**, or **Approve promote to <env>**) instead of a retry, because a retry reaches the same hold. The approval is bound to the commit the page showed, so a new commit is held again, and it is spent only when the stage advances. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
 
 `prove` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, shell quotes, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
 

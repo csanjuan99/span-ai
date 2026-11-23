@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
-import { answerRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
+import { answerRun, approveStage, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
-import { activeFailure, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
 import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
@@ -96,6 +96,7 @@ export function SpanPage() {
     busy,
   })
   const canAct = Boolean(cursor?.hold) || idle
+  const approval = waiting ? null : approvalOf(cursor ?? null)
 
   async function answer(answers: { question: string; body: string }[]) {
     setNote("")
@@ -127,6 +128,20 @@ export function SpanPage() {
       setNote("The run is continuing.")
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "the run did not continue")
+    }
+  }
+
+  async function approve() {
+    if (approval === null) {
+      return
+    }
+    setNote("")
+    try {
+      await approveStage(id, approval.stage, approval.environment)
+      state.note(`approved ${approval.stage}`)
+      setNote("Approved. The run is continuing.")
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "the approval was not saved")
     }
   }
 
@@ -183,8 +198,16 @@ export function SpanPage() {
             <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
           </section>
         ) : null}
-        {failure !== null && !busy ? <FailureCard failure={failure} /> : null}
-        {!waiting && canAct && action !== null ? (
+        {approval !== null ? (
+          <div className="flex flex-col gap-2">
+            <Button type="button" className="self-start" onClick={() => void approve()}>
+              {approval.label}
+            </Button>
+            <p className="text-pretty text-sm text-muted-foreground">{approval.hint}</p>
+          </div>
+        ) : null}
+        {failure !== null && !busy && approval === null ? <FailureCard failure={failure} /> : null}
+        {!waiting && approval === null && canAct && action !== null ? (
           <div className="flex flex-col gap-2">
             <Button type="button" className="self-start" onClick={() => void resume()}>
               {action.label}

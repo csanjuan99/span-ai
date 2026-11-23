@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { activeFailure, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
 import type { Cursor, Statement } from "@/lib/types"
 
 function cursor(over: Partial<Cursor> = {}): Cursor {
@@ -129,5 +129,32 @@ describe("a failed run resumed into a busy checkout", () => {
     const failure = activeFailure({ statements: [statement()], cursor: cursor() })
     const action = holdAction({ failure, questions: 0, stop: false, done: false, busy: true })
     expect(action?.label).toBe("Resume when the other run ends")
+  })
+})
+
+describe("approvalOf", () => {
+  it("offers the approval of a stage held by its mode, not a retry", () => {
+    expect(approvalOf(cursor({ stage: "merge", reason: "merge is hold" }))).toEqual({
+      stage: "merge",
+      environment: "",
+      label: "Approve merge",
+      hint: "merge: hold waits for a person. Approving lets this commit merge; a retry would hold again.",
+    })
+    expect(approvalOf(cursor({ stage: "open", reason: "open is hold" }))?.label).toBe("Approve open")
+  })
+
+  it("names the environment a promote is held at", () => {
+    const got = approvalOf(cursor({ stage: "promote", reason: "preview is hold" }))
+    expect(got?.stage).toBe("promote")
+    expect(got?.environment).toBe("preview")
+    expect(got?.label).toBe("Approve promote to preview")
+  })
+
+  it("is absent for every other hold, a finished run and a missing cursor", () => {
+    expect(approvalOf(cursor({ stage: "merge", reason: "merge outcome unknown: network" }))).toBeNull()
+    expect(approvalOf(cursor({ stage: "prove", reason: "prove is hold" }))).toBeNull()
+    expect(approvalOf(cursor({ stage: "merge", reason: "merge is hold", hold: false }))).toBeNull()
+    expect(approvalOf(cursor({ stage: "merge", reason: "merge is hold", done: true }))).toBeNull()
+    expect(approvalOf(null)).toBeNull()
   })
 })

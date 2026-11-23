@@ -288,3 +288,43 @@ func TestRelaunchRefusesALiveStoppedOrWaitingRun(t *testing.T) {
 		t.Fatalf("body %s", rec.Body.String())
 	}
 }
+
+func TestApproveReleasesAHeldStageAndResumesTheRun(t *testing.T) {
+	root := t.TempDir()
+	writeCursor(t, root, engine.Cursor{ID: "span-1", Stage: "merge", Hold: true, GitSHA: "abc123", Reason: "merge is hold"})
+	var woke []Signal
+	handler := New(root, "", nil, func(_ context.Context, _ string, signal Signal) error {
+		woke = append(woke, signal)
+		return nil
+	}, nil, nil)
+	post := func(id, form string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/spans/"+id+"/approve", strings.NewReader(form))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := post("span-1", "stage=merge")
+	if rec.Code != http.StatusAccepted || len(woke) != 1 || !woke[0].Resume {
+		t.Fatalf("status %d woke %+v body %s", rec.Code, woke, rec.Body.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "span-1", "approve-merge"))
+	if err != nil || strings.TrimSpace(string(raw)) != "abc123" {
+		t.Fatalf("approval %q %v", raw, err)
+	}
+	for name, form := range map[string]string{
+		"a stage with no approval": "stage=build",
+		"no stage":                 "",
+		"promote without an env":   "stage=promote",
+	} {
+		if rec := post("span-1", form); rec.Code == http.StatusAccepted {
+			t.Fatalf("%s was accepted: %s", name, rec.Body.String())
+		}
+	}
+	if rec := post("missing", "stage=merge"); rec.Code != http.StatusNotFound {
+		t.Fatalf("a run that does not exist: %d", rec.Code)
+	}
+	if len(woke) != 1 {
+		t.Fatalf("a rejected approval woke the run: %d wakes", len(woke))
+	}
+}

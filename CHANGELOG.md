@@ -6,6 +6,10 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: a stage held by its mode (`merge: hold`, `open: hold`, a promote environment in `hold`) could never be released: the page offered "Fix and retry", which reached the same hold again. The page now offers an approval (`POST /spans/{id}/approve`), bound to the commit it showed and spent when the stage advances.
+- **Fixed**: `span.yaml` was staged into the story's branch by the commit, so a checkout of another branch lost it and a run recorded without a project could not be resumed (`open .../span.yaml: no such file`).
+
+
 ### Repairs prove only what the change can affect
 
 - **A focused band from the diff.** When neither the criteria nor `prove.focused` name one
