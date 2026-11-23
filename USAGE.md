@@ -270,6 +270,14 @@ The desk fills the field's suggestions from `GET /branches?path=<folder>`: the l
 an empty field means (`base:` in `span.yaml`, else `dev`). The placeholder shows `master`
 when the kind is `hotfix`.
 
+The merge stage checks it too. If the change targets another branch (for example `main`
+when the run's base is `dev`), the run holds instead of merging: retarget the change
+(`gh pr edit <n> --base <base>`) or approve the merge stage to merge it where it is. If the
+change was already merged into another branch, the run holds with that branch named, so a
+merge into the wrong place is not closed as if it were right; check that branch, then
+approve the stage to close the run. A host that cannot report the target, such as the local
+review used without `gh`, is not checked.
+
 ## House style
 
 `harness/skills` is the writing standard, copied from the skill set so two people produce one author's code. The build prompt lists each skill name, its trigger, and the path of `SKILL.md`. The agent reads that file only when the trigger matches the change. Reference files stay unloaded until the skill itself names one. Bodies are not pasted into the prompt.
