@@ -65,3 +65,22 @@ func TestBuildDoesNotInlineASkillBody(t *testing.T) {
 		t.Fatal("skill body leaked into the prompt")
 	}
 }
+
+func TestAWorktreePromptForbidsSwitchingBranches(t *testing.T) {
+	text := Build(Input{Stage: "build", FeaturePath: "odd/tasks/x.md", Worktree: true})
+	for _, want := range []string{"git worktree on its own branch", "git checkout", "git worktree add", "Span commits"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the worktree rules are missing %q", want)
+		}
+	}
+	if bare := Build(Input{Stage: "build", FeaturePath: "odd/tasks/x.md"}); strings.Contains(bare, "git worktree on its own branch") {
+		t.Fatal("a shared checkout was told it is a worktree")
+	}
+}
+
+func TestFrameForbidsEditingFiles(t *testing.T) {
+	// The baseline is recorded after frame, on the tree frame left; frame must not change it.
+	if got := Frame(Input{Stage: "frame", Brief: "Charge the card."}); !strings.Contains(got, "Do not edit files.") {
+		t.Fatalf("frame prompt:\n%s", got)
+	}
+}
