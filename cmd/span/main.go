@@ -745,6 +745,8 @@ func options(workspace, spans, policyPath, project string, explicit bool) (engin
 		Release:   adapt.CommandRelease{},
 		Worktree:  adapt.IsWorktree(workspace),
 		Project:   project,
+		// A host calls a branch conflicting for a few seconds after the resolution is pushed.
+		HostSettle: engine.DefaultHostSettle,
 	}
 	if project == "" {
 		project = workspace

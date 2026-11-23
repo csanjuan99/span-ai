@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: the conflict phase could not fetch the base from a private origin on macOS, because it switched off the system git config that holds the keychain credential helper. Only the fetch keeps it now.
+- **Fixed**: right after a resolved merge commit was pushed, GitHub still called the change conflicting, so the run held with "merge conflict reported by the host, but origin/dev merges cleanly here". The merge is now retried for about half a minute in that case.
 - **Fixed**: a run whose process was killed looked alive forever and `resume` refused it ("this run is not paused"). It is now shown as interrupted, with a reason, and can be resumed.
 - **Fixed**: an agent left running by a killed Span kept editing the tree. The next run of that tree ends it first, after checking the pid still names the agent.
 - **Fixed**: the `agent:` line of `span.yaml` was validated and shown but never used, so `agent: claude` still ran on the first ready CLI. A per-stage choice still wins; the policy is now the fallback.

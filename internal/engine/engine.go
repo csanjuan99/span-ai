@@ -164,6 +164,10 @@ type Options struct {
 	// Worktree is true when the workspace is a linked git worktree, so parallel runs do
 	// not share a tree. The prompt says so and the agent may not switch branches.
 	Worktree bool
+	// HostSettle is how long to wait, between retries, for the host to recompute whether a
+	// change merges after a resolved merge commit was pushed to it. Empty means no retry.
+	// The host answers "conflict" from its old view for a few seconds after a push.
+	HostSettle []time.Duration
 	// Project is the checkout the run belongs to. The policy and the Jira account live
 	// there, while the code lives in the worktree.
 	Project string
@@ -1258,6 +1262,7 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 			return verdict, reason, err
 		}
 		note = why
+		pushed := false
 		if r.cur.Unpushed {
 			// A resolved merge commit is published only now, once it passed prove, QA and
 			// inspect, so a failing check never reaches the change.
@@ -1265,11 +1270,12 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 				return r.record(merge, statement.Hold, "the merge commit was not pushed: "+err.Error()+". Resume to push it again.", nil)
 			}
 			r.cur.Unpushed = false
+			pushed = true
 			if err := r.save(); err != nil {
 				return "", "", err
 			}
 		}
-		if err := r.opt.Review.Merge(ctx, r.cur.ChangeURL); err != nil {
+		if err := r.mergeSettling(ctx, pushed); err != nil {
 			if errors.Is(err, ErrConflict) {
 				// The base moved after the check above. Nothing was merged, so this is known.
 				return r.refused(ctx, err)
@@ -1291,6 +1297,34 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	return r.record(merge, statement.Advance, reason, func(s *statement.Statement) {
 		s.ChangeURL = r.cur.ChangeURL
 	})
+}
+
+// DefaultHostSettle is how the launcher waits for a host to catch up with a push: about
+// half a minute in four steps, which is longer than GitHub took in practice.
+var DefaultHostSettle = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 12 * time.Second}
+
+// mergeSettling asks the host to merge. Right after a resolved merge commit was pushed, the
+// host may still answer from the branch as it was and call the change conflicting. Only then
+// is that answer retried, a few times, so a refusal that is really stale does not become a
+// hold that says the base merges cleanly. A conflict that does not clear is returned as it
+// is; so is any other refusal, and a stop ends the wait.
+func (r *runner) mergeSettling(ctx context.Context, pushed bool) error {
+	err := r.opt.Review.Merge(ctx, r.cur.ChangeURL)
+	if !pushed || !errors.Is(err, ErrConflict) {
+		return err
+	}
+	for _, wait := range r.opt.HostSettle {
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(wait):
+		}
+		err = r.opt.Review.Merge(ctx, r.cur.ChangeURL)
+		if !errors.Is(err, ErrConflict) {
+			return err
+		}
+	}
+	return err
 }
 
 // otherBase is the hold reason when the change targets a branch other than this run's base,

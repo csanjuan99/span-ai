@@ -1259,6 +1259,13 @@ commit:
 
 These checks are heuristics, not a secret scanner: a secret that matches none of the shapes is committed. Run a scanner such as gitleaks in your own pipeline for coverage.
 
+### Private origins and a host that lags
+
+Two details of resolving a conflict that only show against a real host:
+
+- The base is fetched with your system git config, which is where macOS keeps the keychain credential helper. The rest of the conflict phase still runs with the system config off. Before this, a private origin made the fetch ask for a password git may not prompt for, and the merge held with `the base dev could not be fetched from origin`.
+- After the resolved merge commit is pushed, GitHub can still call the change conflicting for a few seconds. Span retries the merge four times over about half a minute (2, 4, 8 and 12 seconds) before reporting it, and only in that case. A conflict that is still there after that, a base that moved on its own, or any other refusal is reported at once.
+
 ## Limiting how long an agent may run
 
 `limits.stageTimeout` bounds one agent call: frame, build or inspect. It is a Go duration from `1s` to `48h`, for example `45m`. An absent limit is no limit.
