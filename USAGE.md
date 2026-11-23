@@ -215,7 +215,7 @@ The agent is a CLI already on `PATH` with Gentle AI detectable:
 | `claude` | it is on `PATH` | `~/.claude/CLAUDE.md` contains `Organic Driven Development` |
 | `codex` | it is on `PATH` | `~/.codex/AGENTS.md` contains `Organic Driven Development` |
 
-With `agent: any`, the order is cursor, claude, codex. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
+With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
 
 Build requires Organic Driven Development. `odd/tasks/<feature>.md` must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
 
@@ -241,10 +241,16 @@ stages:
   open: auto
   merge: hold
 prove:
+  focused:
+    - go test {files}
   fast:
     - go test ./...
   acceptance:
     - go test ./acceptance
+qa:
+  report: test-results/junit.xml
+repair:
+  maxAttempts: 3
 promote:
   environments:
     - name: preview
@@ -308,8 +314,8 @@ The order is fixed: intake, frame, build, prove, qa, inspect, open, merge, promo
 | intake | Stores the brief and its digest | It does not stop on its own |
 | frame | Reads the story in its own language and carries what it decides into the standard | `hold` on questions or missing acceptance. `stop` on out of scope. `hold` when there are no claims or no agent |
 | build | Runs ODD and commits a dirty tree | `stop` without the feature document. `hold` when the agent or git fails |
-| prove | Runs `fast`, then `acceptance` if fast passed | `hold` when the command is not executable or did not start. A non-zero exit starts another iteration |
-| qa | Checks each acceptance line against a test declaration, then runs one command | `hold` when an id is missing or the command fails. A story with no acceptance lines skips this stage |
+| prove | Runs `fast`, then `acceptance` if fast passed | `hold` when the command is not executable or did not start. A non-zero exit returns to build with its output |
+| qa | Checks each acceptance line against a test declaration and reads a per-test report | `hold` when the command did not start. A failed gate returns to build with its output. A story with no acceptance lines skips this stage |
 | inspect | A separate read of the diff | A blocking finding returns to build. The third block holds |
 | open | Looks up the change, pushes, and opens it | `hold` when the mode is `hold`, the push fails, or the create result is unknown |
 | merge | Merges when it is not already merged | `hold` when the mode is `hold` or the result cannot be confirmed |
@@ -318,9 +324,17 @@ The order is fixed: intake, frame, build, prove, qa, inspect, open, merge, promo
 
 `qa` numbers the lines under `Acceptance criteria:` as `AC-1`, `AC-2`, and so on. The build prompt tells the agent to put each id on a test declaration (`func Test`, `test(`, `it(`, or `def test_`), as `AC-1` or `AC1`. A comment is not enough. The command is `qa.command` when set. Otherwise a repo with `playwright.config.*`, or `qa.browser: true`, runs `npx playwright test`. Otherwise Span uses the first `prove.acceptance` command, then the first `prove.fast` command. The result is `.span/runs/<id>/qa-gate.json` with `pass`, `fail`, or `unverified`. This stage does not comment on Jira.
 
+An acceptance id is only `fail` when a report names the test that ran and failed. `qa.report` points at a JUnit XML or a Vitest/Jest JSON report; with no path set, Span looks in `test-results/junit.xml`, `junit.xml`, `test-results/vitest.json`, `test-results/results.json`, `test-results.json`, and `report.json`. A report older than the command is ignored.
+
+Without a report, a zero exit marks the declared ids `pass` and a non-zero exit marks them `unverified`. The process failing is not evidence that a named criterion failed.
+
+QA does not run the fast command a second time. When prove already ran that exact command on this commit in a clean tree, the gate reads that result and only checks the declarations. A dirty tree or a different commit runs it again.
+
+`./span resume` after `Fix and retry` continues at build, not at the stage that held.
+
 A browser repo also tells the agent to test user-visible behavior with `getByRole` and web-first `expect`, and to record a trace on the first retry. `@playwright/mcp --caps=testing` is named as an authoring aid. The gate is the command, not an MCP session.
 
-Span commits. The agent does not. The message is `feat(<feature>): span <id>`. The author is `Span <span@example.test>`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
+Span commits. The agent does not. The message is `feat(<feature>): span <id>`, which names the session. The author and committer are **whoever that checkout is configured with**: Span sets no identity, adds no co-author trailer, and never overwrites your `user.name` or `user.email`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
 
 ### Statements
 
@@ -374,15 +388,289 @@ Each selected repo receives a copy in `.span/runs/<id>/handoffs/`. The first fra
 
 You can still copy files into `.span/runs/<id>/handoffs/` while the span exists. The stage already running does not read them. They enter the next frame, with their digest.
 
-### Tests and another iteration
+### The weight of a story
+
+Not every story earns the same machinery. Span derives a weight from the story itself and
+each weight pays for a different path:
+
+| Weight | When | Repairs | Whole suite |
+| --- | --- | --- | --- |
+| `light` | up to 4 criteria and no design handoff | 2 | not run |
+| `standard` | 5 to 15 criteria | 3 | once per commit |
+| `deep` | 16 or more criteria, or a design handoff (html, png, pdf, svg, fig) | 6 | once per commit |
+
+The weight is read while the run walks, not frozen at intake: frame can install criteria,
+and a brief that grows into twenty of them earns more checks. A prove pass is never left
+with nothing to run — if a light story has no declaring files to focus on, the whole suite
+decides again.
+
+Override it when the derivation is wrong for a project:
+
+```yaml
+run:
+  weight: standard
+```
+
+`repair.maxAttempts` still wins when it is set: the weight only decides the default.
+
+### The story's own tests
+
+Span runs the tests that belong to the story, not the repository. It already maps every
+acceptance criterion to the file that declares it, for the QA gate; that map is the scope.
+
+**You do not have to configure anything.** With `prove.fast: [npm test]` and a story whose
+criteria are declared in test files, the scoped band is derived from the wide command:
+
+| Wide command | Scoped to the declaring files |
+| --- | --- |
+| `npm test`, `pnpm test`, `yarn test`, `npm run <script>` | `<command> -- <files>` |
+| `npx vitest run`, `vitest`, `npx jest`, `jest` | `<command> <files>` |
+| `pytest`, `python -m pytest`, `npx playwright test` | `<command> <files>` |
+
+When the runner is not in that table (`go test ./...`, `make test`), Span does not invent a
+syntax: the wide band keeps deciding, as before.
+
+Override it when the shape is unusual, or when one band is not enough:
+
+```yaml
+prove:
+  focused:
+    - npm test -- {files}
+  fast:
+    - npm test
+```
+
+The rule is one sentence long: **a focused band blocks, the wide suite reports.** When
+`focused` is configured, a failure in it returns to build like any attributable failure,
+and the wide `fast` list still runs but cannot spend a repair attempt or turn a criterion
+red. Its output is kept, its band is recorded as `wide`, and the reason names it: a
+failure outside this story's files cannot be repaired by this story's agent.
+
+The wide suite runs **once per commit**. Once it passes on a commit, the next attempt on
+that same commit skips it: the bytes did not change, so the answer cannot. A repair that
+commits again gets a fresh wide pass.
+
+Without `focused`, the `fast` band decides, exactly as before.
+
+No declaration means no scope. If the story's criteria are not on test declarations yet,
+there is nothing to focus on and the wide band decides, which is the honest outcome: the
+change has not said what it is supposed to prove.
+
+### Tests and the repair loop
 
 `fast` runs first. If a `fast` command fails, `acceptance` does not start.
 
-A non-zero exit attributed to this change does not discard the span. It returns to frame with the previous prove report and opens the next iteration. ODD receives that report so it can correct specs and tasks.
+A non-zero exit attributed to this change does not discard the span. It returns to build with the failing command, its exit code, the last lines it printed, and the path to the full log. The build prompt carries that packet, so the agent fixes the failure instead of reading the feature again. `prove` and `qa` use the same edge.
 
-The cap is 3 iterations. The third attributable failure holds and keeps the reports. A command that never started does not consume an iteration. It holds, and `./span resume` repeats the band.
+A command that never started does not consume an attempt. It holds, and `./span resume` repeats the band.
+
+Two stops run before the cap:
+
+- The same failure twice. The fingerprint of a failure is the command plus the lines that name what broke. If it comes back unchanged on the next attempt, the build did not fix it, and another run would spend the same money for the same result. The span holds with `no progress`.
+- The same command passing and then failing on one commit. The result is not attributable to the change, so the span holds as `inconclusive` and the criteria stay unverified. `Re-verify` runs it again without touching the code.
+
+`repair.maxAttempts` is how many times a failure may send the span back to build, from 1 to 8, default 3. The next failure after that holds and keeps the reports. A restart from a stage clears the count.
 
 Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build. Two returns can correct the change. The third holds.
+
+### Failures the base commit already had
+
+A red test in an unrelated module is not this story's to fix. Before the first build, Span
+runs the `fast`, `acceptance`, and `qa.command` lines this story would use once on the base
+commit and writes what failed to `.span/runs/<id>/baseline.json`. It is skipped when the
+checkout has uncommitted changes, because those are not the base commit.
+
+After the build, a failing command is excused only when it failed on the base commit too and
+every failure line it prints now was already there, at least as many times. Only colors, a
+parenthesised duration such as `(0.12s)`, and the timing column of a `go test` package line
+are ignored; every other character counts, values inside messages included, so one new
+failing test is a new failure and blocks as before. For `go test`, with or without `-v`,
+every line a failing test printed is compared, tied to its test and package; what a passing
+test logs is ignored. An output cut at the 1 MiB capture limit, on either side, and a
+package that reports `[build failed]` or `[setup failed]`, are never excused.
+
+What is and is not matched: only an identical failure is excused. A failing test that prints
+timings, pointers, temporary directories, random seeds, or map order differs on every run,
+so it is not excused even when the code did not change, and a panic stack never is. That is
+the safe direction: the failure blocks, as it did before the baseline existed.
+
+An excused command is never hidden: it stays on the statement marked `preexisting`, the
+reason says how many were not counted, and it does not spend a repair or reach the build
+prompt. In QA, an excused exit is judged as exit 0: without a per-test report the criteria
+pass on it, and with one each criterion still decides.
+
+The cost is one extra run of those commands per run. Turn it off with:
+
+```yaml
+prove:
+  baseline: false
+```
+
+### Choosing the agent
+
+Span drives four CLIs. All four run headless and write: nobody is present to approve
+a prompt, so the flags are fixed per CLI.
+
+| Agent | `agent:` | Binary | Called as | Ready when |
+| --- | --- | --- | --- | --- |
+| Cursor | `cursor` | `cursor-agent` | `-p --trust --force` | `~/.cursor/rules/gentle-ai.mdc` exists |
+| Claude | `claude` | `claude` | `-p --dangerously-skip-permissions` | `~/.claude/CLAUDE.md` says Organic Driven Development |
+| Codex | `codex` | `codex` | `exec --sandbox workspace-write --approve-for-me` | `~/.codex/AGENTS.md` says Organic Driven Development |
+| Pi | `pi` | `pi` | `--print --approve` | `~/.pi/agent/npm/node_modules/gentle-pi` is installed |
+
+`agent: any` or `auto` picks the first ready CLI in that order, and uses a second ready
+one for inspect, so the review is not the same model that wrote the change. The binary
+name is accepted too, so an older `agent: cursor-agent` keeps working.
+
+Choose it on the page: the desk has an **Agent** picker under the folder. It lists all
+four with the reason each one cannot run, and saving rewrites the one `agent:` line in
+`span.yaml` without touching a comment. The picker needs the file to exist; a folder
+without one is told to run `./span quickstart` once.
+
+`GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
+`agent` writes the choice.
+
+### Choosing the agent per stage, and pausing for it
+
+The project picks a default agent. One run can override it per stage without touching
+`span.yaml`: on a started span, the ledger tab has **Agent for a stage of this run** with
+frame, build, and inspect. The choice lives in `.span/runs/<id>/agents.json` and applies
+the next time that stage starts.
+
+Resolution order for a stage: the run's choice, then `agent:` from the policy, then the
+first ready CLI. An empty choice, or `Policy default`, clears the exception. Inspect keeps
+using a different CLI from build when nothing was chosen, so the review is not the model
+that wrote the change.
+
+Only frame, build, and inspect call a model. prove, qa, open, merge, and promote run
+commands, so they cannot carry a choice and a request for them is refused.
+
+**Pause after this stage** asks the run to hold at the next stage boundary. The stage that
+is already running finishes; the run then holds with `paused before <stage>` and the
+request is consumed. Resume continues from that stage, so the order is: pause, pick the
+agent, resume.
+
+The pause does not kill a stage that is mid-write, because that would leave a half written
+statement. When you need the running stage to stop now, the run tolerates a killed
+process on resume, but Span does not offer a button for it.
+
+The page and the runner are different processes, and `cursor.json` belongs to the runner:
+a cursor written by the page is erased by the runner's next save. That is why both
+requests are files beside the cursor, the same way instructions and answers already work.
+
+`POST /spans/{id}/agent` with `stage` and `agent`, and `POST /spans/{id}/pause`, back the
+two controls. The snapshot the page reads carries `stageAgents`.
+
+### When an agent runs out of quota or credentials
+
+A stage that calls an agent can fail for a reason the project cannot fix. Span reads the
+CLI's own output and names it, so the reason says what to do instead of repeating
+`exit status 1`.
+
+Two kinds, because the answer differs:
+
+| Kind | What the CLI printed | What to do |
+| --- | --- | --- |
+| `quota` | a usage or rate limit, a spent credit balance | resume after the limit resets, or point `agent:` at another CLI |
+| `credentials` | no API key, an invalid key, a login that expired | log in to that CLI, then resume |
+
+The match is a curated list of phrases, not a status code, and it runs on text the CLI
+already produced: no model, no extra process, no network. A build failure that happens
+to print `429` stays an ordinary failure.
+
+The run holds, it does not stop. `cursor.json` keeps the block, and the page shows
+which CLI needs attention:
+
+```json
+"agentBlock": { "kind": "quota", "agent": "claude", "detail": "Claude AI usage limit reached.", "time": "..." }
+```
+
+The block clears when a later stage advances.
+
+### Parallel runs get their own worktree
+
+Two stories in one repository must not share a working tree. A run that walks a branch is
+checked out in its own **git worktree**, so the checkout you are using is never switched and
+two runs never see each other's files.
+
+```bash
+./span run --workspace /path/to/repo --brief notes.md --branch feat/sal-3 --worktree
+./span quickstart --workspace /path/to/repo --issue SAL-3   # isolates when it derives a branch
+```
+
+The tree lives at `<repo>/.span/worktrees/<branch>`, with `/` in the branch name turned into
+`-`. The state directory and `span.yaml` stay in the repository you pointed at, so the desk
+keeps one list of runs and the policy is not copied into every tree.
+
+These are the only worktree commands Span runs. Nothing is inferred:
+
+| Command | When |
+| --- | --- |
+| `git worktree add <path> <branch>` | the branch already exists |
+| `git worktree add -b <branch> <path> <base>` | the branch is new, from `dev` |
+| `git worktree list --porcelain` | deciding whether this branch already has a tree |
+| `git worktree remove --force <path>` | dropping an isolated tree; the branch survives |
+| `git worktree prune` | forgetting trees whose directory is gone |
+
+A run in a worktree tells the agent so, in the prompt, with the rules spelled out: the branch
+is already checked out; do not run `git checkout`, `git switch`, `git worktree add`, or
+`git stash`; read `git worktree list` if you need to see the other trees; Span commits.
+
+**What the lock protects.** A run holds the tree it edits, not the repository. From the page,
+the first story in a free checkout edits it in place and holds it. A second story launched
+while that checkout is held is not queued: it gets its own worktree and starts at once, and
+nothing is written into the busy checkout (no `span.yaml`, no brief). Stories in separate
+worktrees never wait for each other; only two runs that share one tree are serialized. A busy
+checkout that was never configured, or a launch with no story, still refuses, because there
+is nothing safe to isolate with. So does launching a story whose branch already belongs to
+another run or exists in git: two runs on one branch would fight over its checkout. Resuming,
+answering, or reloading an isolated run always lands on its own worktree and reads the policy
+from the project.
+
+**Dependencies in a fresh worktree.** A new worktree has the code but not `node_modules`.
+Set a command in `span.yaml` and Span runs it once in the run's own worktree, before the
+baseline and the first build; it never runs in your own checkout:
+
+```yaml
+prove:
+  prepare:
+    - pnpm install --frozen-lockfile
+```
+
+If `prepare` fails, or the tree has a `package.json` and no `node_modules` and no `prepare`,
+no baseline is recorded and the transcript says why. Recording one there would mark the
+environment as broken on the base commit and then excuse the same failures after the build.
+
+### Restarting from a stage
+
+When what the branch produced is not what the handoff asked for, a run can start again at
+any stage that does work (everything except intake). The ledger tab has **Restart from a
+stage**: pick the stage, write the instruction that stage must read, and confirm.
+
+What a restart does, and why:
+
+- `cursor.stage` moves to that stage and `iteration` goes up by one, so the attempt so far
+  stays on disk under its own iteration instead of being overwritten.
+- the repair ledger, `wideSHA`, the agent block, and any open questions are cleared: a
+  person starting over deliberately is not the automatic loop the cap exists to stop, so
+  the restarted streak gets its own budget.
+- the note is written to `.span/runs/<id>/instructions/<stage>.md`, which is the file that
+  stage reads when it starts. It is the same channel as **Leave a note for a stage**.
+
+A restart refuses to start while a stage is running: stop it first, or the two writers
+would race. `POST /spans/{id}/rewind` with `stage` and an optional `note` backs the control.
+
+### Stopping what is running
+
+**Stop now** cancels the stage in flight. The engine kills the command or the agent, the
+loop fails, and the run comes back **held** with `the run stopped: …` — never idle, so the
+page always has something to offer. The working tree may be left mid-edit, which is why the
+next resume runs that stage again from its start.
+
+`Stop now` and **Pause after this stage** are different on purpose: pause waits for a clean
+stage boundary and loses nothing; stop is immediate and assumes the stage will be repeated.
+`POST /spans/{id}/stop` backs the control and answers `nothing is running this span` when
+there is no flight.
 
 ### Resume
 
