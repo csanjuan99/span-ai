@@ -104,6 +104,7 @@ func RunWriter(ctx context.Context, name, workspace, prompt string, sink io.Writ
 	}
 	stop := observe(ctx, name, pid)
 	defer stop()
+	defer proc.Track(pid)()
 	if err := cmd.Wait(); err != nil {
 		// A cancelled run is not a blocked one: the output of a killed CLI can mention
 		// quota or login by accident, and Classify must not turn a Stop into a hold.

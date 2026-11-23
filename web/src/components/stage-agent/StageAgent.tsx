@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { setStageAgent } from "@/lib/api"
 import { agentStages, agentForStage, defaultAgentStage, usesAgent } from "@/lib/stage-agents"
@@ -31,13 +31,15 @@ export function StageAgent({
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
+  // The stage the run stopped at is the one a person came here to change. When the run moves
+  // on, the form follows it; that is adjusted while rendering, not in an effect.
+  const [seen, setSeen] = useState(current)
+  if (seen !== current) {
     const next = defaultAgentStage(current)
+    setSeen(current)
     setStage(next)
     setAgent(agentForStage(next, choices))
-    // The stage the run stopped at is the one a person came here to change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current])
+  }
 
   function pickStage(value: string) {
     setStage(value)

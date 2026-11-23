@@ -43,3 +43,16 @@ func terminate(pid int) error {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	return nil
 }
+
+// kill ends the group led by pid at once.
+func kill(pid int) { _ = syscall.Kill(-pid, syscall.SIGKILL) }
+
+// Alive reports whether pid is a process. A permission error still counts: it exists,
+// it is just not ours.
+func Alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}

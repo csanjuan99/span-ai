@@ -164,7 +164,6 @@ export function Desk() {
       void readSession(workspace)
     }, 250)
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace])
 
   async function findRepos() {

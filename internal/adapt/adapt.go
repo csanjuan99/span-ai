@@ -37,7 +37,7 @@ func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) 
 	kept := &tailBuffer{max: OutputCap}
 	cmd.Stdout = kept
 	cmd.Stderr = kept
-	err := cmd.Run()
+	err := proc.Run(cmd)
 	out := prove.Output{Text: kept.String(), Truncated: kept.Truncated()}
 	if err == nil {
 		return out, nil
@@ -360,7 +360,7 @@ func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
 	cmd.Env = append(os.Environ(), "SPAN_SHA="+sha)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := proc.Run(cmd); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

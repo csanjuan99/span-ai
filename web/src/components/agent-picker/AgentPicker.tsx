@@ -13,22 +13,29 @@ const empty: AgentChoice = { agents: [], selected: "any", chosen: "", exists: fa
  * so a row that cannot run says why instead of failing on the next stage.
  */
 export function AgentPicker({ project }: { project: string }) {
-  const [choice, setChoice] = useState<AgentChoice>(empty)
+  const [loaded, setLoaded] = useState<AgentChoice>(empty)
   const [picked, setPicked] = useState("")
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
+  // A different project is a different registry, so a pick made for the old one is dropped
+  // while rendering, not in an effect that would render twice.
+  const [seen, setSeen] = useState(project)
+  if (seen !== project) {
+    setSeen(project)
     setPicked("")
-    if (project.trim() === "") {
-      setChoice(empty)
+  }
+  const blank = project.trim() === ""
+
+  useEffect(() => {
+    if (blank) {
       return
     }
     let live = true
     void getJSON(`/agent?path=${encodeURIComponent(project)}`)
       .then((body) => {
         if (live) {
-          setChoice(agentChoice(body))
+          setLoaded(agentChoice(body))
         }
       })
       .catch((err: unknown) => {
@@ -39,8 +46,10 @@ export function AgentPicker({ project }: { project: string }) {
     return () => {
       live = false
     }
-  }, [project])
+  }, [project, blank])
 
+  // Nothing is shown for a blank project, even if an earlier one was loaded.
+  const choice = blank ? empty : loaded
   const value = picked === "" ? choice.selected : picked
   const current = choice.agents.find((row) => row.id === value)
   const chosen = choice.agents.find((row) => row.id === choice.chosen)
@@ -50,7 +59,7 @@ export function AgentPicker({ project }: { project: string }) {
     setNote("")
     try {
       const body = await saveAgent(project, value)
-      setChoice(agentChoice(body))
+      setLoaded(agentChoice(body))
       setPicked("")
       setNote("Saved. The next run uses this CLI.")
     } catch (err: unknown) {
