@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/base64"
 	"io/fs"
 	"net/http"
@@ -41,7 +42,7 @@ func offeredProtocols(r *http.Request) []string {
 func subprotocol(r *http.Request, token string) bool {
 	want := bearerProtocol(token)
 	for _, part := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-		if strings.TrimSpace(part) == want {
+		if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(part)), []byte(want)) == 1 {
 			return true
 		}
 	}
