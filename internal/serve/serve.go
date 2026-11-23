@@ -339,23 +339,35 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, agentView(r.URL.Query().Get("path")))
 	})
 	mux.HandleFunc("POST /agent", func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			writeErr(w, err)
-			return
-		}
-		project := r.PostForm.Get("project")
-		// span.yaml is optional, so choosing an agent may create it, but only inside a
-		// project folder that exists: an empty path would write next to the server.
-		if info, err := os.Stat(project); project == "" || err != nil || !info.IsDir() {
-			writeErr(w, fmt.Errorf("project %q is not a folder", project))
-			return
-		}
-		path := filepath.Join(project, policy.Name)
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !spanProject(project) {
-			writeErr(w, fmt.Errorf("%s is not a git repository or a Span project, so span.yaml is not created there", project))
+		project, path, ok := agentPolicyPath(w, r)
+		if !ok {
 			return
 		}
 		if err := policy.SetAgent(path, r.PostForm.Get("agent")); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, agentView(project))
+	})
+	mux.HandleFunc("GET /agent/models", func(w http.ResponseWriter, r *http.Request) {
+		view, err := modelsOf(r.Context(), r.URL.Query().Get("cli"))
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
+	})
+	mux.HandleFunc("POST /agent/model", func(w http.ResponseWriter, r *http.Request) {
+		project, path, ok := agentPolicyPath(w, r)
+		if !ok {
+			return
+		}
+		cli, model := r.PostForm.Get("cli"), strings.TrimSpace(r.PostForm.Get("model"))
+		if err := canChooseModel(cli); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if err := policy.SetModel(path, cli, model); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -759,6 +771,27 @@ func configureOnly(ctx context.Context, req setup.Request) (string, error) {
 		fmt.Fprintf(&b, "repo %s\npolicy %s\nbranch %s\nbase %s\n", target.Name, res.PolicyPath, res.Branch, res.Base)
 	}
 	return b.String(), nil
+}
+
+// agentPolicyPath reads the form of a request that writes span.yaml and returns the project
+// and the policy path. span.yaml is optional, so a write may create it, but only inside a
+// project folder that exists: an empty path would write next to the server.
+func agentPolicyPath(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	if err := r.ParseForm(); err != nil {
+		writeErr(w, err)
+		return "", "", false
+	}
+	project := r.PostForm.Get("project")
+	if info, err := os.Stat(project); project == "" || err != nil || !info.IsDir() {
+		writeErr(w, fmt.Errorf("project %q is not a folder", project))
+		return "", "", false
+	}
+	path := filepath.Join(project, policy.Name)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !spanProject(project) {
+		writeErr(w, fmt.Errorf("%s is not a git repository or a Span project, so span.yaml is not created there", project))
+		return "", "", false
+	}
+	return project, path, true
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
