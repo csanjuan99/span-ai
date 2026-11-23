@@ -1,7 +1,11 @@
 # Hand-written policy. ./span quickstart writes span.yaml only when that file is missing.
 # The Jira token is not in this file. Each folder keeps its own .span/jira.json.
 feature: payments
+# light, standard, or deep. Empty derives it from the story.
+run:
+  weight: ""
 rules: rules.md
+# cursor, claude, codex, pi, or any.
 agent: any
 stages:
   open: auto
@@ -9,12 +13,26 @@ stages:
 jira:
   blockStatus: Block
 prove:
+  # Scoped to the files that declare this story's criteria. {files} is replaced.
+  focused:
+    - go test {files}
   fast:
     - go test ./...
   acceptance: []
+  # Runs once in a run's own git worktree, before its baseline and build, to install what a
+  # fresh tree lacks. Never runs in your own checkout.
+  prepare: []
+  # Run the wide commands once on the base commit before the first build. A failure that
+  # was already there is shown as preexisting and does not spend a repair. Default true.
+  baseline: true
 qa:
   command: go test ./...
   browser: false
+  # JUnit XML or Vitest/Jest JSON. Empty looks in test-results/junit.xml and friends.
+  report: ""
+# How many times a failing check sends the span back to build. 1 to 8.
+repair:
+  maxAttempts: 3
 promote:
   environments:
     - name: preview
