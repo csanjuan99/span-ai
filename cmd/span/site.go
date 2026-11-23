@@ -53,6 +53,30 @@ func claimSite(req setup.Request, spans, label string) (site, error) {
 	return isolatedSite(req, spans, err)
 }
 
+// isolateWhenBusy keeps span run from queueing behind another run of the same checkout. A
+// busy checkout is never switched from under its run, so a run with a branch gets that
+// branch's own worktree, as a second launch from the page does, and the note says where.
+// Without a branch there is no name for a tree, so it refuses and says how to go on. A free
+// checkout, or an explicit --worktree, is left exactly as asked.
+func isolateWhenBusy(f runFlags) (runFlags, string, error) {
+	if f.isolate {
+		return f, "", nil
+	}
+	project, err := filepath.Abs(f.workspace)
+	if err != nil {
+		return f, "", err
+	}
+	holder, busy := engine.WorkspaceBusy(project)
+	if !busy {
+		return f, "", nil
+	}
+	if strings.TrimSpace(f.branch) == "" {
+		return f, "", fmt.Errorf("this checkout is busy (%s); pass --branch <name> to run in its own worktree", holder)
+	}
+	f.isolate = true
+	return f, fmt.Sprintf("this checkout is busy (%s): running %s in its own worktree at %s", holder, f.branch, worktree.Path(project, f.branch)), nil
+}
+
 // isolatedSite gives a run its own worktree because the checkout is busy. Nothing is
 // written into the busy checkout: no policy, no brief. It needs a story to derive a branch
 // from; without one it returns the busy error it was given. A missing span.yaml is fine.

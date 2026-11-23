@@ -72,6 +72,14 @@ func run(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	f, note, err := isolateWhenBusy(f)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if note != "" {
+		fmt.Fprintln(os.Stderr, note)
+	}
 	opt, err := runOptions(f)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
