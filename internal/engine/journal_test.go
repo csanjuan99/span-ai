@@ -23,6 +23,14 @@ func TestEveryStatementLeavesAStageEventInAnIntactJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Other lines, such as the agent a stage ran with, sit between the stage events.
+	var stages []journal.Event
+	for _, event := range events {
+		if event.Type == "stage" {
+			stages = append(stages, event)
+		}
+	}
+	events = stages
 	if len(events) == 0 || len(events) != len(snap.Statements) {
 		t.Fatalf("%d events for %d statements", len(events), len(snap.Statements))
 	}

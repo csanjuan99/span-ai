@@ -6,6 +6,10 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: an agent or model picked on the desk while a run was going was ignored, because `span.yaml` was read once when the run's process started and the run kept the default. Each stage now reads it again, and keeps the policy it started with when the file cannot be read at that moment.
+
+- **Added**: every agent stage records the CLI and model it ran with (`agent.run` in the journal), and the run page shows them under **ran with**. A stage with no chosen model says so.
+
 - **Added**: the desk opens with a **setup** band that shows what a first run still needs (folder, agent and model, Jira, first story), read from the real state rather than ticked by hand. The Jira form moved from the bottom of the page into its step, with labelled fields and a link to create the API token. The band can be hidden and shown again.
 
 - **Changed**: the access token for a remote server moved from the top of the desk to **Settings**, with an explanation of when it is needed. A server that answers 401 now opens Settings and says so, instead of failing with "the response was not JSON". Closing the Jira session is in Settings too.

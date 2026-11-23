@@ -738,11 +738,26 @@ func options(workspace, spans, policyPath, project, folder string, explicit bool
 		return engine.Options{}, err
 	}
 	file = inheritFolder(file, folder)
+	// The desk rewrites span.yaml while a run is going. Each stage asks for the file as it is
+	// then, so a model or agent picked after launch is the one the next stage uses. A file
+	// that cannot be read at that moment leaves the policy the run started with.
+	fresh := func() policy.File {
+		now, err := load(policyPath, workspace)
+		if err != nil {
+			return file
+		}
+		merged, err := inheritFolderChecked(now, folder)
+		if err != nil {
+			return file
+		}
+		return merged
+	}
 	opt := engine.Options{
 		Workspace: workspace,
 		Root:      spans,
 		Policy:    file,
-		Agents:    &adapt.CLIAgents{Models: file.Models},
+		Fresh:     fresh,
+		Agents:    &adapt.CLIAgents{Models: file.Models, Fresh: func() map[string]string { return fresh().Models }},
 		Check:     adapt.Exec{},
 		Source:    adapt.Git{Dir: workspace, Allow: file.Commit.Allow},
 		Review:    adapt.Host{Workspace: workspace, State: spans},

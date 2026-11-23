@@ -56,10 +56,10 @@ func TestACLIWithoutAChosenModelKeepsItsOwn(t *testing.T) {
 
 func TestTheModelIsLookedUpByCLIIDEvenWhenTheBinaryNameIsGiven(t *testing.T) {
 	agents := CLIAgents{Models: map[string]string{"cursor": "gpt-5.3-codex"}}
-	if got := agents.model("cursor-agent"); got != "gpt-5.3-codex" {
+	if got := agents.Model("cursor-agent"); got != "gpt-5.3-codex" {
 		t.Fatalf("model %q", got)
 	}
-	if got := agents.model("unknown"); got != "" {
+	if got := agents.Model("unknown"); got != "" {
 		t.Fatalf("model %q", got)
 	}
 }

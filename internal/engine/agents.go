@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"span/internal/agent"
+	"span/internal/policy"
 )
 
 // The page is a different process from the runner, and the cursor belongs to the
@@ -128,7 +129,29 @@ func (r *runner) agentWanted(stageChoice string) string {
 	if stageChoice != "" {
 		return stageChoice
 	}
-	return r.opt.Policy.Agent
+	return r.policy().Agent
+}
+
+// policy is span.yaml as it reads now when the run can reread it, else as it was at launch.
+func (r *runner) policy() policy.File {
+	if r.opt.Fresh != nil {
+		return r.opt.Fresh()
+	}
+	return r.opt.Policy
+}
+
+// modeled is an Agents that can say which model a CLI would run.
+type modeled interface{ Model(binary string) string }
+
+// noteAgent records the CLI and model a stage is about to run. The page shows this, not
+// the configuration, so a default nobody chose cannot pass unnoticed. A CLI that does not
+// say its model leaves the field empty.
+func (r *runner) noteAgent(stage, binary string) {
+	detail := map[string]string{"stage": stage, "agent": binary, "model": ""}
+	if m, ok := r.opt.Agents.(modeled); ok {
+		detail["model"] = m.Model(binary)
+	}
+	r.journal("agent.run", detail)
 }
 
 // pick decides which binary runs a stage. The run's choice for that stage wins, then
@@ -143,8 +166,10 @@ func (r *runner) pick(stage string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	binary := sel.Build
 	if stage == inspect && want == "" {
-		return sel.Inspect, nil
+		binary = sel.Inspect
 	}
-	return sel.Build, nil
+	r.noteAgent(stage, binary)
+	return binary, nil
 }
