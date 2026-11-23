@@ -55,13 +55,14 @@ func TestCommitLeavesBuildOutputAndCachesUncommitted(t *testing.T) {
 		"tests/__pycache__/t.pyc":  "x",
 		"web/node_modules/a/i.js":  "x",
 		".DS_Store":                "x",
+		".atl/skill-registry.md":   "x",
 		"tests/test_greet.cpython": "x",
 	})
 	if _, err := (Git{Dir: dir}).Commit(context.Background(), "feat: x"); err != nil {
 		t.Fatal(err)
 	}
 	got := tracked(t, dir)
-	for _, junk := range []string{"__pycache__", "node_modules", ".DS_Store"} {
+	for _, junk := range []string{"__pycache__", "node_modules", ".DS_Store", ".atl"} {
 		if strings.Contains(got, junk) {
 			t.Fatalf("%s was committed:\n%s", junk, got)
 		}

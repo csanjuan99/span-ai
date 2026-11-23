@@ -14,7 +14,7 @@ const scanLimit = 8 << 20
 var (
 	// junkPath is build output and caches. They never belong in history, so the commit
 	// leaves them in the working tree without staging them and does not stop.
-	junkPath = regexp.MustCompile(`(^|/)(__pycache__|node_modules)/|\.(pyc|pyo)$|(^|/)\.DS_Store$`)
+	junkPath = regexp.MustCompile(`(^|/)(__pycache__|node_modules|\.atl)/|\.(pyc|pyo)$|(^|/)\.DS_Store$`)
 	// secretPath is a file that usually holds a secret. It stops the commit.
 	secretPath = regexp.MustCompile(`(^|/)\.env(\.[^/]+)?$|\.(pem|key|p12|pfx)$|(^|/)id_(rsa|dsa|ecdsa|ed25519)$`)
 	// templatePath is a secret-looking file that is a shareable template.

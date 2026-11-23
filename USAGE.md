@@ -1246,7 +1246,7 @@ Sources for the shape: Architecture Decision Records (Nygard) and MADR for decis
 
 After a stage that edits files, Span stages everything the agent left (except `.span` and `span.yaml`) and then checks it before committing:
 
-- Build output and caches are left in the working tree and not committed, without stopping the run: `__pycache__/`, `*.pyc`, `*.pyo`, `node_modules/` and `.DS_Store`.
+- Build output and caches are left in the working tree and not committed, without stopping the run: `__pycache__/`, `*.pyc`, `*.pyo`, `node_modules/`, `.DS_Store` and `.atl/` (the agent tooling's skill registry, which is not part of any story). To version one of them on purpose, list it under `commit.allow`.
 - A file that looks like a secret stops the commit. Nothing is committed, the index is cleared, and the run holds with the file and the reason. The match is never printed. The checks are the name (`.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa`, `id_ed25519` and the like; `.env.example`, `.sample`, `.template` and `.dist` are allowed) and the added lines (an AWS access key id, a private key block, a GitHub token, or a quoted credential of 20 or more characters).
 - To let a reviewed path through, list it in `span.yaml`, then resume. An entry is an exact path or a folder written with a trailing slash, relative to the repository; a path that leaves the repository is refused when the policy loads. A listed path skips both checks.
 
