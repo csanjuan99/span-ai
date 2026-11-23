@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"span/internal/agent"
 	"span/internal/handoff"
 	"span/internal/policy"
+	"span/internal/prove"
 	"span/internal/statement"
 )
 
@@ -26,9 +28,16 @@ type fakeAgents struct {
 	acceptance []string
 	outOfScope bool
 	frameErr   error
+	buildErr   error
+	wanted     []string
+	selectErr  error
 }
 
-func (f *fakeAgents) Select(string) (agent.Selection, error) {
+func (f *fakeAgents) Select(want string) (agent.Selection, error) {
+	f.wanted = append(f.wanted, want)
+	if f.selectErr != nil {
+		return agent.Selection{}, f.selectErr
+	}
 	return agent.Selection{Build: "cursor-agent", Inspect: "claude"}, nil
 }
 
@@ -51,6 +60,9 @@ func (f *fakeAgents) Frame(_ context.Context, _, _ string, text string) (FrameDo
 func (f *fakeAgents) Build(_ context.Context, _, workspace, text string) error {
 	f.builds++
 	f.prompts = append(f.prompts, text)
+	if f.buildErr != nil {
+		return f.buildErr
+	}
 	if f.skipDoc {
 		return nil
 	}
@@ -71,11 +83,12 @@ func (f *fakeAgents) Inspect(context.Context, string, string, string) (InspectDo
 }
 
 type fakeSource struct {
-	commits int
-	pushes  int
-	dirty   bool
-	branch  string
-	sha     string
+	commits   int
+	pushes    int
+	dirty     bool
+	stayDirty bool
+	branch    string
+	sha       string
 }
 
 func (s *fakeSource) Head(context.Context) (string, error) { return s.sha, nil }
@@ -83,7 +96,7 @@ func (s *fakeSource) Dirty(context.Context) (bool, error)  { return s.dirty, nil
 func (s *fakeSource) Commit(context.Context, string) (string, error) {
 	s.commits++
 	s.sha = "abc123"
-	s.dirty = false
+	s.dirty = s.stayDirty
 	return s.sha, nil
 }
 func (s *fakeSource) Push(context.Context) error { s.pushes++; return nil }
@@ -140,17 +153,39 @@ func (r *fakeRelease) Run(_ context.Context, command, _, _ string) error {
 }
 
 type scriptCheck struct {
-	calls []string
-	fail  int
+	calls     []string
+	fail      int
+	text      string
+	byCommand map[string]int
+	texts     map[string]string
+	failAfter map[string]int
+	cases     int
 }
 
-func (s *scriptCheck) Run(context.Context, string, string) (int, error) {
-	s.calls = append(s.calls, "run")
+func (s *scriptCheck) Run(_ context.Context, command, _ string) (prove.Output, error) {
+	s.calls = append(s.calls, command)
+	if s.failAfter != nil {
+		if left, seen := s.failAfter[command]; seen {
+			if left > 0 {
+				s.failAfter[command] = left - 1
+				return prove.Output{}, nil
+			}
+			s.cases++
+			return prove.Output{ExitCode: 1, Text: s.texts[command] + " " + strconv.Itoa(s.cases)}, nil
+		}
+	}
+	if s.byCommand != nil {
+		if left := s.byCommand[command]; left > 0 {
+			s.byCommand[command] = left - 1
+			return prove.Output{ExitCode: 1, Text: s.texts[command]}, nil
+		}
+		return prove.Output{}, nil
+	}
 	if s.fail > 0 {
 		s.fail--
-		return 1, nil
+		return prove.Output{ExitCode: 1, Text: s.text}, nil
 	}
-	return 0, nil
+	return prove.Output{}, nil
 }
 
 func baseOpt(t *testing.T) (Options, *fakeAgents, *fakeSource, *fakeReview, *fakeRelease, *scriptCheck) {
@@ -161,12 +196,15 @@ func baseOpt(t *testing.T) (Options, *fakeAgents, *fakeSource, *fakeReview, *fak
 	release := &fakeRelease{}
 	check := &scriptCheck{}
 	var tick int64
+	// The baseline run adds calls before the first build; these tests count calls as they
+	// were written, so it is off here and on in the tests that cover it.
+	off := false
 	opt := Options{
 		Workspace: t.TempDir(),
 		Root:      t.TempDir(),
 		Policy: policy.File{
 			Feature: "payments",
-			Prove:   policy.Bands{Fast: []string{"go test ./..."}},
+			Prove:   policy.Bands{Fast: []string{"go test ./..."}, Baseline: &off},
 			Promote: policy.Ladder{Environments: []policy.Environment{{Name: "preview", Command: "echo preview"}}},
 		},
 		Brief:   "Charge the card.",
@@ -280,7 +318,7 @@ func TestAttributableFailureStartsAnotherIteration(t *testing.T) {
 	if review.opens != 1 {
 		t.Fatalf("opens %d", review.opens)
 	}
-	second, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "2"), frame)
+	second, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "2"), build)
 	if err != nil || !ok || len(second.HandoffDigests) != 1 {
 		t.Fatalf("ok=%v err=%v %+v", ok, err, second)
 	}
@@ -393,26 +431,39 @@ type handoffCheck struct {
 	once bool
 }
 
-func (h *handoffCheck) Run(ctx context.Context, command, dir string) (int, error) {
-	code, err := h.scriptCheck.Run(ctx, command, dir)
-	if code != 0 && !h.once {
+func (h *handoffCheck) Run(ctx context.Context, command, dir string) (prove.Output, error) {
+	out, err := h.scriptCheck.Run(ctx, command, dir)
+	if out.ExitCode != 0 && !h.once {
 		h.once = true
 		entries, readErr := os.ReadDir(h.root)
 		if readErr != nil {
-			return code, readErr
+			return out, readErr
 		}
 		if len(entries) == 0 {
-			return code, os.ErrNotExist
+			return out, os.ErrNotExist
 		}
 		path := filepath.Join(h.root, entries[0].Name(), "handoffs")
 		if mkErr := os.MkdirAll(path, 0o755); mkErr != nil {
-			return code, mkErr
+			return out, mkErr
 		}
 		if wErr := os.WriteFile(filepath.Join(path, "ticket.md"), []byte("extra case"), 0o644); wErr != nil {
-			return code, wErr
+			return out, wErr
 		}
 	}
-	return code, err
+	return out, err
+}
+
+func readCursor(t *testing.T, opt Options, id string) Cursor {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(opt.Root, id, "cursor.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cur Cursor
+	if err := json.Unmarshal(raw, &cur); err != nil {
+		t.Fatal(err)
+	}
+	return cur
 }
 
 func writeCursor(t *testing.T, opt Options, cur Cursor) string {
@@ -660,4 +711,200 @@ func contains(items []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func TestTheSameFailureTwiceStopsInsteadOfBurningTheCap(t *testing.T) {
+	opt, _, _, review, _, check := baseOpt(t)
+	check.fail = 5
+	check.text = "FAIL src/cart.test.ts > totals\nexpected 2 to be 3\n"
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	if !strings.Contains(got.Reason, "no progress") {
+		t.Fatalf("reason = %s", got.Reason)
+	}
+	if runs := len(check.calls); runs != 2 {
+		t.Fatalf("the fast command ran %d times, want 2", runs)
+	}
+	if review.opens != 0 {
+		t.Fatalf("opens %d", review.opens)
+	}
+}
+
+func TestNewFailuresKeepGoingUntilTheCap(t *testing.T) {
+	opt, _, _, _, _, check := baseOpt(t)
+	opt.Policy.Repair = policy.Repair{MaxAttempts: 3}
+	check.failAfter = map[string]int{"go test ./...": 0}
+	check.texts = map[string]string{"go test ./...": "FAIL case"}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	if runs := len(check.calls); runs != 4 {
+		t.Fatalf("the fast command ran %d times, want 4: one build plus three repairs", runs)
+	}
+	if !strings.Contains(got.Reason, "iteration cap 3") {
+		t.Fatalf("reason = %s", got.Reason)
+	}
+}
+
+func TestAFailingQAGateReturnsToBuildWithTheOutput(t *testing.T) {
+	opt, _, _, _, _, check := baseOpt(t)
+	opt.Policy.QA = policy.QA{Command: "qa-cmd"}
+	opt.Policy.Repair = policy.Repair{MaxAttempts: 3}
+	opt.Brief = "Charge the card.\n\nAcceptance criteria:\nCharges the card.\n"
+	body := "package pay\n\nfunc TestAC1_Charges(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(opt.Workspace, "pay_test.go"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check.byCommand = map[string]int{"qa-cmd": 1}
+	check.texts = map[string]string{"qa-cmd": "FAIL src/checkout.test.ts > charges\nexpected 200 to be 402\n"}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Advance {
+		t.Fatalf("%+v", got)
+	}
+	first, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "1"), qaSt)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if first.Verdict != statement.Hold {
+		t.Fatalf("a failed gate is recorded as %s", first.Verdict)
+	}
+	if len(first.Commands) == 0 || !strings.Contains(first.Commands[0].Output, "expected 200 to be 402") {
+		t.Fatalf("the gate did not keep the output: %+v", first.Commands)
+	}
+	if len(first.Commands) > 0 && first.Commands[0].LogPath == "" {
+		t.Fatal("the full output was not written to a log file")
+	}
+	second, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "2"), build)
+	if err != nil || !ok {
+		t.Fatalf("a failing gate did not return to build: ok=%v err=%v", ok, err)
+	}
+	if second.Verdict != statement.Advance {
+		t.Fatalf("second build %+v", second)
+	}
+}
+
+func TestQADoesNotRunTheFastCommandAgainOnACleanTree(t *testing.T) {
+	opt, _, source, _, _, check := baseOpt(t)
+	opt.Policy.Run = policy.Run{Weight: policy.Standard}
+	opt.Policy.QA = policy.QA{Command: "go test ./..."}
+	source.stayDirty = false
+	opt.Brief = "Charge the card.\n\nAcceptance criteria:\nCharges the card.\n"
+	body := "package pay\n\nfunc TestAC1_Charges(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(opt.Workspace, "pay_test.go"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Advance {
+		t.Fatalf("%+v", got)
+	}
+	if runs := len(check.calls); runs != 1 {
+		t.Fatalf("the fast command ran %d times, want once", runs)
+	}
+	gate, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "1"), qaSt)
+	if err != nil || !ok {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(gate.Reason, "was not run again") {
+		t.Fatalf("reason = %s", gate.Reason)
+	}
+}
+
+func TestASameCommitFlipIsInconclusiveAndDoesNotFailTheGate(t *testing.T) {
+	opt, _, source, _, _, check := baseOpt(t)
+	opt.Policy.Run = policy.Run{Weight: policy.Standard}
+	opt.Policy.QA = policy.QA{Command: "go test ./..."}
+	opt.Policy.Repair = policy.Repair{MaxAttempts: 3}
+	source.stayDirty = true
+	opt.Brief = "Charge the card.\n\nAcceptance criteria:\nCharges the card.\n"
+	body := "package pay\n\nfunc TestAC1_Charges(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(opt.Workspace, "pay_test.go"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check.failAfter = map[string]int{"go test ./...": 1}
+	check.texts = map[string]string{"go test ./...": "FAIL src/cart.test.ts > totals expected 2 to be 3"}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	if !strings.Contains(got.Reason, "inconclusive") {
+		t.Fatalf("reason = %s", got.Reason)
+	}
+}
+
+func TestAQuotaBlockHoldsWithTheActionAndRecordsTheAgent(t *testing.T) {
+	opt, agents, _, _, _, _ := baseOpt(t)
+	agents.buildErr = &agent.Blocked{
+		Agent: "claude", Kind: agent.Quota, Detail: "Claude AI usage limit reached. Your limit resets at 15:00.",
+	}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	for _, want := range []string{"quota exhausted (claude)", "Resume after the limit resets"} {
+		if !strings.Contains(got.Reason, want) {
+			t.Fatalf("reason %q is missing %q", got.Reason, want)
+		}
+	}
+	cur := readCursor(t, opt, got.ID)
+	if cur.AgentBlock == nil || cur.AgentBlock.Kind != agent.Quota || cur.AgentBlock.Agent != "claude" {
+		t.Fatalf("agentBlock = %+v", cur.AgentBlock)
+	}
+	if !strings.Contains(cur.AgentBlock.Detail, "usage limit") {
+		t.Fatalf("detail = %q", cur.AgentBlock.Detail)
+	}
+}
+
+func TestACredentialBlockSaysToLogIn(t *testing.T) {
+	opt, agents, _, _, _, _ := baseOpt(t)
+	agents.buildErr = &agent.Blocked{
+		Agent: "codex", Kind: agent.Credentials, Detail: "No API key found for openai-codex.",
+	}
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	for _, want := range []string{"credentials missing (codex)", "Log in to that CLI"} {
+		if !strings.Contains(got.Reason, want) {
+			t.Fatalf("reason %q is missing %q", got.Reason, want)
+		}
+	}
+}
+
+func TestAnOrdinaryAgentErrorDoesNotRecordABlock(t *testing.T) {
+	opt, agents, _, _, _, _ := baseOpt(t)
+	agents.buildErr = errors.New("claude: exit status 1: cannot find module ./totals")
+	got, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Hold {
+		t.Fatalf("%+v", got)
+	}
+	if cur := readCursor(t, opt, got.ID); cur.AgentBlock != nil {
+		t.Fatalf("agentBlock = %+v", cur.AgentBlock)
+	}
 }
