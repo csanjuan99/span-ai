@@ -394,6 +394,8 @@ func replaceModel(body, id, model string) (string, error) {
 	case model != "":
 		lines = append(lines[:last+1], append([]string{entry}, lines[last+1:]...)...)
 	}
+	// An entry removed from a block that had only that entry leaves models: with no children
+	// (last is still the header), and an empty header is dropped too.
 	if model == "" && found >= 0 && last == start {
 		lines = append(lines[:start], lines[start+1:]...)
 	}

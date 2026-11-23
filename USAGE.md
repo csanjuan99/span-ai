@@ -756,7 +756,8 @@ and again before the CLI starts, and it is passed as its own argument. A `span.y
 `models:` is written inline (`models: {cursor: x}`) loads, but the page will not rewrite it.
 
 `GET /agent/models?cli=<id>` returns the suggestions (listed CLIs are asked at most once a
-minute; a failure comes back as `error` and the field stays editable), and
+minute, a failure for 30 seconds, and concurrent requests share one process; a failure comes
+back as `error` and the field stays editable), and
 `POST /agent/model` with `project`, `cli` and `model` writes the choice. `GET /agent` also
 returns the chosen `models`. A change reaches the runs that start after it, not one already
 running.

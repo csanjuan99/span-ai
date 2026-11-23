@@ -363,9 +363,13 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			return
 		}
 		cli, model := r.PostForm.Get("cli"), strings.TrimSpace(r.PostForm.Get("model"))
-		if err := canChooseModel(cli); err != nil {
-			writeErr(w, err)
-			return
+		// Clearing a model is always allowed: a CLI that stopped being ready must not keep a
+		// saved model the person can no longer remove.
+		if model != "" {
+			if err := canChooseModel(cli); err != nil {
+				writeErr(w, err)
+				return
+			}
 		}
 		if err := policy.SetModel(path, cli, model); err != nil {
 			writeErr(w, err)

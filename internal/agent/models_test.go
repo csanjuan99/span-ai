@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 const cursorOut = "Available models\n\nauto - Auto (default)\ngpt-5.3-codex-low - Codex 5.3 Low\ngpt-5.3-codex - Codex 5.3\n--evil - Not a model\n$(id) - Nope\ngpt-5.3-codex - Duplicate\n"
@@ -69,5 +71,53 @@ func TestTheListIsAskedOnceAMinute(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("the CLI was asked %d times", calls)
+	}
+}
+
+func TestAFailedListIsRememberedSoABrokenCLIIsNotSpawnedOnEveryRequest(t *testing.T) {
+	orig := runList
+	t.Cleanup(func() { runList = orig; listCache = map[string]cachedList{} })
+	listCache = map[string]cachedList{}
+	calls := 0
+	runList = func(context.Context, string, ...string) (string, error) {
+		calls++
+		return "", errors.New("not logged in")
+	}
+	for range 3 {
+		if _, err := Models(context.Background(), "pi"); err == nil || !strings.Contains(err.Error(), "not logged in") {
+			t.Fatalf("the failure was lost: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("the broken CLI was spawned %d times", calls)
+	}
+}
+
+func TestConcurrentRequestsForOneCLIShareOneProcess(t *testing.T) {
+	orig := runList
+	t.Cleanup(func() { runList = orig; listCache = map[string]cachedList{} })
+	listCache = map[string]cachedList{}
+	var mu sync.Mutex
+	calls := 0
+	runList = func(context.Context, string, ...string) (string, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+		return cursorOut, nil
+	}
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := Models(context.Background(), "cursor"); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if calls != 1 {
+		t.Fatalf("%d processes for one list", calls)
 	}
 }

@@ -123,3 +123,22 @@ func TestTheModelListIsServedPerCLIAndAnUnknownCLIIsRefused(t *testing.T) {
 		t.Fatal("an unknown CLI was listed")
 	}
 }
+
+func TestAModelCanAlwaysBeClearedEvenWhenTheCLIIsNoLongerReady(t *testing.T) {
+	ready(t)
+	project := gitProject(t)
+	if rec := postModel(t, project, "claude", "opus"); rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+	home := t.TempDir()
+	agent.Home = func() string { return home }
+	if rec := postModel(t, project, "claude", "sonnet"); rec.Code == http.StatusOK {
+		t.Fatal("a model was changed for a CLI that is no longer ready")
+	}
+	if rec := postModel(t, project, "claude", ""); rec.Code != http.StatusOK {
+		t.Fatalf("a saved model could not be cleared: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := getAgent(t, project).Models; len(got) != 0 {
+		t.Fatalf("the model stayed: %v", got)
+	}
+}

@@ -74,4 +74,16 @@ describe("ModelPicker", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Save model" })[0] as HTMLElement)
     expect(await screen.findByText(/is not a model name/)).toBeTruthy()
   })
+
+  it("lets a model be cleared on a CLI that is no longer ready, but not changed", () => {
+    const stale: AgentChoice = { ...choice, models: { cursor: "auto", pi: "xai/grok-4.7" } }
+    render(<ModelPicker project="/p" choice={stale} onSaved={() => undefined} />)
+    const pi = screen.getByLabelText("Pi model") as HTMLInputElement
+    expect(pi.disabled).toBe(false)
+    const save = screen.getAllByRole("button", { name: "Save model" })[1] as HTMLButtonElement
+    fireEvent.change(pi, { target: { value: "xai/grok-4.6" } })
+    expect(save.disabled).toBe(true)
+    fireEvent.change(pi, { target: { value: "" } })
+    expect(save.disabled).toBe(false)
+  })
 })

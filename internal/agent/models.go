@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"sync"
@@ -30,6 +31,9 @@ const (
 	listTimeout = 15 * time.Second
 	listLimit   = 1 << 20
 	listTTL     = time.Minute
+	// A failed list is remembered for less: a login fixes it, and waiting a minute for the
+	// next try would be worse than a second spawn.
+	failTTL = 30 * time.Second
 )
 
 // fixedModels are the aliases a CLI accepts but cannot list. Claude resolves each alias to its
@@ -80,16 +84,30 @@ func (w *limitWriter) Write(p []byte) (int, error) {
 var (
 	listMu    sync.Mutex
 	listCache = map[string]cachedList{}
+	// listLocks make concurrent requests for one CLI wait for the first instead of each
+	// starting a process.
+	listLocks = map[string]*sync.Mutex{}
 )
 
 type cachedList struct {
 	at   time.Time
 	list ModelList
+	err  string
+}
+
+func lockFor(id string) *sync.Mutex {
+	listMu.Lock()
+	defer listMu.Unlock()
+	if listLocks[id] == nil {
+		listLocks[id] = &sync.Mutex{}
+	}
+	return listLocks[id]
 }
 
 // Models is what the desk can offer for the CLI with this id. A CLI that lists is asked, at
-// most once a minute; a failure is returned so the page can say the list is unavailable and
-// still let the person type a name.
+// most once a minute (half that after a failure), and concurrent requests share one answer. A
+// failure is returned so the page can say the list is unavailable and still let the person
+// type a name.
 func Models(ctx context.Context, id string) (ModelList, error) {
 	spec, ok := Find(id)
 	if !ok {
@@ -102,15 +120,27 @@ func Models(ctx context.Context, id string) (ModelList, error) {
 	if !ok {
 		return ModelList{Free: true, Source: "none"}, nil
 	}
+	lock := lockFor(spec.ID)
+	lock.Lock()
+	defer lock.Unlock()
 	listMu.Lock()
 	cached, hit := listCache[spec.ID]
 	listMu.Unlock()
-	if hit && time.Since(cached.at) < listTTL {
-		return cached.list, nil
+	if hit {
+		if cached.err == "" && time.Since(cached.at) < listTTL {
+			return cached.list, nil
+		}
+		if cached.err != "" && time.Since(cached.at) < failTTL {
+			return cached.list, errors.New(cached.err)
+		}
 	}
 	out, err := runList(ctx, spec.Binary, args...)
 	if err != nil {
-		return ModelList{Free: true, Source: "none"}, err
+		failed := ModelList{Free: true, Source: "none"}
+		listMu.Lock()
+		listCache[spec.ID] = cachedList{at: time.Now(), list: failed, err: err.Error()}
+		listMu.Unlock()
+		return failed, err
 	}
 	list := ModelList{Models: ParseModels(spec.ID, out), Free: true, Source: "cli"}
 	listMu.Lock()

@@ -84,7 +84,7 @@ export function ModelPicker({ project, choice, onSaved }: Props) {
                 className="w-72"
                 list={listId}
                 value={value}
-                disabled={!row.ready}
+                disabled={!row.ready && saved === ""}
                 placeholder="Gentle AI default"
                 autoComplete="off"
                 spellCheck={false}
@@ -100,7 +100,7 @@ export function ModelPicker({ project, choice, onSaved }: Props) {
               <Button
                 type="button"
                 variant="secondary"
-                disabled={!row.ready || busy !== "" || value === saved}
+                disabled={(!row.ready && value !== "") || busy !== "" || value === saved}
                 onClick={() => void save(row.id, value)}
               >
                 Save model

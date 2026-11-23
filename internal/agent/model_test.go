@@ -30,7 +30,7 @@ func TestNoModelLeavesTheFixedFlagsAlone(t *testing.T) {
 
 func TestAModelThatCouldBeAFlagIsNeverPassed(t *testing.T) {
 	for _, bad := range []string{"--approve", "-p", "a b", "x\ny", "a;b", "$(id)", strings.Repeat("a", 101), ""} {
-		if ValidModel(bad) && bad != "" {
+		if ValidModel(bad) {
 			t.Fatalf("%q was accepted as a model", bad)
 		}
 		if got := strings.Join(commandArgsModel("claude", bad), " "); strings.Contains(got, "--model") {
