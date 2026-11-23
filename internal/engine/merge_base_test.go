@@ -74,3 +74,26 @@ func TestAChangeOnTheRunBaseMergesAsBefore(t *testing.T) {
 		t.Fatalf("%+v merges %d", got, review.merges)
 	}
 }
+
+func TestApprovingAnOpenChangeOnAnotherBaseAdoptsThatBase(t *testing.T) {
+	opt, _, _, review, _, _ := baseOpt(t)
+	review.base = "main"
+	id := atMerge(t, review, opt, "feat/gone")
+	if _, err := Resume(context.Background(), opt, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := Approve(opt.Root, id, "merge", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Resume(context.Background(), opt, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := Load(opt.Root, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != statement.Advance || review.merges != 1 || snap.Cursor.Base != "main" {
+		t.Fatalf("%+v merges %d base %q", got, review.merges, snap.Cursor.Base)
+	}
+}
