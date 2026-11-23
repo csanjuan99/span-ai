@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: one model per CLI. `models:` in `span.yaml` maps a CLI id to a model, and Span passes it as `--model <name>` whenever that CLI runs; a CLI with no entry keeps the model Gentle AI configured. The desk shows a model field per CLI under the Agent picker, with suggestions from `cursor-agent --list-models` and `pi --list-models`, the aliases `opus`, `sonnet` and `haiku` for Claude, and a typed name for Codex. The page says Gentle AI and its configuration are required, and refuses a model for a CLI that is not ready. A name must be letters, digits and `. _ : / @ + -`, never start with a dash, and is checked on load, on save and before the CLI starts. New: `GET /agent/models`, `POST /agent/model`, and `models` in `GET /agent`.
+
 - **Fixed**: `span resume <id>` without `--spans` looked for the run in an empty path and resumed an isolated run in the project checkout, where git refused its branch. It now reads `.span/runs` of the workspace and resumes in the run's worktree.
 - **Fixed**: a repository whose `.gitignore` already covers `.span` or `span.yaml` stopped every run at its first commit, because `git add` exits 1 when an excluded path is ignored. Those excludes are now left out when the path is ignored.
 - **Fixed**: `codex exec` was started with `--sandbox workspace-write --approve-for-me`, which codex 0.170 rejects as conflicting. `--approve-for-me` already implies that sandbox.

@@ -10,12 +10,12 @@ Branch: feat/agent-models. Delivery: ask-on-risk. Runner: go test, npx vitest.
 - S5 Out of scope: the install wizard ("Tal vez mas adelante exlorar la opcion de hacer un onboarding o un wizard").
 
 ## Tasks
-- T1 S2,S4 registry + exec: Spec.ModelFlag, ValidModel, model arg in the command (inline)
-- T2 S2,S4 policy: models map, validation, SetModel (inline)
-- T3 S1 model lists: cursor and pi parsers, claude aliases, bounded listing (inline)
-- T4 S1,S3 serve: models in GET /agent, GET /agent/models, POST /agent/model (inline)
-- T5 S1,S3 web: model picker and Gentle AI notice (inline)
-- T6 docs, changelog (inline)
+- [x] T1 S2,S4 registry + exec: Spec.ModelFlag, ValidModel, model arg in the command (inline) 99374a6
+- [x] T2 S2,S4 policy: models map, validation, SetModel (inline) 99374a6
+- [x] T3 S1 model lists: cursor and pi parsers, claude aliases, bounded listing (inline) 99374a6
+- [x] T4 S1,S3 serve: models in GET /agent, GET /agent/models, POST /agent/model (inline) 641b191
+- [x] T5 S1,S3 web: model picker and Gentle AI notice (inline)
+- [x] T6 docs, changelog (inline)
 
 ## Log
 L1 (2026-11-23) user: "Tambien necesito que por cada agente, tanto cursor, claude, pi etc, necesito que se muestren los modelos para seleccionar dicho modelo como el que orquesta el trabajo. Ya dado en cada agente se maneja internamente sus modelos con para gentle-ai, y OJO, hay que dejar claro que gentle-ai y toda su configuracion es necesaria. Tal vez mas adelante exlorar la opcion de hacer un onboarding o un wizard que ayude a instalar todo."
