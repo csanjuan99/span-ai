@@ -6,6 +6,10 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: the desk opens with a **setup** band that shows what a first run still needs (folder, agent and model, Jira, first story), read from the real state rather than ticked by hand. The Jira form moved from the bottom of the page into its step, with labelled fields and a link to create the API token. The band can be hidden and shown again.
+
+- **Changed**: the access token for a remote server moved from the top of the desk to **Settings**, with an explanation of when it is needed. A server that answers 401 now opens Settings and says so, instead of failing with "the response was not JSON". Closing the Jira session is in Settings too.
+
 - **Fixed**: in a folder of several repositories, the agent and model picked on the desk were saved in the folder's `span.yaml`, but each repository runs with its own, written with `agent: any`, so the run ignored them (a story ran on `cursor-agent` although `pi` was chosen). A repository now takes the folder's agent and models for whatever it leaves unset; its own choices still win, and a run started in the repository itself is unchanged.
 
 - **Fixed**: when `qa` reused the passing result of `prove` and the criteria were still unverified, the hold said only "go test ./... already passed on this commit ... it was not run again" and hid the real cause. It now keeps the gate's own reason, for example "3 of 3 criteria have no test declaration".

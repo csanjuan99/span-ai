@@ -13,8 +13,13 @@ const empty: AgentChoice = { agents: [], selected: "any", chosen: "", exists: fa
  * Which CLI writes this project. The page reads the same registry the engine uses,
  * so a row that cannot run says why instead of failing on the next stage.
  */
-export function AgentPicker({ project }: { project: string }) {
+export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?: (choice: AgentChoice) => void }) {
   const [loaded, setLoaded] = useState<AgentChoice>(empty)
+
+  // The setup band reads the same answer, so what it shows is what this picker saved.
+  useEffect(() => {
+    onLoaded?.(loaded)
+  }, [loaded, onLoaded])
   const [picked, setPicked] = useState("")
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)

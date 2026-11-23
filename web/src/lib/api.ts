@@ -96,6 +96,21 @@ export function rememberServeToken(value: string): void {
   sessionStorage.setItem(tokenKey, value)
 }
 
+/** The server refused the request because it needs its access token, or the one sent is wrong. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("This server needs its access token. Add it under Settings.")
+    this.name = "UnauthorizedError"
+  }
+}
+
+/** Stops before the body is read: the refusal is plain text, not the error JSON. */
+function refuseUnauthorized(response: Response): void {
+  if (response.status === 401) {
+    throw new UnauthorizedError()
+  }
+}
+
 function withAuth(headers: Headers): Headers {
   const value = serveToken()
   if (value !== "") {
@@ -386,6 +401,7 @@ async function readBody(response: Response): Promise<unknown> {
 /** Fetches JSON and surfaces the server message beside the action that sent it. */
 export async function getJSON(url: string): Promise<unknown> {
   const response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  refuseUnauthorized(response)
   const body = await readBody(response)
   if (!response.ok) {
     throw new Error(messageOf(body))
@@ -411,6 +427,7 @@ function startedRuns(value: unknown): StartedRun[] {
 /** Posts the desk form. A 202 returns the new span. Other success is configuration text. */
 export async function startRun(form: FormData): Promise<Started | string> {
   const response = await fetch("/quickstart", { method: "POST", body: form, headers: withAuth(new Headers()) })
+  refuseUnauthorized(response)
   const raw = await response.text()
   if (response.status === 202) {
     const body = parseJSON(raw)
@@ -442,6 +459,7 @@ async function postJSON(url: string, body: unknown): Promise<void> {
     headers: withAuth(new Headers({ "Content-Type": "application/json", Accept: "application/json" })),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+  refuseUnauthorized(response)
   if (response.status === 202 || response.ok) {
     return
   }
@@ -529,6 +547,7 @@ export async function postForm(url: string, body: URLSearchParams): Promise<unkn
     headers: withAuth(new Headers({ "Content-Type": "application/x-www-form-urlencoded" })),
     body,
   })
+  refuseUnauthorized(response)
   const payload = await readBody(response)
   if (!response.ok) {
     throw new Error(messageOf(payload))
