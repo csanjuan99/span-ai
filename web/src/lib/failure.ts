@@ -24,6 +24,48 @@ export interface HoldAction {
   hint: string
 }
 
+/** What a person can approve when a stage is held by its mode rather than by a failure. */
+export interface Approval extends HoldAction {
+  stage: string
+  environment: string
+}
+
+const modeHold = /^(\S+) is hold$/
+
+/**
+ * The approval a run is waiting for. A stage in `hold` mode pauses before its effect and only
+ * a person releases it, so the page offers that, never "Fix and retry", which would reach the
+ * same hold again. Any other reason is a failure or a wait and has no approval.
+ */
+export function approvalOf(cursor: Cursor | null): Approval | null {
+  if (cursor === null || !cursor.hold || cursor.stop || cursor.done) {
+    return null
+  }
+  const named = modeHold.exec(cursor.reason)?.[1]
+  if (named === undefined) {
+    return null
+  }
+  if (cursor.stage === "open" || cursor.stage === "merge") {
+    return named === cursor.stage
+      ? {
+          stage: cursor.stage,
+          environment: "",
+          label: `Approve ${cursor.stage}`,
+          hint: `${cursor.stage}: hold waits for a person. Approving lets this commit ${cursor.stage === "merge" ? "merge" : "open its change"}; a retry would hold again.`,
+        }
+      : null
+  }
+  if (cursor.stage === "promote") {
+    return {
+      stage: "promote",
+      environment: named,
+      label: `Approve promote to ${named}`,
+      hint: `${named}: hold waits for a person. Approving runs this environment for this commit.`,
+    }
+  }
+  return null
+}
+
 function rank(item: Statement): number {
   const at = stages.findIndex((name) => name === item.stage)
   return item.iteration * 100 + (at < 0 ? 0 : at)

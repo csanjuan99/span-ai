@@ -359,6 +359,15 @@ export async function resumeRun(id: string): Promise<void> {
   await postJSON(`/spans/${id}/resume`, undefined)
 }
 
+/** Approves a stage held by its mode and continues the run; the server binds it to the commit shown. */
+export async function approveStage(id: string, stage: string, environment: string): Promise<void> {
+  const form = new URLSearchParams({ stage })
+  if (environment !== "") {
+    form.set("environment", environment)
+  }
+  await postForm(`/spans/${id}/approve`, form)
+}
+
 /** Starts a run again when this process no longer has its worker. */
 export async function relaunchRun(id: string): Promise<void> {
   await postJSON(`/spans/${id}/relaunch`, undefined)
