@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: `span run --branch <name>` runs in its own worktree when another run holds the checkout, instead of holding. Without `--branch` it refuses and says to pass one.
+- **Added**: `span serve --max-parallel N` limits how many runs one server drives at once, so a burst of stories does not exhaust the agent CLI quota. Default 0 is no limit.
 - **Fixed**: runs in parallel worktrees lost each other's lessons. The lesson book now lives in the project checkout, not in the run's tree, and each write re-reads it under a lock. A test now creates 12 worktrees at once to pin that git absorbs simultaneous starts.
 - **Added**: a run journal, `events.jsonl`, numbered and hash-chained, with every stage transition and every action a person took on the page. `GET /spans/<id>/events` serves it and the Audit panel lists the human actions and warns when the chain is broken. Typed text is never stored, only its length.
 - **Added**: `limits.stageTimeout` in `span.yaml` stops an agent call (frame, build or inspect) that runs past it and holds the stage, without spending a repair. Absent means no limit. Spend is not limited: Span does not read cost from the CLIs.
