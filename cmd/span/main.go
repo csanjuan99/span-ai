@@ -166,7 +166,7 @@ func resume(args []string) int {
 func serveCmd(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
-	spans := fs.String("spans", ".span/runs", "state directory")
+	spans := fs.String("spans", ".span/runs", "state directory, relative to where serve starts (not to a workspace)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
