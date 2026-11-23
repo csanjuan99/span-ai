@@ -29,8 +29,10 @@ type fakeAgents struct {
 	outOfScope bool
 	frameErr   error
 	buildErr   error
-	wanted     []string
-	selectErr  error
+	// buildHang makes Build wait for its context, the way an agent that never finishes does.
+	buildHang bool
+	wanted    []string
+	selectErr error
 }
 
 func (f *fakeAgents) Select(want string) (agent.Selection, error) {
@@ -57,9 +59,13 @@ func (f *fakeAgents) Frame(_ context.Context, _, _ string, text string) (FrameDo
 	return FrameDoc{Claims: []string{"charge the card"}, Acceptance: f.acceptance}, nil
 }
 
-func (f *fakeAgents) Build(_ context.Context, _, workspace, text string) error {
+func (f *fakeAgents) Build(ctx context.Context, _, workspace, text string) error {
 	f.builds++
 	f.prompts = append(f.prompts, text)
+	if f.buildHang {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	if f.buildErr != nil {
 		return f.buildErr
 	}

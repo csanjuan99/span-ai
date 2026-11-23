@@ -21,6 +21,10 @@ agent: any
 # commit:
 #   allow:
 #     - fixtures/keys/
+# Longest one agent call (frame, build or inspect) may run before it is stopped and the
+# stage holds. A Go duration, 1s to 48h. Absent means no limit.
+# limits:
+#   stageTimeout: 45m
 stages:
   open: auto
   merge: auto

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -43,6 +44,31 @@ type File struct {
 	Run      Run                 `yaml:"run"`
 	Manifest map[string]Manifest `yaml:"manifest"`
 	Commit   Commit              `yaml:"commit"`
+	Limits   Limits              `yaml:"limits"`
+}
+
+// Limits bound what one run may spend. An absent limit is no limit.
+type Limits struct {
+	// StageTimeout is how long one agent call (frame, build or inspect) may run before it is
+	// stopped and the stage holds, as a Go duration such as 45m. One second to 48 hours.
+	StageTimeout string `yaml:"stageTimeout"`
+}
+
+// The bounds of limits.stageTimeout. A zero or negative limit would hold every stage, and
+// over two days the limit no longer protects anyone. Under a minute is the person's call.
+const (
+	MinStageTimeout = time.Second
+	MaxStageTimeout = 48 * time.Hour
+)
+
+// StageTimeout is the longest one agent call may run. Zero means no limit. A value that does
+// not parse reads as no limit here; Validate refuses it, and its bounds, when the policy loads.
+func (f File) StageTimeout() time.Duration {
+	limit, err := time.ParseDuration(f.Limits.StageTimeout)
+	if err != nil || limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 // Commit tunes what a stage's commit may take. Span never commits build output, and it
@@ -189,6 +215,12 @@ func (f File) Validate() error {
 		}
 		if !agent.ValidModel(model) {
 			return fmt.Errorf("models.%s: %q is not a model name", id, model)
+		}
+	}
+	if raw := f.Limits.StageTimeout; raw != "" {
+		limit, err := time.ParseDuration(raw)
+		if err != nil || limit < MinStageTimeout || limit > MaxStageTimeout {
+			return fmt.Errorf("limits.stageTimeout %q is not a duration between %s and %s", raw, MinStageTimeout, MaxStageTimeout)
 		}
 	}
 	for _, entry := range f.Commit.Allow {
