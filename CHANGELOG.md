@@ -6,6 +6,7 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Documented**: `span serve` reads `.span/runs` relative to the folder it starts in, not to a workspace, unlike `run` and `resume`. The flag help and USAGE now say so.
 - **Fixed**: commands could not express a quoted argument or an environment variable. `pytest -k "a and b"` is now one argument, and `CI=1 pnpm test` runs with `CI=1` set for that command. Commands without quotes or a leading assignment run as before. There is still no shell, so `cd web && npm test` is written `npm --prefix web test`.
 - **Fixed**: the commit took whatever the agent left in the tree. It now leaves build output and caches (`__pycache__`, `*.pyc`, `node_modules`, `.DS_Store`) uncommitted, and holds the run, committing nothing, when a staged file looks like a secret (an `.env`, a key file, or an added line shaped like an AWS key, a private key, a GitHub token or a quoted credential). `commit.allow` in `span.yaml` lets a reviewed path through.
 - **Added**: the Implementation tab opens with a report: a risk verdict, every risk Span detects (size, sensitive paths, dependencies, committed build output, missing tests, secret-shaped strings, repeated inspect returns), what the story asked, the decisions and risks the agent recorded, the checks that ran, and what could not be checked. The audit trail and the raw transcript are below it, closed. `GET /spans/<id>/feature` serves the feature document.

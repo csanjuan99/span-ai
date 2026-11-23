@@ -302,6 +302,8 @@ go build -o span ./cmd/span
 ./span serve --addr 127.0.0.1:8787 --spans /path/to/project/.span/runs
 ```
 
+`span serve` has no workspace of its own. Its `--spans` default, `.span/runs`, is relative to the folder you start it from, so start it inside the project or pass the absolute path above. `run` and `resume` default to `<workspace>/.span/runs`.
+
 `advance` exits 0. `hold` and `stop` exit 1. A startup error (empty brief, invalid `span.yaml`) also exits 1 and prints the reason on stderr.
 
 A finished run prints an identity line and a reason line:
