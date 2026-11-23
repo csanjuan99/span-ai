@@ -9,15 +9,13 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
+
+	"span/internal/proc"
 )
 
 // ErrNone means no selected CLI is installed with Gentle AI.
 var ErrNone = errors.New("no agent with Gentle AI")
-
-// Names is the lookup order for agent: any.
-var Names = []string{"cursor-agent", "claude", "codex"}
 
 // Selection is the build CLI and, when another is enabled, a different inspect CLI.
 type Selection struct {
@@ -31,61 +29,35 @@ var Look = func(name string) error {
 	return err
 }
 
-// Select picks the requested agent, or the first enabled one.
+// Select picks the requested agent, or the first ready one. Ready means the
+// binary is on PATH and that harness already has Gentle AI.
 func Select(want, home string) (Selection, error) {
-	enabled := enabled(home)
-	if len(enabled) == 0 {
+	ready := Available(home)
+	if len(ready) == 0 {
 		return Selection{}, ErrNone
 	}
-	if want == "" || want == "any" {
-		sel := Selection{Build: enabled[0], Inspect: enabled[0]}
-		if len(enabled) > 1 {
-			sel.Inspect = enabled[1]
+	if Auto(want) {
+		sel := Selection{Build: ready[0].Binary, Inspect: ready[0].Binary}
+		if len(ready) > 1 {
+			sel.Inspect = ready[1].Binary
 		}
 		return sel, nil
 	}
-	for _, name := range enabled {
-		if name == want {
-			sel := Selection{Build: name, Inspect: name}
-			for _, other := range enabled {
-				if other != name {
-					sel.Inspect = other
-					break
-				}
-			}
-			return sel, nil
+	spec, ok := Find(want)
+	if !ok {
+		return Selection{}, fmt.Errorf("%w: %s is not one of %s", ErrNone, want, IDs())
+	}
+	if reason := Explain(want, home); reason != "" {
+		return Selection{}, fmt.Errorf("%w: %s", ErrNone, reason)
+	}
+	sel := Selection{Build: spec.Binary, Inspect: spec.Binary}
+	for _, other := range ready {
+		if other.Binary != spec.Binary {
+			sel.Inspect = other.Binary
+			break
 		}
 	}
-	return Selection{}, fmt.Errorf("%w: %s", ErrNone, want)
-}
-
-func enabled(home string) []string {
-	var out []string
-	for _, name := range Names {
-		if Look(name) != nil {
-			continue
-		}
-		if !Gentle(name, home) {
-			continue
-		}
-		out = append(out, name)
-	}
-	return out
-}
-
-// Gentle reports whether that harness has Gentle AI installed for this user.
-func Gentle(name, home string) bool {
-	switch name {
-	case "cursor-agent":
-		_, err := os.Stat(filepath.Join(home, ".cursor", "rules", "gentle-ai.mdc"))
-		return err == nil
-	case "claude":
-		return contains(filepath.Join(home, ".claude", "CLAUDE.md"), "Organic Driven Development")
-	case "codex":
-		return contains(filepath.Join(home, ".codex", "AGENTS.md"), "Organic Driven Development")
-	default:
-		return false
-	}
+	return sel, nil
 }
 
 func contains(path, needle string) bool {
@@ -96,18 +68,13 @@ func contains(path, needle string) bool {
 	return strings.Contains(string(raw), needle)
 }
 
-// commandArgs starts a headless agent that can write. Nobody is present to approve a prompt.
+// commandArgs starts a headless agent that can write. Nobody is present to approve
+// a prompt, so the flags come from the registry and are never built here.
 func commandArgs(name string) []string {
-	switch name {
-	case "cursor-agent":
-		return []string{"-p", "--trust", "--force"}
-	case "claude":
-		return []string{"-p", "--dangerously-skip-permissions"}
-	case "codex":
-		return []string{"exec", "--sandbox", "workspace-write", "--approve-for-me"}
-	default:
-		return []string{"-p"}
+	if spec, ok := Find(name); ok {
+		return spec.Args
 	}
+	return []string{"-p"}
 }
 
 // Run executes the CLI with the prompt on stdin and returns stdout.
@@ -118,6 +85,7 @@ func Run(ctx context.Context, name, workspace, prompt string) (string, error) {
 // RunWriter does what Run does and copies stdout to sink while the process runs.
 func RunWriter(ctx context.Context, name, workspace, prompt string, sink io.Writer) (string, error) {
 	cmd := exec.CommandContext(ctx, name, commandArgs(name)...)
+	proc.Tame(cmd)
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr strings.Builder
@@ -137,9 +105,36 @@ func RunWriter(ctx context.Context, name, workspace, prompt string, sink io.Writ
 	stop := observe(ctx, name, pid)
 	defer stop()
 	if err := cmd.Wait(); err != nil {
-		return "", fmt.Errorf("%s: %w: %s", name, err, stderr.String())
+		// A cancelled run is not a blocked one: the output of a killed CLI can mention
+		// quota or login by accident, and Classify must not turn a Stop into a hold.
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		combined := stdout.String() + "\n" + stderr.String()
+		if kind, detail, found := Classify(combined); found {
+			return "", &Blocked{Agent: name, Kind: kind, Detail: detail, Err: err}
+		}
+		return "", fmt.Errorf("%s: %w: %s", name, err, tailOutput(combined))
 	}
 	return stdout.String(), nil
+}
+
+// tailOutput keeps the last lines of what the CLI printed. A CLI can write its whole
+// diagnosis to stdout, and an empty reason is worse than a short one.
+func tailOutput(text string) string {
+	var kept []string
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i := len(lines) - 1; i >= 0 && len(kept) < 6; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			kept = append([]string{line}, kept...)
+		}
+	}
+	out := strings.Join(kept, " | ")
+	if len(out) > 400 {
+		out = out[len(out)-400:]
+	}
+	return out
 }
 
 // ParseJSON extracts the first JSON object from an agent reply.
