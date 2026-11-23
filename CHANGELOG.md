@@ -6,6 +6,12 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: a run whose process was killed looked alive forever and `resume` refused it ("this run is not paused"). It is now shown as interrupted, with a reason, and can be resumed.
+- **Fixed**: an agent left running by a killed Span kept editing the tree. The next run of that tree ends it first, after checking the pid still names the agent.
+- **Fixed**: the `agent:` line of `span.yaml` was validated and shown but never used, so `agent: claude` still ran on the first ready CLI. A per-stage choice still wins; the policy is now the fallback.
+- **Fixed**: acceptance criterion ids (`AC-1`) were read as a Jira key and became the branch name (`feat/AC-1-...`). A real key such as `SAL-3` is still found.
+- **Fixed**: the frame prompt asked for `claims` without saying what they are, so a simple story came back with none and the run held with no way forward. The prompt now explains them and the hold says what to do.
+- **Fixed**: `.atl/` (the agent tooling's skill registry) was committed into every pull request of a project that does not ignore it. It is now left uncommitted like other caches.
 - **Added**: `span run --branch <name>` runs in its own worktree when another run holds the checkout, instead of holding. Without `--branch` it refuses and says to pass one.
 - **Added**: `span serve --max-parallel N` limits how many runs one server drives at once, so a burst of stories does not exhaust the agent CLI quota. Default 0 is no limit.
 - **Fixed**: runs in parallel worktrees lost each other's lessons. The lesson book now lives in the project checkout, not in the run's tree, and each write re-reads it under a lock. A test now creates 12 worktrees at once to pin that git absorbs simultaneous starts.

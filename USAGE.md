@@ -1246,7 +1246,7 @@ Sources for the shape: Architecture Decision Records (Nygard) and MADR for decis
 
 After a stage that edits files, Span stages everything the agent left (except `.span` and `span.yaml`) and then checks it before committing:
 
-- Build output and caches are left in the working tree and not committed, without stopping the run: `__pycache__/`, `*.pyc`, `*.pyo`, `node_modules/` and `.DS_Store`.
+- Build output and caches are left in the working tree and not committed, without stopping the run: `__pycache__/`, `*.pyc`, `*.pyo`, `node_modules/`, `.DS_Store` and `.atl/` (the agent tooling's skill registry, which is not part of any story). To version one of them on purpose, list it under `commit.allow`.
 - A file that looks like a secret stops the commit. Nothing is committed, the index is cleared, and the run holds with the file and the reason. The match is never printed. The checks are the name (`.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa`, `id_ed25519` and the like; `.env.example`, `.sample`, `.template` and `.dist` are allowed) and the added lines (an AWS access key id, a private key block, a GitHub token, or a quoted credential of 20 or more characters).
 - To let a reviewed path through, list it in `span.yaml`, then resume. An entry is an exact path or a folder written with a trailing slash, relative to the repository; a path that leaves the repository is refused when the policy loads. A listed path skips both checks.
 
@@ -1284,3 +1284,12 @@ Each line has a `seq`, a time, the actor and the type. A line also carries `prev
 Free text a person typed (an answer, a note, an instruction) is never stored in the journal, only its length. Short fixed fields such as the stage are.
 
 Limits: the chain shows tampering, it does not prevent it, since anyone who can rewrite the file can rewrite the whole chain. Runs started before this version have no journal, and an empty one reads as intact. Nothing is exported to OpenTelemetry.
+
+## When Span itself is killed
+
+A `kill -9`, a crash or a power cut stops Span without letting it pause the run or stop its agent. Two things are handled:
+
+- **The run shows as interrupted.** A run the cursor calls running, with nobody holding its lock for more than 10 seconds, is shown as paused with the reason `the run was interrupted: the process driving it ended. Resume to continue from this stage.` Resume it from the page or with `span resume <id>`; it continues from the stage it was in. Before this, such a run looked alive and `resume` refused it with `this run is not paused`.
+- **The agent it left running is ended.** While an agent runs, Span writes its pid and name to `<tree>/.span/agent.pid`. When a run of that tree starts again, with the tree's lock held, it ends that process group if the pid is still alive and its command line still names the agent, so it cannot keep editing files under the next agent. A pid the system has since reused for something else is left alone. The journal records `agent.reaped`.
+
+Limits: on Windows the note is cleared but the process is not killed, because its command line cannot be checked safely. Only one agent per tree is recorded at a time. Work an agent half-finished in the tree is not undone: the resumed stage starts from the files as they are.

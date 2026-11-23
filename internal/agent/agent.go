@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"span/internal/proc"
@@ -122,6 +123,9 @@ func RunModel(ctx context.Context, name, model, workspace, prompt string, sink i
 	stop := observe(ctx, name, pid)
 	defer stop()
 	defer proc.Track(pid)()
+	// If Span itself is killed without a chance to stop the agent, the next run of this
+	// tree finds this note and ends the agent before starting another one.
+	defer proc.Leave(filepath.Join(workspace, ".span"), pid, name)()
 	if err := cmd.Wait(); err != nil {
 		// A cancelled run is not a blocked one: the output of a killed CLI can mention
 		// quota or login by accident, and Classify must not turn a Stop into a hold.

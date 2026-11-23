@@ -30,6 +30,7 @@ import (
 	"span/internal/journal"
 	"span/internal/learn"
 	"span/internal/policy"
+	"span/internal/proc"
 	"span/internal/prompt"
 	"span/internal/prove"
 	"span/internal/qa"
@@ -586,6 +587,19 @@ func (r *runner) writeLog(stage string, index int, text string) (string, error) 
 	return filepath.ToSlash(filepath.Join("iter", strconv.Itoa(r.cur.Iteration), "logs", name)), nil
 }
 
+// reapOrphan ends an agent a killed Span left running in this tree. The tree is locked, so
+// nothing alive owns it, and it would keep editing files under the agent this run starts.
+func (r *runner) reapOrphan() {
+	tree := r.cur.Workspace
+	if tree == "" {
+		tree = r.opt.Workspace
+	}
+	if tree != "" && proc.Reap(filepath.Join(tree, ".span")) {
+		r.journal("agent.reaped", nil)
+		log.Printf("run %s: ended an agent left running by a Span that was killed", r.cur.ID)
+	}
+}
+
 // run walks the stages and, when the loop fails, leaves the run held with the reason.
 // A run that died mid-stage with hold=false looks identical to a running one on the
 // page, so the person is offered nothing to do. A hold with the error is honest.
@@ -595,6 +609,7 @@ func (r *runner) run(ctx context.Context) (Result, error) {
 		return r.holdBusy(busy), nil
 	}
 	defer release()
+	r.reapOrphan()
 	res, err := r.loop(ctx)
 	if err != nil {
 		r.cur.Hold = true
@@ -790,7 +805,7 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		return r.block(ctx, questions)
 	}
 	if len(doc.Claims) == 0 {
-		return r.record(frame, statement.Hold, "frame produced no claims", nil)
+		return r.record(frame, statement.Hold, "frame produced no claims: the agent returned the story with nothing to check. Resume to ask again, or make the story say what must be true when it is done.", nil)
 	}
 	now := r.opt.now()
 	r.cur.FrameAdvancedAt = &now

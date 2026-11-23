@@ -52,6 +52,21 @@ type Plan struct {
 	Feature string
 }
 
+// criterionID is how Span numbers acceptance criteria (AC-1, AC-2). It has the shape of a
+// Jira key but names a line of the story, so it is never read as the story's key. A Jira
+// project literally named AC passes its key as the issue instead.
+var criterionID = regexp.MustCompile(`^AC-\d+$`)
+
+// storyKey is the first Jira-shaped key in the story that is not a criterion id.
+func storyKey(story string) string {
+	for _, match := range keyPattern.FindAllString(story, -1) {
+		if !criterionID.MatchString(match) {
+			return match
+		}
+	}
+	return ""
+}
+
 // Derive infers the prefix from the kind and the base, and the suffix from a
 // linked story key when one is present.
 func Derive(story, issue, kind, base string) (Plan, error) {
@@ -79,7 +94,7 @@ func Derive(story, issue, kind, base string) (Plan, error) {
 	}
 	key := strings.ToUpper(strings.TrimSpace(issue))
 	if key == "" {
-		key = keyPattern.FindString(story)
+		key = storyKey(story)
 	}
 	if key != "" && !exactKey.MatchString(key) {
 		return Plan{}, fmt.Errorf("issue %q is not a story key", issue)
