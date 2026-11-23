@@ -57,17 +57,17 @@ func TestCoveredIgnoresCommentsAndLongerIDs(t *testing.T) {
 	}
 }
 
-func TestJudgeFailsABrokenCommandAndLeavesAMissingIDUnverified(t *testing.T) {
+func TestJudgeLeavesACoveredIDUnverifiedWhenNoReportNamesIt(t *testing.T) {
 	lines := []Line{{ID: "AC-1"}, {ID: "AC-2"}}
-	failed := Judge(lines, 1, true, map[string]bool{"AC-1": true})
-	if failed.Verdict != "fail" || failed.Checks[0].Result != "fail" || failed.Checks[1].Result != "unverified" {
-		t.Fatalf("%+v", failed)
+	broken := Judge(lines, 1, map[string]bool{"AC-1": true}, Outcomes{})
+	if broken.Verdict != "unverified" || broken.Checks[0].Result != "unverified" {
+		t.Fatalf("a non-zero exit marked a covered id fail: %+v", broken)
 	}
-	passed := Judge(lines, 0, true, map[string]bool{"AC-1": true})
+	passed := Judge(lines, 0, map[string]bool{"AC-1": true}, Outcomes{})
 	if passed.Verdict != "unverified" || passed.Checks[0].Result != "pass" {
 		t.Fatalf("%+v", passed)
 	}
-	ok := Judge(lines, 0, true, map[string]bool{"AC-1": true, "AC-2": true})
+	ok := Judge(lines, 0, map[string]bool{"AC-1": true, "AC-2": true}, Outcomes{})
 	if ok.Verdict != "pass" {
 		t.Fatalf("%+v", ok)
 	}
@@ -80,7 +80,7 @@ func TestPresentNamesTheDeclarationAndLeavesAMissingIDUnverified(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := []Line{{ID: "AC-1", Text: "Charges"}, {ID: "AC-2", Text: "Receipt"}}
-	gate := Judge(lines, 0, true, map[string]bool{"AC-1": true})
+	gate := Judge(lines, 0, map[string]bool{"AC-1": true}, Outcomes{})
 	got, err := Present(root, lines, &gate)
 	if err != nil {
 		t.Fatal(err)
