@@ -20,10 +20,13 @@ type Flight struct {
 	Since time.Time
 }
 
-// Hub keeps one buffer per subscriber. A full buffer drops the frame.
+// Hub keeps one buffer per subscriber. A subscriber whose buffer is full is cut: its
+// channel closes so the socket ends and the page reconnects and replays, instead of
+// silently missing a frame it can never get back.
 type Hub struct {
 	mu      sync.Mutex
 	subs    map[string]map[chan []byte]struct{}
+	seqs    map[string]uint64
 	flights map[string]Flight
 	stops   map[string]context.CancelFunc
 	closed  bool
@@ -31,7 +34,7 @@ type Hub struct {
 
 // New returns an empty hub.
 func New() *Hub {
-	return &Hub{subs: map[string]map[chan []byte]struct{}{}}
+	return &Hub{subs: map[string]map[chan []byte]struct{}{}, seqs: map[string]uint64{}}
 }
 
 // WatchStop registers how to cancel the flight of one run. Whoever launched it owns the
@@ -114,23 +117,43 @@ func (h *Hub) Stop(id string) bool {
 	return true
 }
 
-// Publish sends one event. A marshal or send failure does not fail the run.
+// Publish stamps the next seq of the run on a copy of event and sends it. The stamp
+// and the sends share one lock so every subscriber sees the frames in seq order. A
+// marshal failure does not fail the run; a full subscriber is cut, not skipped.
 func (h *Hub) Publish(id string, event engine.Event) {
 	if h == nil {
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.seqs == nil {
+		h.seqs = map[string]uint64{}
+	}
+	h.seqs[id]++
+	event.Seq = h.seqs[id]
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	for ch := range h.subs[id] {
 		select {
 		case ch <- raw:
 		default:
+			delete(h.subs[id], ch)
+			close(ch)
 		}
 	}
+}
+
+// Seq reports the last seq stamped for id, zero before the first Publish. The live
+// socket reads it after subscribing so its replay names where the stream resumes.
+func (h *Hub) Seq(id string) uint64 {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.seqs[id]
 }
 
 // Claim reserves id for one worker. A second claim fails until EndFlight.
@@ -189,7 +212,8 @@ func (h *Hub) Flights() map[string]Flight {
 	return out
 }
 
-// Subscribe returns the frames for id and a function that detaches.
+// Subscribe returns the frames for id and a function that detaches. The channel closes
+// when the hub cuts a subscriber that fell behind; detaching after that is a no-op.
 func (h *Hub) Subscribe(id string) (<-chan []byte, func()) {
 	ch := make(chan []byte, 32)
 	h.mu.Lock()
