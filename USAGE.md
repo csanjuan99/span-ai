@@ -973,8 +973,8 @@ those files.
 Choose one option per group. Span stages each path through git itself (`git update-index`
 and `git checkout-index`), never by writing the file directly, refuses a path through a
 symlinked directory, and refuses a text that still has a conflict (a `<<<<<<<` line, a
-`=======` line and a `>>>>>>>` line, in that order). It commits `merge <base> into <branch>:
-resolve conflicts` and the run goes back to `prove`, because the sealed prove, QA and inspect
+`=======` line and a `>>>>>>>` line, in that order). It commits `merge: bring <base> into <branch>
+(resolve conflicts)` and the run goes back to `prove`, because the sealed prove, QA and inspect
 statements describe the head before the merge. The merge commit stays local until prove, QA
 and inspect passed on it: it is pushed right before the host is asked to merge, so a failing
 check never publishes it. If prove fails, the normal repair loop takes over. With `merge:

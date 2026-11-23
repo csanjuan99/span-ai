@@ -1094,9 +1094,9 @@ func (r *runner) mergeMessage(base, suffix string) string {
 			branch = name
 		}
 	}
-	message := "merge " + base + " into " + branch
+	message := "merge: bring " + base + " into " + branch
 	if suffix != "" {
-		message += ": " + suffix
+		message += " (" + suffix + ")"
 	}
 	return message
 }

@@ -345,7 +345,7 @@ func TestChoosingAppliesCommitsPushesAndProvesAgain(t *testing.T) {
 	if !written.Write || !strings.Contains(string(written.Content), "const Other") {
 		t.Fatalf("resolution %+v", written)
 	}
-	if rig.git.messages[0] != "merge origin/dev into feat/payments: resolve conflicts" {
+	if rig.git.messages[0] != "merge: bring origin/dev into feat/payments (resolve conflicts)" {
 		t.Fatalf("message %q", rig.git.messages[0])
 	}
 	if rig.git.pushes != 1 || len(rig.git.pushedAt) != 1 || rig.git.pushedAt[0] <= proves {
