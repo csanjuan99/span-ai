@@ -33,8 +33,9 @@ type fakeGit struct {
 	snapshots int
 	keeps     [][]string
 	// pushedAt is how many check commands had run at each push.
-	pushedAt []int
-	check    *scriptCheck
+	pushedAt     []int
+	check        *scriptCheck
+	wrongParents bool
 }
 
 func (g *fakeGit) Preflight(context.Context, string) (Preflight, error) {
@@ -50,14 +51,20 @@ func (g *fakeGit) Snapshot(context.Context) (TreeState, error) {
 	g.snapshots++
 	return TreeState{}, nil
 }
-func (g *fakeGit) Restore(_ context.Context, _ TreeState, keep []string) ([]string, error) {
+func (g *fakeGit) Restore(_ context.Context, _ TreeState, keep []string) (Restored, error) {
 	g.keeps = append(g.keeps, keep)
 	if len(g.restored) == 0 {
-		return nil, nil
+		return Restored{}, nil
 	}
 	next := g.restored[0]
 	g.restored = g.restored[1:]
-	return next, nil
+	return Restored{Paths: next}, nil
+}
+func (g *fakeGit) Parents(context.Context) ([]string, error) {
+	if g.wrongParents {
+		return []string{"agent-sha"}, nil
+	}
+	return []string{"head-sha", "dev-sha"}, nil
 }
 func (g *fakeGit) Push(ctx context.Context) error {
 	if g.check != nil {
@@ -765,5 +772,35 @@ func TestConflictMarkersNeedAllThreeLinesInOrder(t *testing.T) {
 		if got := HasConflictMarkers([]byte(text)); got != want {
 			t.Errorf("HasConflictMarkers(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+func TestABehindRefusalIsAKnownOutcome(t *testing.T) {
+	rig := newConflictRig(t)
+	rig.opt.Review = &refusingReview{fakeReview: rig.review, err: fmt.Errorf("%w: not up to date with the base branch", ErrBehind)}
+	got := rig.resume(t)
+	if got.Verdict != statement.Hold || got.Reason != BehindReason {
+		t.Fatalf("%+v", got)
+	}
+	if cur := rig.cursor(t); cur.Pending != nil {
+		t.Fatalf("pending %+v", cur.Pending)
+	}
+}
+
+func TestAMergeWhoseParentsAreNotSpansIsRefused(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	rig.resume(t)
+	if err := ChooseConflict(rig.opt.Root, rig.id, map[string]string{"g1": "both"}); err != nil {
+		t.Fatal(err)
+	}
+	rig.git.wrongParents = true
+	got := rig.resume(t)
+	c := rig.cursor(t).Conflict
+	if got.Verdict != statement.Hold || c == nil || c.State != ConflictFailed || !strings.Contains(c.Note, "not the merge span prepared") {
+		t.Fatalf("%+v %+v", got, c)
+	}
+	if rig.git.pushes != 0 || rig.review.merges != 0 {
+		t.Fatal("a foreign commit was pushed or merged")
 	}
 }

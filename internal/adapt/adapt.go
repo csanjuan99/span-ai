@@ -339,6 +339,9 @@ func (h Host) Merge(ctx context.Context, url string) error {
 		// line carries the URL, and a repository can be named after conflicts.
 		return fmt.Errorf("%w: %s", ErrConflict, err.Error())
 	}
+	if errors.As(err, &refused) && IsBehindMessage(refused.stderr) {
+		return fmt.Errorf("%w: %s", engine.ErrBehind, err.Error())
+	}
 	return err
 }
 

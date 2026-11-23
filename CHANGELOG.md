@@ -29,9 +29,13 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
   commits the merge and sends the run back to `prove`; the merge commit is pushed only right
   before the host merge, once prove, QA and inspect passed on it. At most three resolutions
   per run.
-- **The checkout stays honest.** What the agent or a regenerate command changes outside the
-  conflict is put back, and the card says which files. No resolution writes through a
-  symlink.
+- **The checkout stays honest.** What the agent or a regenerate command changes is put back:
+  files, the index, commits, resets, branch checkouts, the merge state, hooks and config;
+  ignored files are named, never deleted. The merge commit runs no hooks and is accepted only
+  with the run's head and the base as its parents. No resolution writes or deletes through a
+  symlink, including a parent that becomes one while the choice is applied.
+- **Behind is not unknown.** A host refusal because the change is behind its base holds with
+  its own reason; span does not update the change.
 - **Regenerate, never on its own.** Lockfiles and generated files can offer a `regenerate`
   command from an allowlist of package managers and build tools, shown on the card and run
   without a shell only after it is chosen.

@@ -20,6 +20,13 @@ import (
 // Nothing was merged, so the outcome is known and the run can resolve it.
 var ErrConflict = errors.New("the change conflicts with its base")
 
+// ErrBehind is a change the host refused to merge because it is behind its base. Nothing was
+// merged; the change has to be updated first, and span does not update it on its own.
+var ErrBehind = errors.New("the change is behind its base")
+
+// BehindReason is the hold reason for ErrBehind.
+const BehindReason = "the change is behind its base; resume to merge again after it is updated"
+
 // ErrNoConflict means the run has no conflict in the state the request needs.
 var ErrNoConflict = errors.New("this run has no conflict waiting for a choice")
 
@@ -123,6 +130,29 @@ type TreeState struct {
 	Index     map[string]string
 	Dirty     map[string]bool
 	Untracked map[string]bool
+	Ignored   map[string]bool
+	// Head, Symref, Refs and Merge are the repository around the tree: the commit checked
+	// out, the branch HEAD names, every local branch, and the merge state files.
+	Head   string
+	Symref string
+	Refs   map[string]string
+	Merge  map[string][]byte
+	// Git are files under the git directory an agent could use to act later (hooks, config),
+	// by path, with their bytes and mode.
+	Git map[string]GitFile
+}
+
+// GitFile is one file under the git directory, at Path, keyed by a name like .git/config.
+type GitFile struct {
+	Path string
+	Data []byte
+	Mode os.FileMode
+}
+
+// Restored is what Restore put back, and the ignored files that were left where they are.
+type Restored struct {
+	Paths   []string
+	Ignored []string
 }
 
 // FileSide is one version of a conflicted file. Text is empty for binary content and cut
@@ -188,7 +218,8 @@ type integrator interface {
 	Preview(ctx context.Context, path string, before FileSide, res FileResolution) (string, error)
 	Preflight(ctx context.Context, base string) (Preflight, error)
 	Snapshot(ctx context.Context) (TreeState, error)
-	Restore(ctx context.Context, before TreeState, keep []string) ([]string, error)
+	Restore(ctx context.Context, before TreeState, keep []string) (Restored, error)
+	Parents(ctx context.Context) ([]string, error)
 }
 
 // conflictAgent is an agent port that can read a conflict and propose options. Without it
@@ -349,7 +380,14 @@ func (r *runner) propose(ctx context.Context, src integrator, plan *conflictPlan
 	note := ""
 	if plan.Proposals < maxConflictProposals {
 		plan.Proposals++
-		groups, options, note = r.askAgent(ctx, src, plan, hint)
+		var fatal error
+		groups, options, note, fatal = r.askAgent(ctx, src, plan, hint)
+		if fatal != nil {
+			if err := r.writePlan(plan); err != nil {
+				return "", "", err
+			}
+			return r.failConflict(fatal.Error())
+		}
 	} else {
 		note = fmt.Sprintf("the agent already proposed %d times; these are the mechanical options", maxConflictProposals)
 	}
@@ -409,47 +447,52 @@ func autoChoices(groups []ConflictGroup) (map[string]string, bool) {
 // askAgent returns nil groups when the options must be the mechanical ones, with the
 // reason in note. The agent runs in the checkout, so whatever it changes there is put back
 // before its proposal is used: nothing reaches the merge commit that no card showed.
-func (r *runner) askAgent(ctx context.Context, src integrator, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string) {
+func (r *runner) askAgent(ctx context.Context, src integrator, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string, error) {
 	proposer, ok := r.opt.Agents.(conflictAgent)
 	if !ok {
-		return nil, nil, "no agent can propose options here; these are the mechanical options"
+		return nil, nil, "no agent can propose options here; these are the mechanical options", nil
 	}
 	target, err := r.pick(build)
 	if err != nil {
-		return nil, nil, "no agent is available (" + err.Error() + "); these are the mechanical options"
+		return nil, nil, "no agent is available (" + err.Error() + "); these are the mechanical options", nil
 	}
 	input := prompt.ConflictInput{Base: r.cur.Conflict.Base, Branch: r.cur.Branch, Files: promptFiles(plan.Files), Hint: hint}
 	rejected := ""
-	var stray []string
+	var stray, ignored []string
 	for attempt := 0; attempt < 2; attempt++ {
 		input.Rejected = rejected
 		before, err := src.Snapshot(ctx)
 		if err != nil {
-			return nil, nil, "the checkout could not be read before asking the agent (" + err.Error() + "); these are the mechanical options"
+			return nil, nil, "the checkout could not be read before asking the agent (" + err.Error() + "); these are the mechanical options", nil
 		}
 		r.logLine(fmt.Sprintf("merge: asking %s for options on %d conflicted files", target, len(plan.Files)))
 		reply, err := proposer.Propose(ctx, target, r.opt.Workspace, prompt.Conflict(r.promptInput(build, ""), input))
-		changed, restoreErr := src.Restore(ctx, before, nil)
+		restored, restoreErr := src.Restore(ctx, before, nil)
 		if restoreErr != nil {
-			return nil, nil, "what the agent changed in the checkout could not be put back (" + restoreErr.Error() + "); these are the mechanical options"
+			return nil, nil, "", fmt.Errorf("what the agent changed in the checkout could not be put back (%s); abort the conflict", restoreErr.Error())
 		}
-		stray = append(stray, changed...)
+		stray = append(stray, restored.Paths...)
+		ignored = append(ignored, restored.Ignored...)
 		if err != nil {
-			return nil, nil, joinNotes(strayNote(stray), "the agent did not answer ("+err.Error()+"); these are the mechanical options")
+			return nil, nil, joinNotes(strayNote(stray, ignored), "the agent did not answer ("+err.Error()+"); these are the mechanical options"), nil
 		}
 		groups, options, err := validateReply(reply, plan.Files)
 		if err == nil {
-			return groups, options, strayNote(stray)
+			return groups, options, strayNote(stray, ignored), nil
 		}
 		rejected = err.Error()
 		r.logLine("merge: the agent's options were refused: " + rejected)
 	}
-	return nil, nil, joinNotes(strayNote(stray), "the agent's options were refused twice ("+rejected+"); these are the mechanical options")
+	return nil, nil, joinNotes(strayNote(stray, ignored), "the agent's options were refused twice ("+rejected+"); these are the mechanical options"), nil
 }
 
-func strayNote(paths []string) string {
+func strayNote(paths, ignored []string) string {
+	left := ""
+	if len(ignored) > 0 {
+		left = "the agent left ignored files, which span does not delete: " + strings.Join(ignored, ", ")
+	}
 	if len(paths) == 0 {
-		return ""
+		return left
 	}
 	seen := map[string]bool{}
 	var unique []string
@@ -459,7 +502,7 @@ func strayNote(paths []string) string {
 			unique = append(unique, path)
 		}
 	}
-	return "the agent changed files outside the conflict (" + strings.Join(unique, ", ") + "); they were restored"
+	return joinNotes("the agent changed files outside the conflict ("+strings.Join(unique, ", ")+"); they were restored", left)
 }
 
 func joinNotes(notes ...string) string {
@@ -839,6 +882,9 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 	if !merging {
 		head, headErr := r.opt.Source.Head(ctx)
 		if headErr == nil && head != "" && head != r.cur.GitSHA {
+			if note := r.foreignMerge(ctx, src); note != "" {
+				return r.failConflict(note)
+			}
 			return r.resolved(head, "resolved the conflict with "+c.Base+" ("+summary+")")
 		}
 		return r.failConflict("the merge is no longer in progress in the checkout; abort the conflict and run the merge again")
@@ -865,6 +911,9 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 	if err != nil {
 		return r.retryChoice("the merge could not be committed: " + err.Error())
 	}
+	if note := r.foreignMerge(ctx, src); note != "" {
+		return r.failConflict(note)
+	}
 	return r.resolved(sha, "resolved the conflict with "+c.Base+" ("+summary+")")
 }
 
@@ -890,10 +939,11 @@ func (r *runner) regenerate(ctx context.Context, src integrator, plan *conflictP
 	}
 	r.logLine("merge: running " + planned.Command + " to regenerate the conflicted files")
 	out, runErr := r.opt.Check.Run(ctx, planned.Command, r.opt.Workspace)
-	changed, err := src.Restore(ctx, before, own)
+	restored, err := src.Restore(ctx, before, own)
 	if err != nil {
 		return fmt.Errorf("what %s changed could not be put back: %w", planned.Command, err)
 	}
+	changed := restored.Paths
 	if len(changed) > 0 {
 		return fmt.Errorf("%s changed files outside its group (%s); they were restored", planned.Command, strings.Join(changed, ", "))
 	}
@@ -933,9 +983,26 @@ func (r *runner) resolved(sha, what string) (string, string, error) {
 	return "reprove", reason, nil
 }
 
+// foreignMerge is empty when HEAD is the merge span prepared: its parents are exactly the
+// head the run was on and the base it merged. Anything else (an agent's commit, an amend, a
+// reset) is never pushed.
+func (r *runner) foreignMerge(ctx context.Context, src integrator) string {
+	parents, err := src.Parents(ctx)
+	if err != nil {
+		return "the merge commit could not be read: " + err.Error()
+	}
+	if len(parents) != 2 || parents[0] != r.cur.GitSHA || parents[1] != r.cur.Conflict.BaseSHA {
+		return "the branch has a commit that is not the merge span prepared; abort the conflict and look at the branch"
+	}
+	return ""
+}
+
 func (r *runner) abortConflict(ctx context.Context, src integrator) (string, string, error) {
 	if err := src.Abort(ctx); err != nil {
 		return r.failConflict("git merge --abort failed: " + err.Error())
+	}
+	if head, err := r.opt.Source.Head(ctx); err == nil && r.cur.GitSHA != "" && head != r.cur.GitSHA {
+		return r.failConflict("the merge was aborted but HEAD is " + short(head) + ", not the branch head " + short(r.cur.GitSHA) + " the conflict started from")
 	}
 	r.cur.Conflict = nil
 	r.clearConflictFiles()

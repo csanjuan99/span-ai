@@ -202,7 +202,15 @@ func (g Git) Resolve(ctx context.Context, files map[string]engine.FileResolution
 		}
 		paths = append(paths, path)
 	}
-	sort.Strings(paths)
+	// Children before their parents: a parent replaced by a symlink first would turn a later
+	// delete of its child into a delete outside the checkout.
+	sort.Slice(paths, func(i, j int) bool {
+		di, dj := strings.Count(paths[i], "/"), strings.Count(paths[j], "/")
+		if di != dj {
+			return di > dj
+		}
+		return paths[i] < paths[j]
+	})
 	for _, path := range paths {
 		if err := g.resolveOne(ctx, path, files[path]); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
@@ -225,6 +233,9 @@ func (g Git) resolveOne(ctx context.Context, path string, res engine.FileResolut
 	case res.Delete:
 		return g.drop(ctx, path)
 	case res.Stage:
+		if err := g.safePath(path); err != nil {
+			return err
+		}
 		full := filepath.Join(g.Dir, filepath.FromSlash(path))
 		info, err := os.Lstat(full)
 		if errors.Is(err, os.ErrNotExist) {
@@ -279,9 +290,14 @@ func (g Git) place(ctx context.Context, path, mode, sha string) error {
 			return err
 		}
 	}
+	// Checked again here, right before the tree is touched: an earlier step may have changed
+	// what lies on the way to this path.
+	if err := g.safePath(path); err != nil {
+		return err
+	}
 	full := filepath.Join(g.Dir, filepath.FromSlash(path))
 	if info, err := os.Lstat(full); err == nil && info.IsDir() && mode != gitlink {
-		removeEmptyDirs(full)
+		g.removeEmptyDirs(full)
 	}
 	if _, err := g.output(ctx, "update-index", "--add", "--cacheinfo", mode+","+sha+","+path); err != nil {
 		return err
@@ -295,10 +311,14 @@ func (g Git) place(ctx context.Context, path, mode, sha string) error {
 }
 
 // drop removes path from the index and from the tree. A symlink is removed as a link; a
-// directory is left alone.
+// directory is left alone. The tree is only touched when the path is, at this moment, inside
+// the checkout: behind a symlinked parent there is nothing of ours to remove.
 func (g Git) drop(ctx context.Context, path string) error {
 	if _, err := g.output(ctx, "update-index", "--force-remove", "--", path); err != nil {
 		return err
+	}
+	if err := g.safePath(path); err != nil {
+		return nil
 	}
 	full := filepath.Join(g.Dir, filepath.FromSlash(path))
 	info, err := os.Lstat(full)
@@ -314,14 +334,23 @@ func (g Git) drop(ctx context.Context, path string) error {
 	if err := os.Remove(full); err != nil {
 		return err
 	}
-	removeEmptyDirs(filepath.Dir(full))
+	g.removeEmptyDirs(filepath.Dir(full))
 	return nil
 }
 
-// removeEmptyDirs removes dir and its parents while they are empty, stopping at the first
-// that is not. A failure only means the directory stays.
-func removeEmptyDirs(dir string) {
+// removeEmptyDirs removes dir and its parents while they are real, empty directories inside
+// the checkout, stopping at the first that is not. A failure only means the directory stays.
+func (g Git) removeEmptyDirs(dir string) {
+	root := filepath.Clean(g.Dir)
 	for {
+		rel, err := filepath.Rel(root, dir)
+		if err != nil || rel == "." || !filepath.IsLocal(rel) {
+			return
+		}
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() {
+			return
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil || len(entries) > 0 || os.Remove(dir) != nil {
 			return
@@ -340,10 +369,36 @@ func (g Git) FinishMerge(ctx context.Context, message string) (string, error) {
 	if strings.TrimSpace(left) != "" {
 		return "", errors.New("some paths are still unmerged")
 	}
-	if _, err := g.output(ctx, "commit", "-m", message); err != nil {
+	// No hook runs on span's merge commit: an agent that wrote one cannot add a file to it.
+	noHooks, err := os.MkdirTemp("", "span-nohooks-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(noHooks) }()
+	if _, err := g.output(ctx, "-c", "core.hooksPath="+noHooks, "commit", "--no-verify", "-m", message); err != nil {
 		return "", err
 	}
 	return g.Head(ctx)
+}
+
+// Parents lists HEAD's parents, first parent first.
+func (g Git) Parents(ctx context.Context) ([]string, error) {
+	out, err := g.output(ctx, "rev-list", "--parents", "-n", "1", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return nil, errors.New("HEAD has no commit")
+	}
+	return fields[1:], nil
+}
+
+// IsBehindMessage reports a forge refusal because the change is behind its base: nothing was
+// merged, and the change has to be updated first.
+func IsBehindMessage(stderr string) bool {
+	text := strings.ToLower(stderr)
+	return strings.Contains(text, "not up to date with the base branch") || strings.Contains(text, "head branch is not up to date")
 }
 
 // Preview is the unified diff from before (one side, possibly absent) to what res would
@@ -444,10 +499,14 @@ func (g Git) diffBytes(ctx context.Context, path string, old, next []byte, hadOl
 	return out.String(), nil
 }
 
-// Snapshot reads the index, the tracked paths whose tree differs from it, and the untracked
-// files git does not ignore.
+// Snapshot reads the repository around the tree (HEAD, the branch it names, every local
+// branch, the merge state files, hooks and config) and the tree itself: the index, the
+// tracked paths whose tree differs from it, the untracked files, and the ignored ones.
 func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
-	state := engine.TreeState{Index: map[string]string{}, Dirty: map[string]bool{}, Untracked: map[string]bool{}}
+	state := engine.TreeState{
+		Index: map[string]string{}, Dirty: map[string]bool{}, Untracked: map[string]bool{}, Ignored: map[string]bool{},
+		Refs: map[string]string{}, Merge: map[string][]byte{}, Git: map[string]engine.GitFile{},
+	}
 	index, err := g.raw(ctx, nil, "ls-files", "-s", "-z")
 	if err != nil {
 		return engine.TreeState{}, err
@@ -462,36 +521,144 @@ func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
 		}
 		state.Index[path] += meta
 	}
-	dirty, err := g.raw(ctx, nil, "diff-files", "--name-only", "-z")
+	for set, args := range map[*map[string]bool][]string{
+		&state.Dirty:     {"diff-files", "--name-only", "-z"},
+		&state.Untracked: {"ls-files", "-o", "-z", "--exclude-standard"},
+		&state.Ignored:   {"ls-files", "-o", "-i", "-z", "--exclude-standard", "--directory"},
+	} {
+		out, err := g.raw(ctx, nil, args...)
+		if err != nil {
+			return engine.TreeState{}, err
+		}
+		for _, path := range splitZ(out) {
+			(*set)[path] = true
+		}
+	}
+	if state.Head, err = g.output(ctx, "rev-parse", "HEAD"); err != nil {
+		return engine.TreeState{}, err
+	}
+	if symref, err := g.output(ctx, "symbolic-ref", "-q", "HEAD"); err == nil {
+		state.Symref = symref
+	}
+	refs, err := g.output(ctx, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads")
 	if err != nil {
 		return engine.TreeState{}, err
 	}
-	for _, path := range splitZ(dirty) {
-		state.Dirty[path] = true
+	for _, line := range strings.Split(refs, "\n") {
+		if name, sha, ok := strings.Cut(line, " "); ok {
+			state.Refs[name] = sha
+		}
 	}
-	untracked, err := g.raw(ctx, nil, "ls-files", "-o", "-z", "--exclude-standard")
+	for _, name := range mergeFiles {
+		path, err := g.gitPath(ctx, name)
+		if err != nil {
+			return engine.TreeState{}, err
+		}
+		if raw, err := os.ReadFile(path); err == nil {
+			state.Merge[name] = raw
+		}
+	}
+	files, err := g.gitFiles(ctx)
 	if err != nil {
 		return engine.TreeState{}, err
 	}
-	for _, path := range splitZ(untracked) {
-		state.Untracked[path] = true
-	}
+	state.Git = files
 	return state, nil
 }
 
-// Restore puts back what changed since before, except the paths in keep: index entries are
-// rewritten from the snapshot, tracked files that differ are checked out from it, and new
-// untracked files are removed. It returns the paths it restored, sorted.
-func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string) ([]string, error) {
+var mergeFiles = []string{"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE"}
+
+func (g Git) gitPath(ctx context.Context, name string) (string, error) {
+	path, err := g.output(ctx, "rev-parse", "--git-path", name)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(g.Dir, path)
+	}
+	return path, nil
+}
+
+// gitFiles reads the files under the git directory that would act on a later git command:
+// the shared config, this worktree's config, and every hook.
+func (g Git) gitFiles(ctx context.Context) (map[string]engine.GitFile, error) {
+	common, err := g.output(ctx, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(g.Dir, common)
+	}
+	paths := map[string]string{".git/config": filepath.Join(common, "config")}
+	if worktree, err := g.gitPath(ctx, "config.worktree"); err == nil {
+		paths[".git/config.worktree"] = worktree
+	}
+	if entries, err := os.ReadDir(filepath.Join(common, "hooks")); err == nil {
+		for _, entry := range entries {
+			paths[".git/hooks/"+entry.Name()] = filepath.Join(common, "hooks", entry.Name())
+		}
+	}
+	files := map[string]engine.GitFile{}
+	for name, path := range paths {
+		info, err := os.Lstat(path)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		file := engine.GitFile{Path: path, Mode: info.Mode()}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			target, err := os.Readlink(path)
+			if err != nil {
+				return nil, err
+			}
+			file.Data = []byte(target)
+		} else if file.Data, err = os.ReadFile(path); err != nil {
+			return nil, err
+		}
+		files[name] = file
+	}
+	return files, nil
+}
+
+// Restore puts the repository back where before found it, except the paths in keep: hooks
+// and config, local branches, HEAD, the merge state, the index, tracked files that differ,
+// and new untracked files, which are removed. Ignored files are never deleted; the new ones
+// are reported. It checks the result and fails when it cannot prove the repository is back.
+func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string) (engine.Restored, error) {
 	kept := map[string]bool{}
 	for _, path := range keep {
 		kept[path] = true
 	}
 	now, err := g.Snapshot(ctx)
 	if err != nil {
-		return nil, err
+		return engine.Restored{}, err
 	}
 	changed := map[string]bool{}
+	if err := g.restoreGitFiles(before.Git, now.Git, changed); err != nil {
+		return engine.Restored{}, err
+	}
+	if err := g.restoreRefs(ctx, before, now, changed); err != nil {
+		return engine.Restored{}, err
+	}
+	for _, name := range mergeFiles {
+		was, had := before.Merge[name]
+		is, has := now.Merge[name]
+		if had == has && bytes.Equal(was, is) {
+			continue
+		}
+		path, err := g.gitPath(ctx, name)
+		if err != nil {
+			return engine.Restored{}, err
+		}
+		if had {
+			err = os.WriteFile(path, was, 0o644)
+		} else {
+			err = os.Remove(path)
+		}
+		if err != nil {
+			return engine.Restored{}, err
+		}
+		changed[".git/"+name] = true
+	}
 	var info bytes.Buffer
 	paths := map[string]bool{}
 	for path := range before.Index {
@@ -515,22 +682,22 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 	}
 	if info.Len() > 0 {
 		if _, err := g.raw(ctx, info.Bytes(), "update-index", "-z", "--index-info"); err != nil {
-			return nil, err
+			return engine.Restored{}, err
 		}
 	}
 	after, err := g.Snapshot(ctx)
 	if err != nil {
-		return nil, err
+		return engine.Restored{}, err
 	}
 	for path := range after.Dirty {
 		if kept[path] || before.Dirty[path] || !strings.HasSuffix(strings.SplitN(before.Index[path], "\n", 2)[0], " 0") {
 			continue
 		}
 		if err := g.safePath(path); err != nil {
-			return nil, err
+			return engine.Restored{}, err
 		}
 		if _, err := g.output(ctx, "checkout-index", "-f", "--", path); err != nil {
-			return nil, err
+			return engine.Restored{}, err
 		}
 		changed[path] = true
 	}
@@ -539,23 +706,138 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 			continue
 		}
 		if err := g.safePath(path); err != nil {
-			return nil, err
+			return engine.Restored{}, err
 		}
 		full := filepath.Join(g.Dir, filepath.FromSlash(path))
 		if info, err := os.Lstat(full); err == nil && !info.IsDir() {
 			if err := os.Remove(full); err != nil {
-				return nil, err
+				return engine.Restored{}, err
 			}
-			removeEmptyDirs(filepath.Dir(full))
+			g.removeEmptyDirs(filepath.Dir(full))
 		}
 		changed[path] = true
 	}
-	out := make([]string, 0, len(changed))
-	for path := range changed {
-		out = append(out, path)
+	var out engine.Restored
+	for path := range after.Ignored {
+		if !kept[path] && !before.Ignored[path] {
+			out.Ignored = append(out.Ignored, path)
+		}
 	}
-	sort.Strings(out)
+	sort.Strings(out.Ignored)
+	for path := range changed {
+		out.Paths = append(out.Paths, path)
+	}
+	sort.Strings(out.Paths)
+	if err := g.provenBack(ctx, before, kept); err != nil {
+		return out, err
+	}
 	return out, nil
+}
+
+func (g Git) restoreGitFiles(before, now map[string]engine.GitFile, changed map[string]bool) error {
+	for name, was := range before {
+		path := was.Path
+		is, ok := now[name]
+		if ok && is.Mode == was.Mode && bytes.Equal(is.Data, was.Data) {
+			continue
+		}
+		if ok {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
+		}
+		var err error
+		if was.Mode&fs.ModeSymlink != 0 {
+			err = os.Symlink(string(was.Data), path)
+		} else if err = os.WriteFile(path, was.Data, was.Mode.Perm()); err == nil {
+			err = os.Chmod(path, was.Mode.Perm())
+		}
+		if err != nil {
+			return err
+		}
+		changed[name] = true
+	}
+	for name, is := range now {
+		if _, ok := before[name]; ok {
+			continue
+		}
+		if err := os.Remove(is.Path); err != nil {
+			return err
+		}
+		changed[name] = true
+	}
+	return nil
+}
+
+func (g Git) restoreRefs(ctx context.Context, before, now engine.TreeState, changed map[string]bool) error {
+	for name, sha := range before.Refs {
+		if now.Refs[name] == sha {
+			continue
+		}
+		if _, err := g.output(ctx, "update-ref", name, sha); err != nil {
+			return err
+		}
+		changed[name] = true
+	}
+	for name := range now.Refs {
+		if _, ok := before.Refs[name]; ok {
+			continue
+		}
+		if _, err := g.output(ctx, "update-ref", "-d", name); err != nil {
+			return err
+		}
+		changed[name] = true
+	}
+	switch {
+	case before.Symref != "" && now.Symref != before.Symref:
+		if _, err := g.output(ctx, "symbolic-ref", "HEAD", before.Symref); err != nil {
+			return err
+		}
+		changed["HEAD"] = true
+	case before.Symref == "" && (now.Symref != "" || now.Head != before.Head):
+		if _, err := g.output(ctx, "update-ref", "--no-deref", "HEAD", before.Head); err != nil {
+			return err
+		}
+		changed["HEAD"] = true
+	}
+	return nil
+}
+
+// provenBack compares the repository with before and says what still differs.
+func (g Git) provenBack(ctx context.Context, before engine.TreeState, kept map[string]bool) error {
+	now, err := g.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	var differ []string
+	if now.Head != before.Head || now.Symref != before.Symref {
+		differ = append(differ, "HEAD")
+	}
+	for _, name := range mergeFiles {
+		if !bytes.Equal(now.Merge[name], before.Merge[name]) {
+			differ = append(differ, name)
+		}
+	}
+	for name, sha := range before.Refs {
+		if now.Refs[name] != sha {
+			differ = append(differ, name)
+		}
+	}
+	for path, meta := range before.Index {
+		if !kept[path] && now.Index[path] != meta {
+			differ = append(differ, path)
+		}
+	}
+	for path := range now.Index {
+		if _, ok := before.Index[path]; !ok && !kept[path] {
+			differ = append(differ, path)
+		}
+	}
+	if len(differ) > 0 {
+		sort.Strings(differ)
+		return fmt.Errorf("the repository still differs from before the agent ran: %s", strings.Join(differ, ", "))
+	}
+	return nil
 }
 
 // checkPath refuses a path that is absolute, empty, leaves the checkout, or points into

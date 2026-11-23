@@ -1130,6 +1130,11 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 				// The base moved after the check above. Nothing was merged, so this is known.
 				return r.refused(ctx, err)
 			}
+			if errors.Is(err, ErrBehind) {
+				// Nothing was merged: the host wants the change updated first.
+				r.cur.Pending = nil
+				return r.record(merge, statement.Hold, BehindReason, nil)
+			}
 			return r.record(merge, statement.Hold, "merge outcome unknown: "+err.Error(), nil)
 		}
 	}

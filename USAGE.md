@@ -750,7 +750,10 @@ nothing is checked, the host decides, and the merge statement says why. A host t
 the merge because of conflicts (`gh pr merge` saying the merge commit cannot be cleanly
 created, or that the change has merge conflicts) is not an unknown outcome either: the run
 resolves the conflict. Only gh's stderr is read, never the command line, and a refusal from
-branch policy, a required check or a missing review stays a plain failure.
+branch policy, a required check or a missing review stays a plain failure. A refusal because
+the change is behind its base (`not up to date with the base branch`) holds with `the change
+is behind its base; resume to merge again after it is updated`; span does not update the
+change on its own.
 
 On a conflict, the run merges the base in its own checkout with `git merge --no-commit
 --no-ff origin/<base>`. It never rebases and never force-pushes. It holds with the reason
@@ -778,9 +781,14 @@ least `medium`, and `theirs`, `delete` and `regenerate` are always `high`. An ac
 once more; a second refusal, a missing agent, or a fourth proposal leaves only the mechanical
 options: keep this branch's version, take the base's, or keep or delete a deleted file.
 
-The agent runs in the checkout. Whatever it stages, edits or creates outside what span
-resolves is put back before its proposal is used, and the card's note says which files it
-touched. No file reaches the merge commit unless a card showed it.
+The agent runs in the checkout. Whatever it does there is put back before its proposal is
+used: staged, edited or new files, commits, amends, resets, a checkout of another branch, the
+merge state, local branches, hooks and git config. The card's note names what it touched.
+Ignored files it created are named too but never deleted. When span cannot prove the
+repository is back where it was, the conflict fails and only abort is offered. The merge
+commit is made with every hook disabled, and it is only accepted when its parents are exactly
+the run's head and the base span merged; any other commit is refused and never pushed. No file
+reaches the merge commit unless a card showed it.
 
 `regenerate` is only offered for lockfiles and generated files. Its command must start with
 one of `npm`, `pnpm`, `yarn`, `bun`, `npx`, `go`, `cargo`, `poetry`, `pip`, `pip3`, `uv`,

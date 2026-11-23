@@ -847,7 +847,7 @@ func TestRestoreUndoesWhatAnAgentChangedOutsideTheConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(changed, ",") != "b.txt,c.txt,d.txt" {
+	if strings.Join(changed.Paths, ",") != "b.txt,c.txt,d.txt" {
 		t.Fatalf("restored %v", changed)
 	}
 	if git(t, dir, "ls-files", "-s") != index || git(t, dir, "status", "--porcelain") != status {
@@ -981,5 +981,253 @@ func TestAMergeCommitIsNotPushedWhileProveFails(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(run.root, run.id, "merged")); err == nil {
 		t.Fatal("merged with a failing prove")
+	}
+}
+
+// The branch replaced the directory d with a symlink to a directory outside the checkout;
+// the base edited d/x. Deleting d/x and keeping the symlink must not remove $OUT/x.
+func TestResolveNeverDeletesThroughAParentThatBecameASymlink(t *testing.T) {
+	symlinkOrSkip(t)
+	out := t.TempDir()
+	write(t, out, "x", "outside, untouched\n")
+	dir := diverged(t,
+		func(d string) { write(t, d, "d/x", "base\n") },
+		func(d string) {
+			must(t, os.RemoveAll(filepath.Join(d, "d")))
+			must(t, os.Symlink(out, filepath.Join(d, "d")))
+		},
+		func(d string) { write(t, d, "d/x", "edited\n") },
+	)
+	got := integrate(t, dir)
+	link := onlyFile(t, got, "d", "other")
+	onlyFile(t, got, "d/x", "modify-delete")
+	err := Git{Dir: dir}.Resolve(context.Background(), map[string]engine.FileResolution{
+		"d/x": {Delete: true},
+		"d":   {Blob: link.Ours.SHA, Mode: link.Ours.Mode, Remove: link.Temps},
+	})
+	if body, readErr := os.ReadFile(filepath.Join(out, "x")); readErr != nil || string(body) != "outside, untouched\n" {
+		t.Fatalf("the file outside the checkout changed: %q %v (resolve: %v)", body, readErr, err)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry := git(t, dir, "ls-files", "-s", "d"); !strings.HasPrefix(entry, "120000 ") {
+		t.Fatalf("d = %q", entry)
+	}
+}
+
+type repoState struct{ head, symref, merging, index string }
+
+func stateOf(t *testing.T, dir string) repoState {
+	t.Helper()
+	merging, err := Git{Dir: dir}.Merging(context.Background())
+	must(t, err)
+	symref, _ := exec.Command("git", "-C", dir, "symbolic-ref", "-q", "HEAD").Output()
+	return repoState{git(t, dir, "rev-parse", "HEAD"), strings.TrimSpace(string(symref)), fmt.Sprint(merging), git(t, dir, "ls-files", "-s")}
+}
+
+func conflictedRepo(t *testing.T) string {
+	t.Helper()
+	dir := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n"); write(t, d, "c.txt", "c\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	integrate(t, dir)
+	return dir
+}
+
+func TestRestoreUndoesAnAgentsCommitCheckoutAndReset(t *testing.T) {
+	for name, script := range map[string]string{
+		"commit":   "echo x > a.txt; echo y > c.txt; git add -A; git commit -qm agent",
+		"amend":    "echo y > c.txt; git add -A; git commit -qm agent; git commit -q --amend -m again",
+		"reset":    "git reset -q --hard HEAD~1",
+		"checkout": "git checkout -q -f dev",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				t.Skip("the agent script uses sh")
+			}
+			dir := conflictedRepo(t)
+			g := Git{Dir: dir}
+			want := stateOf(t, dir)
+			before, err := g.Snapshot(context.Background())
+			must(t, err)
+			cmd := exec.Command("sh", "-c", script)
+			cmd.Dir = dir
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("%v %s", err, out)
+			}
+			if _, err := g.Restore(context.Background(), before, nil); err != nil {
+				t.Fatal(err)
+			}
+			if got := stateOf(t, dir); got != want {
+				t.Fatalf("after %s:\n got %+v\nwant %+v", name, got, want)
+			}
+			if body, _ := os.ReadFile(filepath.Join(dir, "c.txt")); string(body) != "c\n" {
+				t.Fatalf("c.txt = %q", body)
+			}
+			must(t, g.Abort(context.Background()))
+			if head := git(t, dir, "rev-parse", "HEAD"); head != git(t, dir, "rev-parse", "feat/x") || git(t, dir, "rev-parse", "HEAD^{tree}") == "" {
+				t.Fatal("abort did not return to the branch")
+			}
+		})
+	}
+}
+
+func TestRestorePutsBackHooksAndConfig(t *testing.T) {
+	dir := conflictedRepo(t)
+	g := Git{Dir: dir}
+	before, err := g.Snapshot(context.Background())
+	must(t, err)
+	config := git(t, dir, "config", "--local", "--list")
+	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	must(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	must(t, os.WriteFile(hook, []byte("#!/bin/sh\necho h > h.txt\ngit add h.txt\n"), 0o755))
+	git(t, dir, "config", "core.hooksPath", "/tmp/elsewhere")
+	changed, err := g.Restore(context.Background(), before, nil)
+	must(t, err)
+	if _, err := os.Stat(hook); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the agent's hook survived")
+	}
+	if git(t, dir, "config", "--local", "--list") != config {
+		t.Fatal("the agent's config survived")
+	}
+	if !strings.Contains(strings.Join(changed.Paths, ","), ".git/hooks/pre-commit") {
+		t.Fatalf("changed %v", changed)
+	}
+}
+
+func TestFinishMergeRunsNoHooks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook is a shell script")
+	}
+	dir := conflictedRepo(t)
+	g := Git{Dir: dir}
+	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	must(t, os.MkdirAll(filepath.Dir(hook), 0o755))
+	must(t, os.WriteFile(hook, []byte("#!/bin/sh\necho h > h.txt\ngit add h.txt\n"), 0o755))
+	file := onlyFile(t, integrationOf(t, dir), "a.txt", "content")
+	must(t, g.Resolve(context.Background(), map[string]engine.FileResolution{"a.txt": {Blob: file.Ours.SHA, Mode: file.Ours.Mode}}))
+	if _, err := g.FinishMerge(context.Background(), "merge"); err != nil {
+		t.Fatal(err)
+	}
+	if tree := git(t, dir, "ls-tree", "-r", "--name-only", "HEAD"); strings.Contains(tree, "h.txt") {
+		t.Fatalf("a hook added a file to the merge commit: %q", tree)
+	}
+}
+
+// integrationOf reads the conflicted files of a merge already in progress.
+func integrationOf(t *testing.T, dir string) engine.Integration {
+	t.Helper()
+	g := Git{Dir: dir}
+	mergeBase := git(t, dir, "merge-base", "HEAD", "MERGE_HEAD")
+	files, err := g.conflicts(context.Background(), mergeBase, git(t, dir, "rev-parse", "MERGE_HEAD"))
+	must(t, err)
+	return engine.Integration{Files: files}
+}
+
+// commitAgent commits during Propose; ignoredAgent leaves an ignored file and a hook.
+type commitAgent struct {
+	strayAgent
+	script string
+}
+
+func (a commitAgent) Propose(ctx context.Context, name, workspace, text string) (engine.ConflictReply, error) {
+	cmd := exec.Command("sh", "-c", a.script)
+	cmd.Dir = workspace
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return engine.ConflictReply{}, fmt.Errorf("%v: %s", err, out)
+	}
+	return engine.ConflictReply{Groups: []engine.ConflictReplyGroup{{ID: "g1", Files: []string{"a.txt"}, Options: []engine.ConflictReplyOption{
+		{ID: "both", Title: "Both", Risk: "low", Action: "combine", Content: "ours\ntheirs\n"},
+		{ID: "mine", Title: "Mine", Risk: "medium", Action: "ours"},
+	}}}}, nil
+}
+
+func TestAnAgentsCommitNeverBecomesTheMerge(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	run := newRealRun(t, commitAgent{script: "echo x > a.txt; echo y > c.txt; git add -A; git commit -qm agent"}, "git --version")
+	run.resume(t)
+	must(t, engine.ChooseConflict(run.root, run.id, map[string]string{"g1": "both"}))
+	if got := run.resume(t); got.Verdict != "advance" {
+		t.Fatalf("%+v", got)
+	}
+	if parents := git(t, run.clone, "rev-parse", "HEAD^1", "HEAD^2"); parents != run.head+"\n"+git(t, run.origin, "rev-parse", "dev") {
+		t.Fatalf("the merge's parents are %q", parents)
+	}
+	if changed := git(t, run.clone, "diff", "--name-only", "HEAD^1", "HEAD"); changed != "a.txt" {
+		t.Fatalf("the merge commit carries %q", changed)
+	}
+	if body := git(t, run.clone, "show", "HEAD:a.txt"); body != "ours\ntheirs" {
+		t.Fatalf("a.txt = %q", body)
+	}
+}
+
+func TestAbortAfterAnAgentsCommitReturnsToTheBranchHead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	run := newRealRun(t, commitAgent{script: "echo y > c.txt; git add -A; git commit -qm agent"}, "git --version")
+	run.resume(t)
+	must(t, engine.AbortConflict(run.root, run.id))
+	run.resume(t)
+	if head := git(t, run.clone, "rev-parse", "HEAD"); head != run.head {
+		t.Fatalf("head %s, want %s", head, run.head)
+	}
+	if status := git(t, run.clone, "status", "--porcelain"); status != "" {
+		t.Fatalf("tree %q", status)
+	}
+}
+
+func TestAnAgentsHookNeverRunsOnTheMergeCommit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	script := "mkdir -p .git/hooks && printf '#!/bin/sh\\necho h > h.txt\\ngit add h.txt\\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
+	run := newRealRun(t, commitAgent{script: script}, "git --version")
+	run.resume(t)
+	must(t, engine.ChooseConflict(run.root, run.id, map[string]string{"g1": "both"}))
+	if got := run.resume(t); got.Verdict != "advance" {
+		t.Fatalf("%+v", got)
+	}
+	if tree := git(t, run.clone, "ls-tree", "-r", "--name-only", "HEAD"); strings.Contains(tree, "h.txt") {
+		t.Fatalf("the hook's file is in the merge: %q", tree)
+	}
+	if _, err := os.Stat(filepath.Join(run.clone, ".git", "hooks", "pre-commit")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the agent's hook was left behind")
+	}
+}
+
+func TestIgnoredFilesAnAgentCreatesAreNamed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	run := newRealRun(t, commitAgent{script: "echo noise > build.log"}, "git --version")
+	write(t, run.clone, ".git/info/exclude", "*.log\n")
+	run.resume(t)
+	snap, err := engine.Load(run.root, run.id)
+	must(t, err)
+	if !strings.Contains(snap.Cursor.Conflict.Note, "build.log") {
+		t.Fatalf("note %q", snap.Cursor.Conflict.Note)
+	}
+	if _, err := os.Stat(filepath.Join(run.clone, "build.log")); err != nil {
+		t.Fatal("an ignored file was deleted")
+	}
+}
+
+func TestHostMergeNamesABehindRefusal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake gh is a shell script")
+	}
+	bin := t.TempDir()
+	must(t, os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho \"$GH_STDERR\" >&2\nexit 1\n"), 0o755))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_STDERR", "X Pull request #3 is not mergeable: the head branch is not up to date with the base branch.")
+	err := Host{Workspace: t.TempDir(), State: t.TempDir()}.Merge(context.Background(), "https://example.test/pull/3")
+	if !errors.Is(err, engine.ErrBehind) || errors.Is(err, engine.ErrConflict) {
+		t.Fatalf("err = %v", err)
 	}
 }
