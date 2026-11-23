@@ -273,3 +273,9 @@ export const stages = [
   "promote",
   "note",
 ] as const
+
+/** The branches a run may start from, and the base an empty field means (span.yaml's base, else dev). */
+export interface BranchChoice {
+  branches: string[]
+  defaultBase: string
+}

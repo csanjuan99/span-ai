@@ -26,7 +26,7 @@ What auto-configuration writes, only if `span.yaml` is missing:
 
 `--force` rewrites `span.yaml`. An existing file is left in place.
 
-The project must already be a git repository with the base branch: `dev` for `feat/` and `fix/`, `master` for `hotfix/`.
+The project must already be a git repository with the base branch on `origin` (or locally, when there is no `origin` remote): `dev` for `feat/` and `fix/`, `master` for `hotfix/`, unless the run or `span.yaml` names another one. See [Where a branch starts and where its PR goes](#where-a-branch-starts-and-where-its-pr-goes).
 
 ## Where Span writes
 
@@ -157,11 +157,14 @@ If you also pass `--story`, that text is the brief and the issue key is still us
 
 Only three prefixes exist.
 
-| Prefix | Starts from | Use |
+| Prefix | Starts from by default | Use |
 | --- | --- | --- |
 | `feat/` | `dev` | a new story |
 | `fix/` | `dev` | an adjustment |
 | `hotfix/` | `master` | an adjustment from master |
+
+The defaults apply only when nobody chose a base. A base named with `--base`, the desk's
+**Base branch** field, or `base:` in `span.yaml` may be any valid branch name, for any prefix.
 
 The text after the prefix is inferred when the span starts. A linked key such as `AET-1478`, from `--issue` or from the story text, produces `feat/AET-1478-show-channels`. Without a key, the first line becomes a slug: `feat/add-saved-cards`.
 
@@ -171,6 +174,101 @@ The text after the prefix is inferred when the span starts. A linked key such as
 ./span quickstart --workspace /path/to/project --kind fix --issue AET-1478 --story "Show channels"
 ./span quickstart --workspace /path/to/project --base master --story "Refund the double charge"
 ```
+
+### Where a branch starts and where its PR goes
+
+The base is one branch with two jobs: the story's branch is cut from it, and the pull
+request opens into it (`gh pr create --base=<base> --head=<branch>`). Span always passes the
+base; without it GitHub picks the repository's default branch, usually `main`, whatever
+the branch was cut from.
+
+The base is chosen in this order, first match wins:
+
+1. The run names it: `--base` on `quickstart` or `run`, the **Base branch** field on the
+   desk, or the `base` form field of `POST /quickstart`. It is used for any kind.
+2. `base:` in `span.yaml`, for `feat/` and `fix/` only. A hotfix keeps `master`, and this
+   line never decides the kind: with `base: master`, a story without `--kind` is still a
+   `feat/` (or a `fix/` when it starts with `fix:`), now cut from `master`.
+3. The default: `dev` for `feat/` and `fix/`, `master` for `hotfix/`.
+
+Without `--kind`, a story is `feat/` unless it starts with `fix:`, `bug:` or `hotfix:`. The
+one exception is kept from before: `--base master` named for the run, without `--kind`,
+still means `hotfix/`. Any other named base leaves the inferred kind alone.
+
+```yaml
+# span.yaml: every feat and fix in this checkout starts from, and opens into, release/2.1
+base: release/2.1
+```
+
+Stacked work is a base that is another feature branch. SAL-4 builds on SAL-3, which is not
+merged yet:
+
+```bash
+./span quickstart --workspace /path/to/project --issue SAL-4 --base feat/SAL-3-wallet
+```
+
+The branch `feat/SAL-4-...` starts from `feat/SAL-3-wallet` and its pull request targets
+`feat/SAL-3-wallet`, so the review shows only SAL-4's change. When SAL-3 merges, retarget
+SAL-4's pull request to SAL-3's own base.
+
+**What a base may be.** A branch name, as `git check-ref-format --branch` accepts it, that
+is not `HEAD`, does not start with `-`, has no spaces around it, and does not look like a
+commit (7 to 40 hex digits; a branch named like a sha, such as `deadbeef`, cannot be a base).
+Tags and commits are not bases. Anything else is refused
+before git or gh sees it, wherever it came from (flag, desk, form, `span.yaml`):
+
+```text
+invalid base branch "--repo=evil/x": use a branch name, not an option, HEAD, or a commit
+```
+
+**Where the branch is cut from.** Span first fetches the base from `origin` (best effort,
+into `refs/remotes/origin/<base>` only; your own branch is never moved). When origin has it,
+the new branch is cut from `origin/<base>`, even when your local branch is behind or has
+diverged from it: a stale local `dev` must not decide where new work starts. Without
+origin's copy, the local branch is used; offline, the local branch wins silently. The new
+branch does not track its base.
+
+**The base must be on origin.** Before the first stage, and again just before the push at
+open, the base must exist on `origin` (a repository without an `origin` remote has no forge,
+so a local branch is enough there). Span asks origin itself (`git ls-remote --exit-code origin
+-- refs/heads/<base>`), so a branch deleted on origin mid-run counts as gone even though the
+checkout still has its `origin/<base>` ref; that stale ref is dropped, your local branch is
+not touched. Offline, the refs already known decide. A base that is only local, a tag, or
+missing holds the run, before any build work and before any push:
+
+```text
+base branch feat/SAL-3-wallet does not exist on origin; push it or choose another base
+```
+
+A run whose base is the branch it is on also holds before the first stage. A run with no
+base at all holds at open instead of opening a pull request.
+
+**A pull request on the wrong base holds.** Span looks at every open pull request for the
+branch. One that targets the base is reused. When none does, for example one opened against
+`main` before this check existed, Span does not reuse it and does not edit it:
+
+```text
+the open change https://github.com/o/r/pull/7 targets main but this run's base is dev; retarget it (gh pr edit 7 --base dev) or close it, then resume
+```
+
+With several, each is named and the command retargets the first. Retarget or close, then
+resume the run.
+
+**`span run` now has a base too.** It used to open into whatever GitHub called the default
+branch. Now it uses `--base`, else `base:` in `span.yaml` for feat and fix, else `dev`, or
+`master` for a hotfix. The kind comes from `--branch`, or, without it, from the branch that is
+checked out: a run on `hotfix/h` opens into `master`, not `dev`. `--branch` is the branch the
+run works on with or without `--worktree`: it must be `feat/`, `fix/` or `hotfix/`, and a new
+one is cut from the base. Before, `--branch` without `--worktree` was ignored. This is a deliberate change: on a repository without that base, or
+on a checkout that is on the base itself, the run holds before the first stage. The base is
+also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
+diffs against it.
+
+The desk fills the field's suggestions from `GET /branches?path=<folder>`: the local and
+`origin` branches of that repository, `origin/` stripped, the default base first, then the
+50 most recently committed, then the rest alphabetically, 200 in all; and `default`, the base
+an empty field means (`base:` in `span.yaml`, else `dev`). The placeholder shows `master`
+when the kind is `hotfix`.
 
 ## House style
 
@@ -217,7 +315,7 @@ The agent is a CLI already on `PATH` with Gentle AI detectable:
 
 With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
 
-Build requires Organic Driven Development. `odd/tasks/<feature>.md` must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
+Build requires Organic Driven Development. `odd/tasks/<feature>.md` (the run's feature, from its branch; see [What span.yaml is for](#what-spanyaml-is-for)) must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
 
 ## Basic use
 
@@ -232,10 +330,45 @@ go test ./...
 
 ### Project policy
 
-`span.yaml` lives at the workspace root unless you pass `--policy`. `feature` allows letters, digits, `.`, `-`, and `_`. An empty mode means `auto`.
+`span.yaml` lives at the workspace root unless you pass `--policy`. It is optional. An empty mode means `auto`.
+
+#### What span.yaml is for
+
+`span.yaml` is project policy only: the agent, the checks, the stage modes, the base, the
+environments, the manifest. It never names a run. Every run takes its identity from its
+own branch, one feature per branch name:
+
+| Branch | Feature |
+| --- | --- |
+| `feat/sal-4-cards` | `sal-4-cards` |
+| `fix/sal-4-cards` | `fix-sal-4-cards` |
+| `hotfix/sal-4-cards` | `hotfix-sal-4-cards` |
+| `feat/x/y`, `feat/fix-a` | slugged, plus `-` and six hex digits of the branch name's SHA-1 |
+| `dev`, `main`, a detached `HEAD` | the run id |
+
+A name that had to change (`/`, a character other than a letter, digit, `.`, `-` or
+`_`, more than 80 characters, or a `feat/` suffix that reads as another kind) carries the
+hash, so two branches never share a feature. A capital letter alone only lowercases the name
+(`feat/SAL-4-cards` is `sal-4-cards`), since branches that differ only in case cannot coexist
+on a case-insensitive checkout. A Windows device name (`con`, `nul`, `com1`)
+gets a `-` after it. A branch that is not `feat/`, `fix/` or `hotfix/` is shared by every
+run started on it, so the run id names the run instead. That feature names the run's
+document `odd/tasks/<feature>.md` and its commit scope `feat(<feature>): span <id>`. The
+pull request title is the story's first line (without `#` or control characters, at most
+100 characters); a first line that is only a story key (`SAL-4`) is joined with the next
+one. Two runs on two branches therefore never write the same file, so they can run in
+parallel without conflicting. The feature is recorded in the run, so a resume keeps it; a
+run recorded before this reads it from its branch.
+
+Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree when the
+checkout is busy: it gets the policy
+`./span quickstart` would write (`agent: any`, `rules: harness`, open `auto`, merge
+`hold`, the detected check such as `go test ./...` for a `go.mod`, the harness skills).
+Nothing is written to disk for that. A `span.yaml` that exists but does not load is still
+an error, and so is a `--policy <path>` that does not exist: only the implicit
+`<workspace>/span.yaml` may be missing. `feature:` in an older file is read and ignored; you can delete it.
 
 ```yaml
-feature: payments
 agent: any
 stages:
   open: auto
@@ -336,7 +469,7 @@ QA does not run the fast command a second time. When prove already ran that exac
 
 A browser repo also tells the agent to test user-visible behavior with `getByRole` and web-first `expect`, and to record a trace on the first retry. `@playwright/mcp --caps=testing` is named as an authoring aid. The gate is the command, not an MCP session.
 
-Span commits. The agent does not. The message is `feat(<feature>): span <id>`, which names the session. The author and committer are **whoever that checkout is configured with**: Span sets no identity, adds no co-author trailer, and never overwrites your `user.name` or `user.email`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
+Span commits. The agent does not. The message is `feat(<feature>): span <id>`, which names the session; `<feature>` comes from the run's branch. The author and committer are **whoever that checkout is configured with**: Span sets no identity, adds no co-author trailer, and never overwrites your `user.name` or `user.email`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
 
 ### Statements
 
@@ -571,8 +704,9 @@ name is accepted too, so an older `agent: cursor-agent` keeps working.
 
 Choose it on the page: the desk has an **Agent** picker under the folder. It lists all
 four with the reason each one cannot run, and saving rewrites the one `agent:` line in
-`span.yaml` without touching a comment. The picker needs the file to exist; a folder
-without one is told to run `./span quickstart` once.
+`span.yaml` without touching a comment. A folder without `span.yaml` gets one holding just
+that `agent:` line, but only when the folder is a git repository or already has `.span/`;
+anything else is refused, so the picker never leaves a file in a home directory.
 
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
@@ -653,8 +787,9 @@ These are the only worktree commands Span runs. Nothing is inferred:
 
 | Command | When |
 | --- | --- |
-| `git worktree add <path> <branch>` | the branch already exists |
-| `git worktree add -b <branch> <path> <base>` | the branch is new, from `dev` |
+| `git worktree add -- <path> <branch>` | the branch already exists |
+| `git worktree add --no-track -b <branch> -- <path> <base>` | the branch is new, from its [base](#where-a-branch-starts-and-where-its-pr-goes) (`origin/<base>` when origin has it) |
+| `git fetch --quiet origin -- +refs/heads/<base>:refs/remotes/origin/<base>` | before every new branch and every base check; best effort |
 | `git worktree list --porcelain` | deciding whether this branch already has a tree |
 | `git worktree remove --force <path>` | dropping an isolated tree; the branch survives |
 | `git worktree prune` | forgetting trees whose directory is gone |
@@ -853,7 +988,7 @@ The page reads the conflict from the cursor's `conflict` field and from live
 
 ### Changes and GitHub
 
-When `gh` is on `PATH`, open lists and creates the pull request with `gh pr`, and merge uses `gh pr merge --merge`. The workspace must be that repository's checkout, with commits already pushed to `origin`.
+When `gh` is on `PATH`, open lists the branch's pull requests with `gh pr list --head=<branch> --json url,baseRefName`, creates one with `gh pr create --base=<base> --head=<branch>`, and merge uses `gh pr merge --merge`. The base is the run's, see [Where a branch starts and where its PR goes](#where-a-branch-starts-and-where-its-pr-goes). The workspace must be that repository's checkout, with commits already pushed to `origin`.
 
 When `gh` is absent, the change is recorded as `local:<id>:<branch>` in `.span/runs/<id>/change.url`. A local merge writes `merged` beside it. That does not publish to a forge.
 
@@ -1005,7 +1140,7 @@ The binary and the agents live on the same machine. `serve` reads and writes fil
 
 ## Run checklist
 
-- [ ] `span.yaml` has a valid `feature`, prove commands, and environments.
+- [ ] `span.yaml`, when present, has prove commands and environments. Without it the quickstart defaults apply.
 - [ ] The workspace is a git repo with `origin` when open is `auto`.
 - [ ] When the story comes from Jira, that same folder has its own `.span/jira.json`.
 - [ ] The chosen CLI is on `PATH` and Gentle AI is detected in its file.

@@ -424,7 +424,7 @@ func TestTheMergeStageResolvesARealConflict(t *testing.T) {
 		Workspace: clone, Root: root, Brief: "Keep a.txt.",
 		Policy: policy.File{Feature: "payments", Prove: policy.Bands{Fast: []string{"git --version"}, Baseline: &off}},
 		Agents: quietAgents{}, Check: Exec{}, Source: Git{Dir: clone},
-		Review: LocalReview{Dir: root}, Release: CommandRelease{},
+		Review: localReview{LocalReview{Dir: root}}, Release: CommandRelease{},
 	}
 	ctx := context.Background()
 	got, err := engine.Resume(ctx, opt, id)
@@ -893,7 +893,7 @@ func newRealRun(t *testing.T, agents engine.Agents, prove string) *realRun {
 		Workspace: clone, Root: run.root, Brief: "Keep a.txt.",
 		Policy: policy.File{Feature: "payments", Prove: policy.Bands{Fast: []string{prove}, Baseline: &off}},
 		Agents: agents, Check: Exec{}, Source: Git{Dir: clone},
-		Review: LocalReview{Dir: run.root}, Release: CommandRelease{},
+		Review: localReview{LocalReview{Dir: run.root}}, Release: CommandRelease{},
 	}
 	return run
 }
@@ -1527,4 +1527,20 @@ func TestTheRunFailsClosedWhenTheAgentRedirectsGit(t *testing.T) {
 	if treeDigest(t, out) != digest {
 		t.Fatal("span changed something under $OUT")
 	}
+}
+
+// localReview is the local change record as the engine's Review port, as Host uses it when
+// gh is absent; these tests must not depend on whether gh is installed.
+type localReview struct{ LocalReview }
+
+func (r localReview) Find(ctx context.Context, spanID, branch string) ([]engine.Change, error) {
+	url, found, err := r.LocalReview.Find(ctx, spanID, branch)
+	if err != nil || !found {
+		return nil, err
+	}
+	return []engine.Change{{URL: url}}, nil
+}
+
+func (r localReview) Open(ctx context.Context, spanID, branch, _, title, body string) (string, error) {
+	return r.LocalReview.Open(ctx, spanID, branch, title, body)
 }

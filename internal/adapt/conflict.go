@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	branchpkg "span/internal/branch"
 	"span/internal/engine"
 )
 
@@ -51,7 +52,7 @@ func IsConflictMessage(stderr string) bool {
 // but never touches the index or the tree. A base that cannot be fetched or found, or a git
 // without merge-tree --write-tree (older than 2.38), is not checked: Note says why.
 func (g Git) Preflight(ctx context.Context, base string) (engine.Preflight, error) {
-	ref, note := g.baseRef(ctx, base)
+	label, ref, note := g.baseRef(ctx, base)
 	if ref == "" {
 		return engine.Preflight{Note: note}, nil
 	}
@@ -59,7 +60,7 @@ func (g Git) Preflight(ctx context.Context, base string) (engine.Preflight, erro
 	if err != nil {
 		return engine.Preflight{Note: err.Error()}, nil
 	}
-	out := engine.Preflight{Base: ref, BaseSHA: sha}
+	out := engine.Preflight{Base: label, BaseSHA: sha}
 	if _, err := g.hout(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
 		out.Checked = true
 		return out, nil
@@ -103,7 +104,7 @@ func (g Git) Integrate(ctx context.Context, base string) (engine.Integration, er
 	if changes != "" {
 		return engine.Integration{}, errors.New("the checkout has uncommitted changes; span merges the base only into a clean tree")
 	}
-	ref, note := g.baseRef(ctx, base)
+	label, ref, note := g.baseRef(ctx, base)
 	if ref == "" {
 		return engine.Integration{}, errors.New(note)
 	}
@@ -111,7 +112,7 @@ func (g Git) Integrate(ctx context.Context, base string) (engine.Integration, er
 	if err != nil {
 		return engine.Integration{}, err
 	}
-	out := engine.Integration{Base: ref, BaseSHA: sha}
+	out := engine.Integration{Base: label, BaseSHA: sha}
 	if _, err := g.hout(ctx, "merge-base", "--is-ancestor", sha, "HEAD"); err == nil {
 		out.Clean = true
 		return out, nil
@@ -1091,25 +1092,25 @@ func (g Git) safePath(path string) error {
 // baseRef fetches base when the checkout has an origin, into refs/remotes/origin/<base> so a
 // single-branch clone gets it too, and falls back to the local branch without one. An empty
 // ref means the base cannot be found; the note says why.
-func (g Git) baseRef(ctx context.Context, base string) (string, string) {
-	base = strings.TrimSpace(base)
-	if base == "" || strings.HasPrefix(base, "-") || strings.ContainsAny(base, ": \t\n") {
-		return "", fmt.Sprintf("base branch %q is not a branch name", base)
-	}
-	if _, err := g.hout(ctx, "check-ref-format", "--branch", base); err != nil {
-		return "", fmt.Sprintf("base branch %q is not a branch name", base)
+func (g Git) baseRef(ctx context.Context, base string) (string, string, string) {
+	// The same check every base passes before it reaches git: never an option, HEAD or a
+	// commit.
+	if err := branchpkg.CheckBase(base); err != nil {
+		return "", "", err.Error()
 	}
 	if _, err := g.hout(ctx, "remote", "get-url", "origin"); err == nil {
-		spec := "+refs/heads/" + base + ":refs/remotes/origin/" + base
-		if _, err := g.hout(ctx, "fetch", "--quiet", "--no-tags", "origin", spec); err != nil {
-			return "", "the base " + base + " could not be fetched from origin: " + err.Error()
+		// The same refresh worktree.StartPoint does: origin's copy only, never refs/heads.
+		remote := "refs/remotes/origin/" + base
+		if _, err := g.hout(ctx, "fetch", "--quiet", "--no-tags", "origin", "--", "+refs/heads/"+base+":"+remote); err != nil {
+			return "", "", "the base " + base + " could not be fetched from origin: " + err.Error()
 		}
-		return "origin/" + base, ""
+		return "origin/" + base, remote, ""
 	}
-	if _, err := g.hout(ctx, "rev-parse", "--verify", "--quiet", base+"^{commit}"); err != nil {
-		return "", "base branch " + base + " is missing"
+	local := "refs/heads/" + base
+	if _, err := g.hout(ctx, "rev-parse", "--verify", "--quiet", local+"^{commit}"); err != nil {
+		return "", "", "base branch " + base + " is missing"
 	}
-	return base, ""
+	return base, local, ""
 }
 
 type stagedEntry struct {

@@ -66,12 +66,16 @@ func (f *fakeAgents) Build(_ context.Context, _, workspace, text string) error {
 	if f.skipDoc {
 		return nil
 	}
-	dir := filepath.Join(workspace, "odd", "tasks")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// The document goes where the prompt says, which is the run's own feature document.
+	path := filepath.Join(workspace, "odd", "tasks", "payments.md")
+	if _, rest, ok := strings.Cut(text, "Feature document: "); ok {
+		path, _, _ = strings.Cut(rest, "\n")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	body := "# Payments\n\n## Specs\n\nS1. Charge the card.\n\n## Tasks\n\n- T1. S1.\n\n## Log\n\nL1. Charge the card.\n"
-	return os.WriteFile(filepath.Join(dir, "payments.md"), []byte(body), 0o644)
+	return os.WriteFile(path, []byte(body), 0o644)
 }
 
 func (f *fakeAgents) Inspect(context.Context, string, string, string) (InspectDoc, error) {
@@ -89,12 +93,15 @@ type fakeSource struct {
 	stayDirty bool
 	branch    string
 	sha       string
+	// messages are the commit messages, in order.
+	messages []string
 }
 
 func (s *fakeSource) Head(context.Context) (string, error) { return s.sha, nil }
 func (s *fakeSource) Dirty(context.Context) (bool, error)  { return s.dirty, nil }
-func (s *fakeSource) Commit(context.Context, string) (string, error) {
+func (s *fakeSource) Commit(_ context.Context, message string) (string, error) {
 	s.commits++
+	s.messages = append(s.messages, message)
 	s.sha = "abc123"
 	s.dirty = s.stayDirty
 	return s.sha, nil
@@ -119,19 +126,32 @@ type fakeReview struct {
 	merges int
 	found  bool
 	url    string
+	base   string
 	merged bool
 	lookup error
+	// openedBase is the base the last Open was given.
+	openedBase string
+	// extra are more open changes for the same head, after the one url names.
+	extra []Change
+	// titles are the titles every Open was given, in order.
+	titles []string
 }
 
-func (r *fakeReview) Find(context.Context, string, string) (string, bool, error) {
+func (r *fakeReview) Find(context.Context, string, string) ([]Change, error) {
 	if r.lookup != nil {
-		return "", false, r.lookup
+		return nil, r.lookup
 	}
-	return r.url, r.found, nil
+	if !r.found {
+		return r.extra, nil
+	}
+	return append([]Change{{URL: r.url, Base: r.base}}, r.extra...), nil
 }
-func (r *fakeReview) Open(context.Context, string, string, string, string) (string, error) {
+func (r *fakeReview) Open(_ context.Context, _, _, base, title, _ string) (string, error) {
 	r.opens++
+	r.titles = append(r.titles, title)
+	r.openedBase = base
 	r.url = "https://example.test/pull/1"
+	r.base = base
 	r.found = true
 	return r.url, nil
 }
@@ -208,6 +228,7 @@ func baseOpt(t *testing.T) (Options, *fakeAgents, *fakeSource, *fakeReview, *fak
 			Promote: policy.Ladder{Environments: []policy.Environment{{Name: "preview", Command: "echo preview"}}},
 		},
 		Brief:   "Charge the card.",
+		Base:    "dev",
 		Agents:  agents,
 		Check:   check,
 		Source:  source,

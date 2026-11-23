@@ -1,6 +1,8 @@
 package branch
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -52,15 +54,75 @@ func TestPlanFixFromDevAndHotfixFromMaster(t *testing.T) {
 	}
 }
 
-func TestPlanRejectsOtherPrefixesAndWrongBase(t *testing.T) {
+func TestPlanRejectsOtherPrefixes(t *testing.T) {
 	if _, err := Derive("Add saved cards", "", "chore", ""); err == nil {
 		t.Fatal("chore was accepted")
 	}
-	if _, err := Derive("Add saved cards", "", "feat", "master"); err == nil {
-		t.Fatal("feat from master was accepted")
+}
+
+// An explicit base is the person's choice: stacked work starts from a feature branch, and
+// a feat may start from master. Only the default still depends on the kind.
+func TestDeriveBase(t *testing.T) {
+	cases := []struct {
+		name, story, kind, base string
+		wantName, wantBase      string
+		wantErr                 bool
+	}{
+		{name: "feat default", story: "Add saved cards", wantName: "feat/add-saved-cards", wantBase: "dev"},
+		{name: "fix default", story: "fix: rounding", wantName: "fix/rounding", wantBase: "dev"},
+		{name: "hotfix default", story: "refund", kind: "hotfix", wantName: "hotfix/refund", wantBase: "master"},
+		{name: "master infers hotfix", story: "refund", base: "master", wantName: "hotfix/refund", wantBase: "master"},
+		{name: "stacked on a feature", story: "Add saved cards", base: "feat/SAL-3-wallet", wantName: "feat/add-saved-cards", wantBase: "feat/SAL-3-wallet"},
+		{name: "feat from master", story: "Add saved cards", kind: "feat", base: "master", wantName: "feat/add-saved-cards", wantBase: "master"},
+		{name: "hotfix from release", story: "refund", kind: "hotfix", base: "release/2.1", wantName: "hotfix/refund", wantBase: "release/2.1"},
+		{name: "space", story: "x", base: "my base", wantErr: true},
+		{name: "dot dot", story: "x", base: "a..b", wantErr: true},
+		{name: "leading dash", story: "x", base: "-dev", wantErr: true},
+		{name: "leading slash", story: "x", base: "/dev", wantErr: true},
+		{name: "trailing slash", story: "x", base: "dev/", wantErr: true},
+		{name: "lock suffix", story: "x", base: "dev.lock", wantErr: true},
+		{name: "reflog", story: "x", base: "dev@{1}", wantErr: true},
+		{name: "tilde", story: "x", base: "dev~1", wantErr: true},
+		{name: "caret", story: "x", base: "dev^", wantErr: true},
+		{name: "colon", story: "x", base: "a:b", wantErr: true},
+		{name: "glob", story: "x", base: "de*v", wantErr: true},
+		{name: "bracket", story: "x", base: "de[v", wantErr: true},
+		{name: "backslash", story: "x", base: `de\v`, wantErr: true},
+		{name: "question", story: "x", base: "de?v", wantErr: true},
+		{name: "itself", story: "Add saved cards", base: "feat/add-saved-cards", wantErr: true},
 	}
-	if _, err := Derive("Add saved cards", "", "hotfix", "dev"); err == nil {
-		t.Fatal("hotfix from dev was accepted")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Derive(tc.story, "", tc.kind, tc.base)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("base %q was accepted: %+v", tc.base, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Name != tc.wantName || got.Base != tc.wantBase {
+				t.Fatalf("%+v", got)
+			}
+			if !Valid(got.Name, got.Base) {
+				t.Fatalf("Valid(%q, %q) is false", got.Name, got.Base)
+			}
+		})
+	}
+}
+
+func TestValidRefFollowsCheckRefFormat(t *testing.T) {
+	for _, ok := range []string{"dev", "master", "feat/SAL-3", "release/2.1", "a.b"} {
+		if !ValidRef(ok) {
+			t.Errorf("%q was rejected", ok)
+		}
+	}
+	for _, bad := range []string{"", "@", "HEAD", "a b", "a..b", "-a", "/a", "a/", "a.lock", "a@{b", "a~", "a^", "a:", "a?", "a*", "a[", `a\b`, "a//b", ".a", "a/.b", "a.", "a\x7f"} {
+		if ValidRef(bad) {
+			t.Errorf("%q was accepted", bad)
+		}
 	}
 }
 
@@ -127,5 +189,117 @@ func TestTheStoryThatFailedNowDerives(t *testing.T) {
 	}
 	if plan.Feature != "sal-4-retirar-de-hermes-los-modulos-que-no-se-usan" {
 		t.Fatalf("feature = %q", plan.Feature)
+	}
+}
+
+func TestValidBaseRefusesOptionsHeadAndCommits(t *testing.T) {
+	for _, ok := range []string{"dev", "master", "feat/SAL-3", "release/2.1", "x", "deadbee-x"} {
+		if err := CheckBase(ok); err != nil {
+			t.Errorf("%q: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "--upload-pack=touch /tmp/PWNED1", "--repo=evil/x", "-x", "HEAD", "@", "deadbee", "0123456789abcdef0123456789abcdef01234567", " dev", "dev ", "a..b"} {
+		err := CheckBase(bad)
+		if err == nil || !strings.Contains(err.Error(), "invalid base branch") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
+		if _, err := Derive("Add saved cards", "", "", bad); bad != "" && err == nil {
+			t.Errorf("Derive accepted base %q", bad)
+		}
+	}
+}
+
+// A project base: line is a default for feat and fix only. It never makes a story a hotfix,
+// and a hotfix keeps master. A base the run names is the person's choice for any kind; only
+// an explicit master without a kind still means hotfix, as it always has.
+func TestChooseKindAndBase(t *testing.T) {
+	cases := []struct {
+		name, story, kind, explicit, project string
+		wantKind, wantBase, wantName         string
+	}{
+		{name: "nothing chosen", story: "Add cards", wantKind: "", wantBase: "", wantName: "feat/add-cards"},
+		{name: "project base for feat", story: "Add cards", project: "release/2.1", wantKind: "feat", wantBase: "release/2.1", wantName: "feat/add-cards"},
+		{name: "project base for fix", story: "fix: rounding", project: "release/2.1", wantKind: "fix", wantBase: "release/2.1", wantName: "fix/rounding"},
+		{name: "project dev leaves hotfix on master", story: "refund", kind: "hotfix", project: "dev", wantKind: "hotfix", wantBase: "", wantName: "hotfix/refund"},
+		{name: "project master never infers hotfix", story: "Add cards", project: "master", wantKind: "feat", wantBase: "master", wantName: "feat/add-cards"},
+		{name: "hotfix story keeps master", story: "hotfix: refund", project: "dev", wantKind: "", wantBase: "", wantName: "hotfix/refund"},
+		{name: "explicit wins over project", story: "Add cards", explicit: "feat/SAL-3", project: "dev", wantKind: "", wantBase: "feat/SAL-3", wantName: "feat/add-cards"},
+		{name: "explicit for hotfix", story: "refund", kind: "hotfix", explicit: "release/2.1", wantKind: "hotfix", wantBase: "release/2.1", wantName: "hotfix/refund"},
+		{name: "explicit master still infers hotfix", story: "refund", explicit: "master", wantKind: "", wantBase: "master", wantName: "hotfix/refund"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, base, err := Choose(tc.story, tc.kind, tc.explicit, tc.project)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != tc.wantKind || base != tc.wantBase {
+				t.Fatalf("kind %q base %q", kind, base)
+			}
+			plan, err := Derive(tc.story, "", kind, base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if plan.Name != tc.wantName {
+				t.Fatalf("name %q", plan.Name)
+			}
+		})
+	}
+	if _, _, err := Choose("x", "", "--repo=evil/x", ""); err == nil {
+		t.Fatal("an option was accepted as an explicit base")
+	}
+	if _, _, err := Choose("x", "", "", "HEAD"); err == nil {
+		t.Fatal("HEAD was accepted as a project base")
+	}
+}
+
+func shortHash(name string) string {
+	sum := sha1.Sum([]byte(name))
+	return hex.EncodeToString(sum[:])[:6]
+}
+
+func TestFeatureOfNamesEveryBranchApart(t *testing.T) {
+	long := "feat/" + strings.Repeat("a", 120)
+	for name, want := range map[string]string{
+		"feat/a.b":              "a.b",
+		"fix/a.b":               "fix-a.b",
+		"hotfix/a.b":            "hotfix-a.b",
+		"feat/sal-1-x":          "sal-1-x",
+		"feat/SAL-1-x":          "sal-1-x",
+		"feat/x-y":              "x-y",
+		"feat/x/y":              "x-y-" + shortHash("feat/x/y"),
+		"feat/fix-a.b":          "fix-a.b-" + shortHash("feat/fix-a.b"),
+		"fix/Añadir tarjeta":    "fix-anadir-tarjeta-" + shortHash("fix/Añadir tarjeta"),
+		"  feat/sal-9-refund  ": "sal-9-refund",
+		"feat/con":              "con-",
+		"feat/nul.x":            "nul-.x",
+		"feat/com1":             "com1-",
+		long:                    strings.Repeat("a", 73) + "-" + shortHash(long),
+		"dev":                   "",
+		"main":                  "",
+		"HEAD":                  "",
+		"chore/x":               "",
+		"feat/":                 "",
+		"feat/..":               "",
+		"":                      "",
+	} {
+		if got := FeatureOf(name); got != want {
+			t.Fatalf("FeatureOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+	pairs := [][2]string{
+		{"feat/a.b", "fix/a.b"}, {"feat/a.b", "hotfix/a.b"}, {"fix/a.b", "hotfix/a.b"},
+		{"feat/x/y", "feat/x-y"}, {"feat/fix-a.b", "fix/a.b"},
+	}
+	for _, pair := range pairs {
+		if FeatureOf(pair[0]) == FeatureOf(pair[1]) {
+			t.Fatalf("%s and %s share the feature %q", pair[0], pair[1], FeatureOf(pair[0]))
+		}
+	}
+	if got := FeatureOf(long); len(got) != 80 || !ValidFeature(got) {
+		t.Fatalf("long feature %q (%d)", got, len(got))
+	}
+	if !ValidFeature("sal-4.cards_x") || ValidFeature("../x") || ValidFeature("") || ValidFeature("..") {
+		t.Fatal("ValidFeature does not follow the feature rule")
 	}
 }

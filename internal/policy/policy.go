@@ -3,6 +3,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,17 +12,25 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"span/internal/agent"
+	"span/internal/branch"
 )
 
 // Name is the file Span reads at the workspace root.
 const Name = "span.yaml"
 
-// File is span.yaml. Empty modes mean auto.
+// File is span.yaml: project policy only. Empty modes mean auto. A run's identity (its
+// feature document, pull request title, and commit scope) comes from its branch, not from
+// this file.
 type File struct {
-	Feature  string              `yaml:"feature"`
-	Rules    string              `yaml:"rules"`
-	Harness  string              `yaml:"harness"`
-	Agent    string              `yaml:"agent"`
+	// Feature is the old project-wide feature name. It is still read, so an existing
+	// span.yaml keeps loading, but nothing uses or validates it.
+	Feature string `yaml:"feature"`
+	Rules   string `yaml:"rules"`
+	Harness string `yaml:"harness"`
+	Agent   string `yaml:"agent"`
+	// Base is the branch new runs start from and open their change into when the run does
+	// not name one. Empty keeps the defaults: dev for feat and fix, master for hotfix.
+	Base     string              `yaml:"base"`
 	Stages   Modes               `yaml:"stages"`
 	Prove    Bands               `yaml:"prove"`
 	Promote  Ladder              `yaml:"promote"`
@@ -119,6 +128,11 @@ func Load(path string) (File, error) {
 	if err != nil {
 		return File{}, err
 	}
+	return Parse(raw)
+}
+
+// Parse reads and validates the body of a policy file.
+func Parse(raw []byte) (File, error) {
 	var f File
 	if err := yaml.Unmarshal(raw, &f); err != nil {
 		return File{}, err
@@ -129,11 +143,23 @@ func Load(path string) (File, error) {
 	return f, nil
 }
 
-// Validate checks modes and the feature name.
-func (f File) Validate() error {
-	if !validFeature(f.Feature) {
-		return fmt.Errorf("feature name must be letters, digits, dots, dashes, or underscores")
+// ProjectBase is the base: line of the span.yaml in dir. A missing file or line is "", which
+// means the defaults apply.
+func ProjectBase(dir string) (string, error) {
+	path := filepath.Join(dir, Name)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return "", nil
 	}
+	f, err := Load(path)
+	if err != nil {
+		return "", err
+	}
+	return f.Base, nil
+}
+
+// Validate checks the agent, modes, base, weight, repairs, and environments. The feature
+// line is not checked: it is ignored.
+func (f File) Validate() error {
 	if !agent.Known(f.Agent) {
 		return fmt.Errorf("agent %q is not one of auto, any, or %s", f.Agent, agent.IDs())
 	}
@@ -144,6 +170,11 @@ func (f File) Validate() error {
 	}
 	if mode := f.ConflictMode(); mode != "auto" && mode != "hold" {
 		return fmt.Errorf("stages.conflict %q is not auto or hold", mode)
+	}
+	if f.Base != "" {
+		if err := branch.CheckBase(f.Base); err != nil {
+			return err
+		}
 	}
 	if !ValidWeight(f.Run.Weight) {
 		return WeightError(f.Run.Weight)
@@ -211,12 +242,25 @@ func (f File) QACommand(browser bool) string {
 }
 
 // SetAgent rewrites the one agent: line. Every other line, comment, and blank line
-// stays where it was, and the result is validated before it reaches the disk.
+// stays where it was, and the result is validated before it reaches the disk. A missing
+// file is created holding only that line: span.yaml is optional, and choosing an agent is
+// an explicit request to record one.
 func SetAgent(path, value string) error {
 	if !agent.Known(value) {
 		return fmt.Errorf("agent %q is not one of auto, any, or %s", value, agent.IDs())
 	}
+	// A new file is 0644 like the one quickstart writes; a rewrite keeps the file's mode.
+	mode := os.FileMode(0o644)
 	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		raw, err = nil, nil
+	} else if err == nil {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return statErr
+		}
+		mode = info.Mode().Perm()
+	}
 	if err != nil {
 		return err
 	}
@@ -240,6 +284,9 @@ func SetAgent(path, value string) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, mode); err != nil {
 		return err
 	}
 	return os.Rename(name, path)
@@ -290,21 +337,4 @@ func orAuto(mode string) string {
 		return "auto"
 	}
 	return mode
-}
-
-func validFeature(name string) bool {
-	if name == "" || name == "." || name == ".." {
-		return false
-	}
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-		case r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.':
-		default:
-			return false
-		}
-	}
-	return true
 }

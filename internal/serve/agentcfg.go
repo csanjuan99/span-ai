@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 
 	"span/internal/agent"
@@ -24,8 +26,12 @@ func agentView(project string) agentPick {
 	home := agent.Home()
 	view := agentPick{Agents: agent.Report(home), Selected: "any", Chosen: firstReady(home)}
 	file, err := policy.Load(filepath.Join(project, policy.Name))
+	if errors.Is(err, os.ErrNotExist) {
+		view.Reason = "There is no span.yaml, so runs use the defaults. Choosing an agent creates one."
+		return view
+	}
 	if err != nil {
-		view.Reason = "span.yaml is not there yet. Span writes it on the first run."
+		view.Reason = "span.yaml does not load: " + err.Error()
 		return view
 	}
 	view.Exists = true

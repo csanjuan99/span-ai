@@ -328,3 +328,75 @@ func TestApproveReleasesAHeldStageAndResumesTheRun(t *testing.T) {
 		t.Fatalf("a rejected approval woke the run: %d wakes", len(woke))
 	}
 }
+
+func TestQuickstartCarriesTheBaseToTheLauncher(t *testing.T) {
+	body := strings.NewReader("workspace=.&story=Add+saved+cards&base=feat%2FSAL-3")
+	req := httptest.NewRequest(http.MethodPost, "/quickstart", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	var got setup.Request
+	New(t.TempDir(), "", func(_ context.Context, req setup.Request) (Outcome, error) {
+		got = req
+		return Outcome{Text: "accepted\n"}, nil
+	}, nil, nil, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || got.Base != "feat/SAL-3" {
+		t.Fatalf("status %d base %q", rec.Code, got.Base)
+	}
+}
+
+func TestQuickstartWithoutABaseUsesThePolicyBase(t *testing.T) {
+	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "span.yaml"), []byte("feature: app\nbase: feat/SAL-3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.NewReader("workspace=" + url.QueryEscape(project) + "&story=Add+saved+cards")
+	req := httptest.NewRequest(http.MethodPost, "/quickstart", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	Handler(t.TempDir(), "").ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "base feat/SAL-3\n") {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestQuickstartRefusesABaseGitOrGhWouldReadAsAFlag(t *testing.T) {
+	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "PWNED1")
+	for _, base := range []string{"--upload-pack=touch " + marker, "--repo=evil/x", "-x", "HEAD", "deadbeef"} {
+		body := strings.NewReader("workspace=" + url.QueryEscape(project) + "&story=Add+saved+cards&base=" + url.QueryEscape(base))
+		req := httptest.NewRequest(http.MethodPost, "/quickstart", body)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		Handler(t.TempDir(), "").ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid base branch") {
+			t.Errorf("base %q: status %d %s", base, rec.Code, rec.Body.String())
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("git ran the injected command")
+	}
+}
+
+func TestAProjectBaseNeverTurnsAStoryIntoAHotfix(t *testing.T) {
+	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "span.yaml"), []byte("feature: app\nbase: master\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.NewReader("workspace=" + url.QueryEscape(project) + "&story=Add+saved+cards")
+	req := httptest.NewRequest(http.MethodPost, "/quickstart", body)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	Handler(t.TempDir(), "").ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "branch feat/add-saved-cards\nbase master\n") {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}

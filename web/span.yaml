@@ -1,4 +1,3 @@
-feature: vamos-a-realizar-un-experimento-y-es-mejorar-la
 agent: any
 rules: harness
 harness: "/Volumes/External/dev/span/harness"

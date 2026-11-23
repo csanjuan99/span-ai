@@ -17,6 +17,7 @@ import {
   type StatementCommand,
   type AgentChoice,
   type AgentState,
+  type BranchChoice,
   type AgentStatus,
   type SpanHead,
 } from "@/lib/types"
@@ -250,6 +251,26 @@ function gate(value: unknown): Gate | null {
     command: text(value.command),
     exitCode: count(value.exitCode),
   }
+}
+
+/** Reads a `GET /branches` reply. It is untrusted input, so only non-empty names survive. */
+export function branchChoice(value: unknown): BranchChoice {
+  if (!isRecord(value)) {
+    return { branches: [], defaultBase: "dev" }
+  }
+  const fallback = text(value.default)
+  return { branches: stringList(value.branches), defaultBase: fallback === "" ? "dev" : fallback }
+}
+
+/** What an empty Base branch field means for the chosen kind: span.yaml's base never applies to a hotfix, which starts from master. */
+export function basePlaceholder(kind: string, defaultBase: string): string {
+  return kind === "hotfix" ? "master" : defaultBase
+}
+
+/** The branch a run works on and the base its change opens into, for the span header. */
+export function branchLine(cursor: Pick<Cursor, "branch" | "base">): string {
+  const parts = [cursor.branch === "" ? "" : `branch ${cursor.branch}`, cursor.base === "" ? "" : `base ${cursor.base}`]
+  return parts.filter((part) => part !== "").join(" · ")
 }
 
 /** Reads the span object the socket and the page share. */

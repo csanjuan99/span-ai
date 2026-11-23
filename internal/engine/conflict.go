@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"span/internal/branch"
 	"span/internal/prompt"
 	"span/internal/statement"
 )
@@ -287,15 +288,19 @@ var (
 	conflictID      = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// checkBase asks, without touching the checkout, whether the base merges cleanly into the
+// preflightBase asks, without touching the checkout, whether the base merges cleanly into the
 // branch. A clean merge, or a check that could not run, leaves the merge to the host exactly
 // as before; note says why nothing was checked. Only a conflict starts the conflict flow.
-func (r *runner) checkBase(ctx context.Context) (string, string, bool, string, error) {
+func (r *runner) preflightBase(ctx context.Context) (string, string, bool, string, error) {
 	src, ok := r.opt.Source.(Integrator)
-	if !ok || strings.TrimSpace(r.cur.Base) == "" {
+	base := r.runBase()
+	if !ok || strings.TrimSpace(base) == "" {
 		return "", "", false, "", nil
 	}
-	pre, err := src.Preflight(ctx, r.cur.Base)
+	if err := branch.CheckBase(base); err != nil {
+		return "", "", false, "no conflict check: " + err.Error(), nil
+	}
+	pre, err := src.Preflight(ctx, base)
 	if err != nil {
 		return "", "", false, "no conflict check: " + err.Error(), nil
 	}
@@ -318,9 +323,14 @@ func (r *runner) integrate(ctx context.Context, src Integrator, refusal error) (
 		verdict, reason, err := r.record(merge, statement.Hold, ConflictTooManyReason, nil)
 		return verdict, reason, true, err
 	}
-	integ, err := src.Integrate(ctx, r.cur.Base)
+	base := r.runBase()
+	if err := branch.CheckBase(base); err != nil {
+		verdict, reason, err := r.record(merge, statement.Hold, "could not merge the base into the branch: "+err.Error(), nil)
+		return verdict, reason, true, err
+	}
+	integ, err := src.Integrate(ctx, base)
 	if err != nil {
-		verdict, reason, err := r.record(merge, statement.Hold, "could not merge "+r.cur.Base+" into the branch: "+err.Error(), nil)
+		verdict, reason, err := r.record(merge, statement.Hold, "could not merge "+base+" into the branch: "+err.Error(), nil)
 		return verdict, reason, true, err
 	}
 	if len(integ.Files) == 0 {
@@ -358,7 +368,7 @@ func (r *runner) integrate(ctx context.Context, src Integrator, refusal error) (
 // refused handles a host that would not merge because of conflicts.
 func (r *runner) refused(ctx context.Context, refusal error) (string, string, error) {
 	src, ok := r.opt.Source.(Integrator)
-	if !ok || strings.TrimSpace(r.cur.Base) == "" {
+	if !ok || strings.TrimSpace(r.runBase()) == "" {
 		r.cur.Pending = nil
 		return r.record(merge, statement.Hold, "merge conflict: "+refusal.Error(), nil)
 	}

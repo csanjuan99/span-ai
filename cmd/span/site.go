@@ -54,9 +54,8 @@ func claimSite(req setup.Request, spans, label string) (site, error) {
 }
 
 // isolatedSite gives a run its own worktree because the checkout is busy. Nothing is
-// written into the busy checkout: no policy, no brief. That is why it needs a policy that
-// is already there and a story to derive a branch from; without either it returns the
-// busy error it was given.
+// written into the busy checkout: no policy, no brief. It needs a story to derive a branch
+// from; without one it returns the busy error it was given. A missing span.yaml is fine.
 func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 	if strings.TrimSpace(req.Story) == "" {
 		return site{}, busy
@@ -65,10 +64,9 @@ func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 	if err != nil {
 		return site{}, err
 	}
+	// span.yaml is optional: without one the run uses the quickstart defaults, so a busy
+	// checkout that was never configured still gets a worktree, and nothing is written here.
 	policyPath := filepath.Join(project, "span.yaml")
-	if _, err := os.Stat(policyPath); err != nil {
-		return site{}, busy
-	}
 	plan, err := branch.Derive(req.Story, req.Issue, req.Kind, req.Base)
 	if err != nil {
 		return site{}, err
@@ -123,8 +121,8 @@ func projectPolicy(project string) string {
 
 // resolvePolicy picks the policy file for a run that is woken again. The project's file
 // wins; a run recorded before projects were stored falls back to the checkout, then to the
-// project that owns the state directory (<project>/.span/runs). "" keeps the default, so the
-// error still names the file that is missing.
+// project that owns the state directory (<project>/.span/runs). "" keeps the default next to
+// the checkout; span.yaml is optional, so a missing one gives the run the quickstart defaults.
 func resolvePolicy(spans, workspace, project string) string {
 	if project != "" {
 		return filepath.Join(project, "span.yaml")

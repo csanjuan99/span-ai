@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"span/internal/agent"
+	"span/internal/branch"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
@@ -126,6 +127,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, set)
 	})
+	mux.HandleFunc("GET /branches", handleBranches)
 	mux.HandleFunc("GET /jira", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("path")
 		account, err := jira.Load(project)
@@ -342,9 +344,15 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			return
 		}
 		project := r.PostForm.Get("project")
+		// span.yaml is optional, so choosing an agent may create it, but only inside a
+		// project folder that exists: an empty path would write next to the server.
+		if info, err := os.Stat(project); project == "" || err != nil || !info.IsDir() {
+			writeErr(w, fmt.Errorf("project %q is not a folder", project))
+			return
+		}
 		path := filepath.Join(project, policy.Name)
-		if _, err := os.Stat(path); err != nil {
-			writeErr(w, errors.New("span.yaml is not there yet. Start one run, or run ./span quickstart, then choose the agent."))
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !spanProject(project) {
+			writeErr(w, fmt.Errorf("%s is not a git repository or a Span project, so span.yaml is not created there", project))
 			return
 		}
 		if err := policy.SetAgent(path, r.PostForm.Get("agent")); err != nil {
@@ -729,12 +737,20 @@ func configureOnly(ctx context.Context, req setup.Request) (string, error) {
 	}
 	var b strings.Builder
 	for _, target := range targets {
+		project, err := policy.ProjectBase(target.Path)
+		if err != nil {
+			return "", err
+		}
+		kind, base, err := branch.Choose(target.Story, req.Kind, req.Base, project)
+		if err != nil {
+			return "", err
+		}
 		res, err := setup.Configure(setup.Request{
 			Workspace: target.Path,
 			Story:     target.Story,
-			Kind:      req.Kind,
+			Kind:      kind,
 			Issue:     target.Issue,
-			Base:      req.Base,
+			Base:      base,
 			Force:     req.Force,
 		})
 		if err != nil {
@@ -749,6 +765,17 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// spanProject reports whether dir is a git repository (.git, a folder or a worktree's file)
+// or already holds Span state (.span/). Only such a folder may get a new span.yaml, so the
+// agent picker cannot leave one in a home directory.
+func spanProject(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return true
+	}
+	info, err := os.Stat(filepath.Join(dir, ".span"))
+	return err == nil && info.IsDir()
 }
 
 func writeErr(w http.ResponseWriter, err error) {

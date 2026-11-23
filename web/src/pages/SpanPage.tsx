@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
-import { answerRun, approveStage, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
+import { answerRun, approveStage, branchLine, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
 import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
@@ -194,6 +194,9 @@ export function SpanPage() {
           <span className="text-primary">$ </span>
           {state.span?.label || id}
         </h1>
+        {cursor !== undefined && branchLine(cursor) !== "" ? (
+          <p className="text-pretty text-sm text-muted-foreground">{branchLine(cursor)}</p>
+        ) : null}
         <StageRail stage={cursor?.stage ?? ""} verdict={verdict} sealed={sealed} />
         <p className="text-pretty">{line}</p>
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
