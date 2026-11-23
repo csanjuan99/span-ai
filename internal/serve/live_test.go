@@ -66,7 +66,7 @@ func TestAcceptanceNamesTheCoveredDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := qa.Lines(brief)
-	gate := qa.Judge(lines, 0, true, map[string]bool{"AC-1": true})
+	gate := qa.Judge(lines, 0, map[string]bool{"AC-1": true}, qa.Outcomes{})
 	gateRaw, _ := json.Marshal(gate)
 	if err := os.WriteFile(filepath.Join(dir, "qa-gate.json"), append(gateRaw, '\n'), 0o644); err != nil {
 		t.Fatal(err)
