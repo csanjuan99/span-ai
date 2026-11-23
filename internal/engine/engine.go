@@ -190,7 +190,10 @@ type Cursor struct {
 	InspectBlocks int      `json:"inspectBlocks"`
 	// InspectFeedback is what inspect found wrong when it sent the work back to build. Build
 	// reads it on its next round and it is cleared when inspect passes.
-	InspectFeedback string      `json:"inspectFeedback,omitempty"`
+	InspectFeedback string `json:"inspectFeedback,omitempty"`
+	// Rewound marks a run a person restarted at a stage. The branch may have moved since,
+	// so the run reads its commit again before the first stage and then clears this.
+	Rewound         bool        `json:"rewound,omitempty"`
 	LastDigest      string      `json:"lastDigest,omitempty"`
 	FrameAdvancedAt *time.Time  `json:"frameAdvancedAt,omitempty"`
 	StartedAt       time.Time   `json:"startedAt"`
@@ -628,6 +631,9 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 			return Result{}, err
 		}
 		return r.finish(statement.Hold), nil
+	}
+	if err := r.settleRewind(ctx); err != nil {
+		return Result{}, err
 	}
 	for step := 0; step < maxSteps; step++ {
 		if r.cur.Done {
@@ -1326,6 +1332,24 @@ func (r *runner) doNote() (string, string, error) {
 		reason = "lead time " + r.opt.now().Sub(*r.cur.FrameAdvancedAt).String()
 	}
 	return r.record(note, statement.Advance, reason, nil)
+}
+
+// settleRewind reads the commit the branch is on after a person restarted the run. Only build
+// writes the cursor's commit, so a restart at prove or later would keep checking and recording
+// the commit from before the person's own edits. A restart at build commits on its own.
+func (r *runner) settleRewind(ctx context.Context) error {
+	if !r.cur.Rewound {
+		return nil
+	}
+	if r.cur.Stage != build {
+		sha, err := r.opt.Source.Head(ctx)
+		if err != nil {
+			return err
+		}
+		r.cur.GitSHA = sha
+	}
+	r.cur.Rewound = false
+	return r.save()
 }
 
 func (r *runner) commit(ctx context.Context) (string, error) {

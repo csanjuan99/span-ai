@@ -50,8 +50,24 @@ func Rewind(root, id, stage string) error {
 	cur.AgentBlock = nil
 	cur.InspectBlocks = 0
 	cur.InspectFeedback = ""
+	cur.Rewound = true
+	// The change belongs to the attempt that opened it. A restart before open will open the
+	// change again, and open reuses a live one on the branch, so the old link only misleads.
+	if stageIndex(stage) < stageIndex(open) {
+		cur.ChangeURL = ""
+		cur.Pending = nil
+	}
 	cur.Reason = "restarted at " + stage + " by a person"
 	return writeCursorFile(dir, cur)
+}
+
+func stageIndex(stage string) int {
+	for index, name := range order {
+		if name == stage {
+			return index
+		}
+	}
+	return -1
 }
 
 func known(stage string) bool {
