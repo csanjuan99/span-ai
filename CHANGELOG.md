@@ -6,6 +6,9 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: when inspect sent a change back to build, build was never told why: it rebuilt without the finding, so the same problem could come back until the third block held the run. The finding now opens the next build prompt ("Inspect sent this change back") and is cleared when inspect passes.
+- **Changed**: resuming a run held at `inspect cap:` gives build another round with the finding and restarts the count of blocks, instead of re-running inspect to the same verdict. Each extra round still needs a person to resume.
+
 - **Added**: one model per CLI. `models:` in `span.yaml` maps a CLI id to a model, and Span passes it as `--model <name>` whenever that CLI runs; a CLI with no entry keeps the model Gentle AI configured. The desk shows a model field per CLI under the Agent picker, with suggestions from `cursor-agent --list-models` and `pi --list-models`, the aliases `opus`, `sonnet` and `haiku` for Claude, and a typed name for Codex. The page says Gentle AI and its configuration are required, and refuses a model for a CLI that is not ready. A name must be letters, digits and `. _ : / @ + -`, never start with a dash, and is checked on load, on save and before the CLI starts. New: `GET /agent/models`, `POST /agent/model`, and `models` in `GET /agent`.
 
 - **Fixed**: `span resume <id>` without `--spans` looked for the run in an empty path and resumed an isolated run in the project checkout, where git refused its branch. It now reads `.span/runs` of the workspace and resumes in the run's worktree.

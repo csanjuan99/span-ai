@@ -49,6 +49,7 @@ func Rewind(root, id, stage string) error {
 	cur.WideSHA = ""
 	cur.AgentBlock = nil
 	cur.InspectBlocks = 0
+	cur.InspectFeedback = ""
 	cur.Reason = "restarted at " + stage + " by a person"
 	return writeCursorFile(dir, cur)
 }

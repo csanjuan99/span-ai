@@ -937,3 +937,74 @@ func TestAnOrdinaryAgentErrorDoesNotRecordABlock(t *testing.T) {
 		t.Fatalf("agentBlock = %+v", cur.AgentBlock)
 	}
 }
+
+func TestResumingAtTheInspectCapGivesBuildAnotherRoundWithWhatInspectSaid(t *testing.T) {
+	opt, agents, _, review, _, _ := baseOpt(t)
+	agents.blocks = 3
+	held, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if held.Verdict != statement.Hold || held.Stage != inspect || !strings.HasPrefix(held.Reason, "inspect cap: ") {
+		t.Fatalf("%+v", held)
+	}
+	built := agents.builds
+	got, err := Resume(context.Background(), opt, held.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents.builds != built+1 {
+		t.Fatalf("builds %d, want %d: resuming did not rebuild", agents.builds, built+1)
+	}
+	if !strings.Contains(agents.prompts[len(agents.prompts)-1], "missing spec") {
+		t.Fatalf("build did not receive what inspect said")
+	}
+	if got.Verdict == statement.Hold && strings.HasPrefix(got.Reason, "inspect cap: ") {
+		t.Fatalf("still stuck at the cap: %+v", got)
+	}
+	snap, err := Load(opt.Root, held.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.Cursor.InspectBlocks != 0 || review.opens != 1 {
+		t.Fatalf("blocks %d opens %d", snap.Cursor.InspectBlocks, review.opens)
+	}
+}
+
+func TestTheInspectCapStillStopsARunWhoseInspectorKeepsBlocking(t *testing.T) {
+	opt, agents, _, _, _, _ := baseOpt(t)
+	agents.blocks = 100
+	held, err := Start(context.Background(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for round := 0; round < 2; round++ {
+		held, err = Resume(context.Background(), opt, held.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if held.Verdict != statement.Hold || held.Stage != inspect {
+			t.Fatalf("round %d: %+v", round, held)
+		}
+	}
+}
+
+func TestBuildIsToldWhyInspectSentTheChangeBack(t *testing.T) {
+	opt, agents, _, _, _, _ := baseOpt(t)
+	agents.blocks = 1
+	if _, err := Start(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	if agents.builds != 2 {
+		t.Fatalf("builds %d, want 2", agents.builds)
+	}
+	told := 0
+	for _, p := range agents.prompts {
+		if strings.Contains(p, "Inspect sent this change back.\nReason: missing spec") {
+			told++
+		}
+	}
+	if told != 1 {
+		t.Fatalf("%d prompts carried inspect's reason, want only the second build's", told)
+	}
+}
