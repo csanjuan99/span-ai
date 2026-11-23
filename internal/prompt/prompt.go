@@ -52,6 +52,7 @@ func Build(in Input) string {
 ODD is mandatory. You are running Gentle AI Organic Driven Development.
 Before writing product code, create or update %s with a heading, "## Specs", "## Tasks", and "## Log".
 Quote the brief in the log. Implement only after that document exists.
+In the log, write one line for each choice you made that the brief did not decide, as "Decision: <what> because <why>", and one line for each way this change could hurt, as "Risk: <what could go wrong> (<how likely, and what would catch it>)". A reviewer reads these two kinds of line first. Write none you do not mean, and write "Risk: none found" only when you looked.
 Write so two people produce one author's code. Read a harness skill only when its trigger matches this change. Do not paste unused skills into the feature.
 %sDo not push, merge, or deploy.
 `, in.FeaturePath, extra.String())

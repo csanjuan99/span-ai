@@ -1141,6 +1141,7 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | GET | `/spans` | `Accept: application/json` returns `{"spans":[...]}`. Any other accept is the desk |
 | GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, and gate. Any other accept is the span page |
 | GET | `/spans/<id>/implementation` | `git diff <base>...<head>` stat and a patch capped at 256 KiB |
+| GET | `/spans/<id>/feature` | The run's `odd/tasks/<feature>.md`, capped at 64 KiB, for the report. Empty when there is none |
 | GET | `/spans/<id>/acceptance` | Each acceptance line, its declaration, and the gate result |
 | GET | `/spans/<id>/live` | WebSocket. The first frame replays the run. Later frames wake the page |
 | GET | `/spans/<id>/agent` | Whether this process still has a worker for that run |
@@ -1198,3 +1199,26 @@ The binary and the agents live on the same machine. `serve` reads and writes fil
 - [ ] The brief states the request without invented requirements.
 - [ ] After `hold`, you read `.span/runs/<id>/iter/<n>/<stage>.md` before `./span resume`.
 - [ ] After `stop`, you do not expect resume to continue.
+
+## The implementation report
+
+The Implementation tab opens with a report, then the diff, then the audit trail and the raw transcript (both closed). Nothing in it calls a model: it is computed from the diff, the sealed statements and the feature document. Each line says where it came from: detected by Span, reported by the agent, or verified by a check.
+
+Order: verdict, risks, what and why, decisions, evidence, then the diff. The verdict is the worst risk level and says how hard to read ("Read every flagged file line by line", "A quick look is enough. Absence of signals is not proof of safety"). The order follows what reviewers act on first: how risky, then what could go wrong, then the reasoning, then the proof.
+
+Detected risks, all heuristics of our own except the size bands:
+
+| Signal | Level |
+|---|---|
+| More than 400 changed lines (review stops finding defects past about 400 lines at a time, SmartBear/Cisco) | high |
+| 200 to 400 changed lines, or more than 10 files | medium |
+| Auth, session, token, secret or crypto source files; schema or migration files; build, deploy or infrastructure files; `.env` files | high |
+| A deleted test file; a secret-shaped string on an added line; inspect still blocking at the cap | high |
+| Dependencies or configuration changed; generated or binary files committed; source changed with no test changed; a check that passed and failed on one commit; inspect sent the change back twice or more | medium |
+| `TODO`, `FIXME`, `HACK` added | low |
+
+The report also lists what it could not check (a cut patch, no prove or QA run, inspect not run, no feature document log), so a quiet report is never read as a safe one.
+
+Build is asked to write two kinds of line in the feature document's `## Log`: `Decision: <what> because <why>` and `Risk: <what could go wrong> (<how likely, and what would catch it>)`. The report shows them as "assumed by the agent" and "reported by the agent". A run whose log has none says so.
+
+Sources for the shape: Architecture Decision Records (Nygard) and MADR for decisions with their reasons, Google's change-description and small-change guidance, SmartBear/Cisco on review size, SLSA provenance for the audit trail (who ran what, on which commit, when), CodeRabbit's walkthrough and merge-risk presentation, and Martin Fowler's Ship/Show/Ask for matching review depth to risk.
