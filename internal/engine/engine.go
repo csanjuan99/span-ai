@@ -177,17 +177,20 @@ type Result struct {
 
 // Cursor is the resume point. It is written before the next stage starts.
 type Cursor struct {
-	ID              string      `json:"id"`
-	Iteration       int         `json:"iteration"`
-	Stage           string      `json:"stage"`
-	Hold            bool        `json:"hold"`
-	Stop            bool        `json:"stop"`
-	Done            bool        `json:"done"`
-	Reason          string      `json:"reason,omitempty"`
-	GitSHA          string      `json:"gitSHA,omitempty"`
-	ChangeURL       string      `json:"changeURL,omitempty"`
-	Pending         *Pending    `json:"pending,omitempty"`
-	InspectBlocks   int         `json:"inspectBlocks"`
+	ID            string   `json:"id"`
+	Iteration     int      `json:"iteration"`
+	Stage         string   `json:"stage"`
+	Hold          bool     `json:"hold"`
+	Stop          bool     `json:"stop"`
+	Done          bool     `json:"done"`
+	Reason        string   `json:"reason,omitempty"`
+	GitSHA        string   `json:"gitSHA,omitempty"`
+	ChangeURL     string   `json:"changeURL,omitempty"`
+	Pending       *Pending `json:"pending,omitempty"`
+	InspectBlocks int      `json:"inspectBlocks"`
+	// InspectFeedback is what inspect found wrong when it sent the work back to build. Build
+	// reads it on its next round and it is cleared when inspect passes.
+	InspectFeedback string      `json:"inspectFeedback,omitempty"`
 	LastDigest      string      `json:"lastDigest,omitempty"`
 	FrameAdvancedAt *time.Time  `json:"frameAdvancedAt,omitempty"`
 	StartedAt       time.Time   `json:"startedAt"`
@@ -1063,6 +1066,17 @@ func failingIDs(gate qa.Gate) string {
 }
 
 func (r *runner) doInspect(ctx context.Context) (string, string, error) {
+	if r.cur.InspectBlocks >= maxInspectBlocks {
+		// The run held at the cap and a person resumed it. That is a request for another round:
+		// inspect already said what is wrong, so build gets that instead of the same verdict
+		// again, and the count starts over. Each round still needs a person to ask for it.
+		reason := strings.TrimPrefix(r.cur.Reason, inspectCap)
+		verdict, why, err := r.sendBack(reason)
+		if err == nil {
+			r.cur.InspectBlocks = 0
+		}
+		return verdict, why, err
+	}
 	target, err := r.pick(inspect)
 	if err != nil {
 		return r.record(inspect, statement.Hold, err.Error(), nil)
@@ -1072,12 +1086,27 @@ func (r *runner) doInspect(ctx context.Context) (string, string, error) {
 		return r.agentBlocked(inspect, err)
 	}
 	if !doc.Blocking {
+		r.cur.InspectFeedback = ""
 		return r.record(inspect, statement.Advance, doc.Reason, nil)
 	}
 	r.cur.InspectBlocks++
-	if r.cur.InspectBlocks >= 3 {
-		return r.record(inspect, statement.Hold, "inspect cap: "+doc.Reason, nil)
+	if r.cur.InspectBlocks >= maxInspectBlocks {
+		return r.record(inspect, statement.Hold, inspectCap+doc.Reason, nil)
 	}
+	return r.sendBack(doc.Reason)
+}
+
+// maxInspectBlocks is how many times inspect may send the work back to build before the run
+// holds for a person.
+const maxInspectBlocks = 3
+
+// inspectCap starts the hold reason of a run that reached maxInspectBlocks.
+const inspectCap = "inspect cap: "
+
+// sendBack archives this round's build, prove, QA and inspect statements as history and
+// returns the verdict that makes build try again with the inspector's reason.
+func (r *runner) sendBack(reason string) (string, string, error) {
+	r.cur.InspectFeedback = reason
 	dir := r.iterDir()
 	suffix := fmt.Sprintf("block-%d", r.cur.InspectBlocks)
 	for _, stage := range []string{build, proveSt, qaSt} {
@@ -1085,13 +1114,13 @@ func (r *runner) doInspect(ctx context.Context) (string, string, error) {
 			return "", "", err
 		}
 	}
-	if _, _, err := r.record(inspect, statement.Stop, doc.Reason, nil); err != nil {
+	if _, _, err := r.record(inspect, statement.Stop, reason, nil); err != nil {
 		return "", "", err
 	}
 	if err := statement.Archive(dir, inspect, suffix); err != nil {
 		return "", "", err
 	}
-	return "rebuild", doc.Reason, nil
+	return "rebuild", reason, nil
 }
 
 func (r *runner) doOpen(ctx context.Context) (string, string, error) {
@@ -1453,11 +1482,14 @@ func wrongBase(changes []Change, expected string) string {
 // failurePacket is what build needs to fix the check that failed. It is built from
 // the statement already on disk: no model, no second suite, no extra command.
 func (r *runner) failurePacket() string {
+	var b strings.Builder
+	if r.cur.InspectFeedback != "" {
+		fmt.Fprintf(&b, "Inspect sent this change back.\nReason: %s\n", r.cur.InspectFeedback)
+	}
 	if r.cur.Iteration <= 1 {
-		return ""
+		return closePacket(&b)
 	}
 	dir := filepath.Join(r.spanDir(), "iter", strconv.Itoa(r.cur.Iteration-1))
-	var b strings.Builder
 	for _, stage := range []string{proveSt, qaSt} {
 		prev, ok, err := statement.Read(dir, stage)
 		if err != nil || !ok || prev.Verdict == statement.Advance {
@@ -1483,6 +1515,12 @@ func (r *runner) failurePacket() string {
 			}
 		}
 	}
+	return closePacket(&b)
+}
+
+// closePacket ends a failure packet with the instruction to fix only that, or returns "" when
+// there was nothing to report.
+func closePacket(b *strings.Builder) string {
 	if b.Len() == 0 {
 		return ""
 	}

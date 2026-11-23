@@ -661,7 +661,7 @@ Two stops run before the cap:
 
 `repair.maxAttempts` is how many times a failure may send the span back to build, from 1 to 8, default 3. The next failure after that holds and keeps the reports. A restart from a stage clears the count.
 
-Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build. Two returns can correct the change. The third holds.
+Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build, and build is given the finding: the next prompt starts with "Inspect sent this change back" and its reason, until inspect passes. Two returns can correct the change. The third holds with `inspect cap:` and the finding. Resuming a run held there is a request for one more round: build gets the finding again and the count starts over, so each extra round needs a person to ask for it. To fix it by hand instead, change the files and use Rewind to restart at prove, which runs inspect again.
 
 ### Failures the base commit already had
 
