@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -138,7 +139,7 @@ func (g Git) Integrate(ctx context.Context, base string) (engine.Integration, er
 }
 
 func (g Git) trackedChanges(ctx context.Context) (string, error) {
-	return g.hout(ctx, "status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude).span")
+	return g.hout(ctx, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all", "--", ".", ":(exclude).span")
 }
 
 // Merging reports whether a merge is in progress in the checkout.
@@ -162,6 +163,13 @@ func (g Git) Merging(ctx context.Context) (bool, error) {
 // file a command touched outside the merge) is put back. With no merge in progress there
 // is nothing to undo.
 func (g Git) Abort(ctx context.Context) error {
+	if g.Pin != nil {
+		// A tampered repository gets no git merge --abort: span would run git on whatever the
+		// agent pointed .git at.
+		if err := g.Verify(*g.Pin); err != nil {
+			return err
+		}
+	}
 	merging, err := g.Merging(ctx)
 	if err != nil || !merging {
 		return err
@@ -549,7 +557,7 @@ func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
 		state.Index[path] += meta
 	}
 	for set, args := range map[*map[string]bool][]string{
-		&state.Dirty:     {"diff-files", "--name-only", "-z"},
+		&state.Dirty:     {"diff-files", "--ignore-submodules=all", "--name-only", "-z"},
 		&state.Untracked: {"ls-files", "-o", "-z", "--exclude-standard"},
 		&state.Ignored:   {"ls-files", "-o", "-i", "-z", "--exclude-standard", "--directory"},
 	} {
@@ -587,6 +595,11 @@ func (g Git) Snapshot(ctx context.Context) (engine.TreeState, error) {
 		common = filepath.Join(g.Dir, common)
 	}
 	state.CommonDir = filepath.Clean(common)
+	if g.Pin != nil {
+		state.Pin = *g.Pin
+	} else if state.Pin, err = g.PinRepo(ctx); err != nil {
+		return engine.TreeState{}, err
+	}
 	if state.Git, err = readManaged(state.GitDir, state.CommonDir); err != nil {
 		return engine.TreeState{}, err
 	}
@@ -604,8 +617,11 @@ var mergeFiles = []string{"MERGE_HEAD", "MERGE_MSG", "MERGE_MODE"}
 // a later git command (config, hooks, info/attributes and info/exclude) and the merge state.
 // "common" is the shared git directory, "git" this worktree's own.
 var (
-	managedFiles = [][2]string{{"common", "config"}, {"git", "config.worktree"}, {"git", "MERGE_HEAD"}, {"git", "MERGE_MSG"}, {"git", "MERGE_MODE"}}
-	managedDirs  = [][2]string{{"common", "hooks"}, {"common", "info"}}
+	managedFiles = [][2]string{
+		{"common", "config"}, {"git", "config.worktree"}, {"git", "HEAD"}, {"git", "commondir"}, {"git", "gitdir"},
+		{"common", "objects/info/alternates"}, {"git", "MERGE_HEAD"}, {"git", "MERGE_MSG"}, {"git", "MERGE_MODE"},
+	}
+	managedDirs = [][2]string{{"common", "hooks"}, {"common", "info"}}
 )
 
 func gitRoots(gitDir, commonDir string) (map[string]*os.Root, func(), error) {
@@ -851,7 +867,13 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 		kept[path] = true
 	}
 	changed := map[string]bool{}
-	// First, with no git command: the agent's config, attributes and hooks go away.
+	// Nothing runs git until the repository is proven to be where it was: a .git that became
+	// a gitfile or a symlink, or git directories that moved, fail closed.
+	if err := verifyCore(before.Pin); err != nil {
+		return engine.Restored{}, err
+	}
+	// Then, with no git command: the agent's config, attributes, hooks, HEAD, commondir and
+	// alternates go away.
 	gitChanged, err := restoreManaged(before)
 	if err != nil {
 		return engine.Restored{}, err
@@ -859,6 +881,11 @@ func (g Git) Restore(ctx context.Context, before engine.TreeState, keep []string
 	for _, name := range gitChanged {
 		changed[name] = true
 	}
+	if err := g.Verify(before.Pin); err != nil {
+		return engine.Restored{}, err
+	}
+	pin := before.Pin
+	g.Pin = &pin
 	now, err := g.Snapshot(ctx)
 	if err != nil {
 		return engine.Restored{}, err
@@ -1279,20 +1306,205 @@ func Generated(path string, sides ...string) bool {
 // in this checkout: a hook, an fsmonitor, a pager or an ext:: transport it configured must not
 // run when span reads or writes the repository. The repository's own config and attributes
 // are put back from the snapshot with plain file operations before any git command.
+// A nested repository staged as a gitlink never starts git inside it.
 var hardened = []string{
 	"--no-optional-locks",
 	"-c", "core.fsmonitor=false",
-	"-c", "core.hooksPath=" + os.DevNull,
 	"-c", "core.pager=cat",
 	"-c", "protocol.ext.allow=never",
+	"-c", "diff.ignoreSubmodules=all",
+	"-c", "submodule.recurse=false",
+	"-c", "status.submoduleSummary=false",
 }
 
-// command is one hardened git command in the checkout.
+// command is one hardened git command of the conflict phase in the checkout. System config
+// and attributes are off too, and git never prompts.
 func (g Git) command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", append(append([]string{}, hardened...), args...)...)
-	cmd.Dir = g.Dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd := g.gitCmd(ctx, g.Dir, args...)
+	// Repository hooks never run in the conflict phase: the agent may have written them. The
+	// ordinary build, commit and push keep the project's own hooks.
+	cmd.Args = append([]string{cmd.Args[0], "-c", "core.hooksPath=" + os.DevNull}, cmd.Args[1:]...)
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_ATTR_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	return cmd
+}
+
+// gitCmd is every git command span runs: hardened options, and with a pin, the repository
+// given explicitly so a .git the agent redirected is never followed. The person's global
+// config (credential helpers, ssh) still applies, so a push authenticates as it always did.
+func (g Git) gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append(append([]string{}, hardened...), args...)...)
+	cmd.Dir = dir
+	cmd.Env = os.Environ()
+	if g.Pin != nil {
+		cmd.Env = append(cmd.Env, "GIT_DIR="+g.Pin.GitDir, "GIT_COMMON_DIR="+g.Pin.CommonDir, "GIT_WORK_TREE="+g.Pin.WorkTree)
+	}
+	return cmd
+}
+
+// WithPin is the same checkout with every git command pointed at the pinned repository.
+func (g Git) WithPin(pin engine.RepoPin) engine.Integrator {
+	g.Pin = &pin
+	return g
+}
+
+// PinRepo records where the repository is and the shape of its git directory. It runs git,
+// so it is taken before an agent runs, never after.
+func (g Git) PinRepo(ctx context.Context) (engine.RepoPin, error) {
+	plain := Git{Dir: g.Dir}
+	work, err := filepath.Abs(g.Dir)
+	if err != nil {
+		return engine.RepoPin{}, err
+	}
+	pin := engine.RepoPin{WorkTree: work}
+	if pin.GitDir, err = plain.hout(ctx, "rev-parse", "--absolute-git-dir"); err != nil {
+		return engine.RepoPin{}, err
+	}
+	common, err := plain.hout(ctx, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return engine.RepoPin{}, err
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(g.Dir, common)
+	}
+	pin.CommonDir = filepath.Clean(common)
+	if pin.RealGitDir, err = filepath.EvalSymlinks(pin.GitDir); err != nil {
+		return engine.RepoPin{}, err
+	}
+	if pin.RealCommonDir, err = filepath.EvalSymlinks(pin.CommonDir); err != nil {
+		return engine.RepoPin{}, err
+	}
+	shape, err := readShape(pin)
+	if err != nil {
+		return engine.RepoPin{}, err
+	}
+	return shape, nil
+}
+
+// readShape fills the parts of a pin that are read with plain file operations.
+func readShape(pin engine.RepoPin) (engine.RepoPin, error) {
+	info, err := os.Lstat(filepath.Join(pin.WorkTree, ".git"))
+	if err != nil {
+		return engine.RepoPin{}, err
+	}
+	pin.DotGit = uint32(info.Mode().Type())
+	pin.GitFile = ""
+	if info.Mode().IsRegular() {
+		raw, err := os.ReadFile(filepath.Join(pin.WorkTree, ".git"))
+		if err != nil {
+			return engine.RepoPin{}, err
+		}
+		pin.GitFile = string(raw)
+	}
+	optional := func(path string) (*string, error) {
+		raw, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		text := string(raw)
+		return &text, nil
+	}
+	if pin.Commondir, err = optional(filepath.Join(pin.GitDir, "commondir")); err != nil {
+		return engine.RepoPin{}, err
+	}
+	if pin.Gitdir, err = optional(filepath.Join(pin.GitDir, "gitdir")); err != nil {
+		return engine.RepoPin{}, err
+	}
+	if pin.Alternates, err = optional(filepath.Join(pin.CommonDir, "objects", "info", "alternates")); err != nil {
+		return engine.RepoPin{}, err
+	}
+	pin.PackedRefs = ""
+	if raw, err := os.ReadFile(filepath.Join(pin.CommonDir, "packed-refs")); err == nil {
+		sum := sha256.Sum256(raw)
+		pin.PackedRefs = hex.EncodeToString(sum[:])
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return engine.RepoPin{}, err
+	}
+	names := func(dir string) ([]string, error) {
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		var out []string
+		for _, entry := range entries {
+			out = append(out, entry.Name())
+		}
+		return out, err
+	}
+	if pin.Modules, err = names(filepath.Join(pin.CommonDir, "modules")); err != nil {
+		return engine.RepoPin{}, err
+	}
+	if pin.Worktrees, err = names(filepath.Join(pin.CommonDir, "worktrees")); err != nil {
+		return engine.RepoPin{}, err
+	}
+	return pin, nil
+}
+
+// verifyCore checks, without git, that .git and the pinned git directories are still the
+// real directories they were: nothing may be written there otherwise.
+func verifyCore(pin engine.RepoPin) error {
+	dotGit := filepath.Join(pin.WorkTree, ".git")
+	info, err := os.Lstat(dotGit)
+	if err != nil || uint32(info.Mode().Type()) != pin.DotGit {
+		return &engine.TamperedError{Path: dotGit}
+	}
+	if info.Mode().IsRegular() {
+		raw, err := os.ReadFile(dotGit)
+		if err != nil || string(raw) != pin.GitFile {
+			return &engine.TamperedError{Path: dotGit}
+		}
+	}
+	for path, real := range map[string]string{pin.GitDir: pin.RealGitDir, pin.CommonDir: pin.RealCommonDir} {
+		info, err := os.Lstat(path)
+		if err != nil || !info.IsDir() {
+			return &engine.TamperedError{Path: path}
+		}
+		if now, err := filepath.EvalSymlinks(path); err != nil || now != real {
+			return &engine.TamperedError{Path: path}
+		}
+	}
+	return nil
+}
+
+// Verify checks the whole pinned shape without git: .git and the git directories, HEAD and
+// the index as regular files, commondir, gitdir, alternates, packed-refs, and the modules and
+// worktrees the repository had.
+func (g Git) Verify(pin engine.RepoPin) error {
+	if err := verifyCore(pin); err != nil {
+		return err
+	}
+	for _, name := range []string{"HEAD", "index"} {
+		path := filepath.Join(pin.GitDir, name)
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) && name == "index" {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() {
+			return &engine.TamperedError{Path: path}
+		}
+	}
+	now, err := readShape(pin)
+	if err != nil {
+		return &engine.TamperedError{Path: pin.GitDir}
+	}
+	same := func(a, b *string) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	switch {
+	case !same(now.Commondir, pin.Commondir):
+		return &engine.TamperedError{Path: filepath.Join(pin.GitDir, "commondir")}
+	case !same(now.Gitdir, pin.Gitdir):
+		return &engine.TamperedError{Path: filepath.Join(pin.GitDir, "gitdir")}
+	case !same(now.Alternates, pin.Alternates):
+		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "objects", "info", "alternates")}
+	case now.PackedRefs != pin.PackedRefs:
+		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "packed-refs")}
+	case strings.Join(now.Modules, "\n") != strings.Join(pin.Modules, "\n"):
+		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "modules")}
+	case strings.Join(now.Worktrees, "\n") != strings.Join(pin.Worktrees, "\n"):
+		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "worktrees")}
+	}
+	return nil
 }
 
 // hout runs one hardened git command and returns its trimmed stdout.

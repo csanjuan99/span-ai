@@ -36,6 +36,11 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
   ignored files are named, never deleted. The merge commit runs no hooks and is accepted only
   with the run's head and the base as its parents. No resolution writes or deletes through a
   symlink, including a parent that becomes one while the choice is applied.
+- **A pinned repository.** The conflict phase pins `.git` and its git directories, checks their
+  shape without git before running git again, and fails closed (no git, no abort) when the
+  agent redirected or replaced them. Every git command span runs, ordinary commits and pushes
+  included, is hardened: no fsmonitor, pager, `ext::` transport or submodule recursion. Repository
+  hooks are off only during the conflict phase; span's own commits and pushes still run them.
 - **Behind is not unknown.** A host refusal because the change is behind its base holds with
   its own reason; span does not update the change.
 - **Regenerate, never on its own.** Lockfiles and generated files can offer a `regenerate`

@@ -793,9 +793,29 @@ Ignored files it created are named too but never deleted. When span cannot prove
 repository is back where it was, the conflict fails and only abort is offered. The merge
 commit is made with every hook disabled, and it is only accepted when its parents are exactly
 the run's head and the base span merged; any other commit is refused and never pushed. No file
-reaches the merge commit unless a card showed it. Out of scope: your global and system git config
-(`~/.gitconfig` and the files it includes), and whatever the agent does outside the checkout,
-such as network calls.
+reaches the merge commit unless a card showed it.
+
+When the conflict starts, span pins the repository: where `.git` and the git directories are,
+and their shape (`.git` as a directory or gitfile, `commondir`, `gitdir`, `HEAD`, the index,
+`objects/info/alternates`, `packed-refs`, `modules/`, `worktrees/`). Before it runs git again
+it checks that shape with plain file operations. What plain file operations can put back is put
+back first (`commondir`, `gitdir`, `alternates`, a `HEAD` replaced by a symlink). Anything else
+(`.git` replaced by a symlink or a gitfile, the git directories moved, the index replaced, a
+changed `packed-refs`, new modules or worktrees) fails closed: the conflict moves to `failed`
+with `the agent changed the repository structure; span did not run git. Inspect <path> by
+hand`, and abort does nothing until the repository is fixed by hand. Every git command span
+runs names the pinned repository explicitly (`GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`) and
+runs with no fsmonitor, no pager, no `ext::` transport and no submodule recursion, so a nested
+repository the agent staged never starts git inside it. Repository hooks are off only during
+the conflict phase; span's ordinary commits and pushes keep running your repository's own
+commit and push hooks. Your global config, credential helpers and ssh settings still apply, so pushing
+authenticates as before.
+
+What this does not cover: your global and system git config (`~/.gitconfig` and the files it
+includes), anything the agent does outside the checkout (network calls, other directories),
+packs, objects and reflogs under `.git`, and an agent that escapes its sandbox. Span cannot
+fully contain an agent that has write access to `.git`: the structural check fails closed
+instead of guessing.
 
 `regenerate` is only offered for lockfiles and generated files. Its command must start with
 one of `npm`, `pnpm`, `yarn`, `bun`, `npx`, `go`, `cargo`, `poetry`, `pip`, `pip3`, `uv`,

@@ -1353,3 +1353,178 @@ func TestRestorePutsBackEveryRefAndTheInfoFiles(t *testing.T) {
 		t.Fatalf("restored %v", restored.Paths)
 	}
 }
+
+// treeDigest lists every entry under dir with its mode and content, links as their target.
+func treeDigest(t *testing.T, dir string) string {
+	t.Helper()
+	var b strings.Builder
+	must(t, filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(dir, path)
+		fmt.Fprintf(&b, "%s %v ", rel, info.Mode())
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, _ := os.Readlink(path)
+			b.WriteString(target)
+		case info.Mode().IsRegular():
+			raw, _ := os.ReadFile(path)
+			b.Write(raw)
+		}
+		b.WriteString("\n")
+		return nil
+	}))
+	return b.String()
+}
+
+// tamperCase runs an agent script against a conflicted repository whose git directory is
+// pinned, with $OUT and $M (a marker directory) in its environment, then restores and aborts.
+func tamperCase(t *testing.T, script string, prepareOut func(out, m string)) (dir string, restoreErr, abortErr error, out, m string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent script uses sh")
+	}
+	out, m = t.TempDir(), markerDir(t)
+	dir = conflictedRepo(t)
+	if prepareOut != nil {
+		prepareOut(out, m)
+	}
+	ctx := context.Background()
+	pin, err := Git{Dir: dir}.PinRepo(ctx)
+	must(t, err)
+	g := Git{Dir: dir, Pin: &pin}
+	before, err := g.Snapshot(ctx)
+	must(t, err)
+	cmd := exec.Command("sh", "-c", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "OUT="+out, "M="+m)
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, raw)
+	}
+	digest := treeDigest(t, out)
+	_, restoreErr = g.Restore(ctx, before, nil)
+	abortErr = g.Abort(ctx)
+	assertNotRun(t, m)
+	if treeDigest(t, out) != digest {
+		t.Fatal("span changed something under $OUT")
+	}
+	return dir, restoreErr, abortErr, out, m
+}
+
+const filterIn = `git --git-dir="$1" config filter.x.clean "sh -c 'touch $M/ran; cat'" && mkdir -p "$1/info" && echo '* filter=x' > "$1/info/attributes"`
+
+func assertTampered(t *testing.T, err error, path string) {
+	t.Helper()
+	var tampered *engine.TamperedError
+	if !errors.As(err, &tampered) || !strings.Contains(err.Error(), "span did not run git") || !strings.Contains(err.Error(), path) {
+		t.Fatalf("want a tampered repository naming %s, got %v", path, err)
+	}
+}
+
+func TestRestoreIgnoresACommondirTheAgentWrote(t *testing.T) {
+	script := `cp -R .git "$OUT/copy" && set -- "$OUT/copy" && ` + filterIn + ` && echo "$OUT/copy" > .git/commondir && sleep 1 && touch c.txt`
+	dir, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	must(t, restoreErr)
+	if _, err := os.Lstat(filepath.Join(dir, ".git", "commondir")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the agent's commondir survived")
+	}
+}
+
+func TestRestoreRunsNoGitBehindAGitfile(t *testing.T) {
+	script := `cp -R .git "$OUT/g" && set -- "$OUT/g" && ` + filterIn + ` && rm -rf .git && echo "gitdir: $OUT/g" > .git && sleep 1 && touch c.txt`
+	_, restoreErr, abortErr, _, _ := tamperCase(t, script, nil)
+	assertTampered(t, restoreErr, ".git")
+	assertTampered(t, abortErr, ".git")
+}
+
+func TestRestoreRunsNoGitThroughASymlinkedGitDir(t *testing.T) {
+	for name, script := range map[string]string{
+		"with a copy": `cp -R .git "$OUT/copy" && set -- "$OUT/copy" && ` + filterIn + ` && rm -rf .git && ln -s "$OUT/copy" .git && sleep 1 && touch c.txt`,
+		"empty":       `rm -rf .git && ln -s "$OUT" .git`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, restoreErr, abortErr, _, _ := tamperCase(t, script, nil)
+			assertTampered(t, restoreErr, ".git")
+			assertTampered(t, abortErr, ".git")
+		})
+	}
+}
+
+func TestRestoreNeverEntersANestedRepository(t *testing.T) {
+	script := `git init -q lib && (cd lib && git config user.email a@b && git config user.name a && echo f > f && git add f && git commit -qm f) && set -- lib/.git && ` + filterIn +
+		` && git update-index --add --cacheinfo 160000,$(git -C lib rev-parse HEAD),lib && sleep 1 && touch lib/f`
+	_, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	must(t, restoreErr)
+}
+
+func TestRestoreRewritesASymlinkedHead(t *testing.T) {
+	script := `cp .git/HEAD "$OUT/HEAD" && rm .git/HEAD && ln -s "$OUT/HEAD" .git/HEAD`
+	dir, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	must(t, restoreErr)
+	if info, err := os.Lstat(filepath.Join(dir, ".git", "HEAD")); err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("HEAD is not a regular file again: %v", err)
+	}
+}
+
+func TestRestoreRemovesAlternatesTheAgentAdded(t *testing.T) {
+	script := `mkdir -p "$OUT/objects" && echo "$OUT/objects" > .git/objects/info/alternates`
+	dir, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	must(t, restoreErr)
+	if _, err := os.Lstat(filepath.Join(dir, ".git", "objects", "info", "alternates")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the agent's alternates survived")
+	}
+}
+
+func TestRestoreFailsClosedOnAnEditedPackedRefs(t *testing.T) {
+	script := `echo "$(git rev-parse HEAD) refs/heads/evil" >> .git/packed-refs`
+	_, restoreErr, abortErr, _, _ := tamperCase(t, script, nil)
+	assertTampered(t, restoreErr, "packed-refs")
+	assertTampered(t, abortErr, "packed-refs")
+}
+
+func TestAPinnedPushStillReachesABareOrigin(t *testing.T) {
+	bare := t.TempDir()
+	git(t, bare, "init", "-q", "--bare")
+	dir := diverged(t, nil, func(d string) { write(t, d, "ours.txt", "o\n") }, nil)
+	git(t, dir, "remote", "add", "origin", bare)
+	if err := (Git{Dir: dir}).Push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, bare, "rev-parse", "feat/x"); got != git(t, dir, "rev-parse", "HEAD") {
+		t.Fatalf("origin has %s", got)
+	}
+}
+
+func TestTheRunFailsClosedWhenTheAgentRedirectsGit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	out, m := t.TempDir(), markerDir(t)
+	t.Setenv("OUT", out)
+	t.Setenv("M", m)
+	script := `cp -R .git "$OUT/g" && set -- "$OUT/g" && ` + filterIn + ` && rm -rf .git && echo "gitdir: $OUT/g" > .git && sleep 1 && touch c.txt`
+	run := newRealRun(t, commitAgent{script: script}, "git --version")
+	run.resume(t)
+	digest := treeDigest(t, out)
+	snap, err := engine.Load(run.root, run.id)
+	must(t, err)
+	c := snap.Cursor.Conflict
+	want := "the agent changed the repository structure; span did not run git. Inspect " + filepath.Join(run.clone, ".git") + " by hand"
+	if c == nil || c.State != engine.ConflictFailed || c.Note != want {
+		t.Fatalf("conflict %+v\nwant note %q", c, want)
+	}
+	must(t, engine.AbortConflict(run.root, run.id))
+	got := run.resume(t)
+	if got.Reason != "conflict: "+want {
+		t.Fatalf("%+v", got)
+	}
+	assertNotRun(t, m)
+	if treeDigest(t, out) != digest {
+		t.Fatal("span changed something under $OUT")
+	}
+}

@@ -36,6 +36,7 @@ type fakeGit struct {
 	pushedAt     []int
 	check        *scriptCheck
 	wrongParents bool
+	tampered     error
 }
 
 func (g *fakeGit) Preflight(context.Context, string) (Preflight, error) {
@@ -60,6 +61,11 @@ func (g *fakeGit) Restore(_ context.Context, _ TreeState, keep []string) (Restor
 	g.restored = g.restored[1:]
 	return Restored{Paths: next}, nil
 }
+func (g *fakeGit) PinRepo(context.Context) (RepoPin, error) {
+	return RepoPin{WorkTree: "/work", GitDir: "/work/.git", CommonDir: "/work/.git"}, nil
+}
+func (g *fakeGit) Verify(RepoPin) error       { return g.tampered }
+func (g *fakeGit) WithPin(RepoPin) Integrator { return g }
 func (g *fakeGit) Parents(context.Context) ([]string, error) {
 	if g.wrongParents {
 		return []string{"agent-sha"}, nil
@@ -802,5 +808,23 @@ func TestAMergeWhoseParentsAreNotSpansIsRefused(t *testing.T) {
 	}
 	if rig.git.pushes != 0 || rig.review.merges != 0 {
 		t.Fatal("a foreign commit was pushed or merged")
+	}
+}
+
+func TestATamperedRepositoryFailsClosedAndAbortRunsNoGit(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	rig.resume(t)
+	rig.git.tampered = &TamperedError{Path: "/work/.git"}
+	if err := AbortConflict(rig.opt.Root, rig.id); err != nil {
+		t.Fatal(err)
+	}
+	got := rig.resume(t)
+	want := "conflict: the agent changed the repository structure; span did not run git. Inspect /work/.git by hand"
+	if got.Reason != want || rig.git.aborts != 0 {
+		t.Fatalf("%+v aborts %d", got, rig.git.aborts)
+	}
+	if c := rig.cursor(t).Conflict; c == nil || c.State != ConflictFailed {
+		t.Fatalf("%+v", c)
 	}
 }

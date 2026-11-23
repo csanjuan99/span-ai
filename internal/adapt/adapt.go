@@ -83,8 +83,13 @@ func (b *tailBuffer) String() string {
 	return string(b.data[len(b.data)-b.max:])
 }
 
-// Git is the workspace source.
-type Git struct{ Dir string }
+// Git is the workspace source. Every git command it runs is hardened (no hooks, no
+// fsmonitor, no pager, no ext:: transport, no submodule recursion). Pin, when set, names the
+// repository explicitly so a redirected .git is not followed.
+type Git struct {
+	Dir string
+	Pin *engine.RepoPin
+}
 
 // IsWorktree reports whether dir is a linked worktree. A linked worktree has a .git
 // file that points at the shared repository, so the check is exact and needs no git call.
@@ -95,8 +100,7 @@ func IsWorktree(dir string) bool {
 
 // Git runs one git command in dir for the packages that own a command surface.
 func (g Git) Git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
+	cmd := g.gitCmd(ctx, dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -165,8 +169,7 @@ func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
 func (g Git) output(ctx context.Context, args ...string) (string, error) {
 	// The author is whoever this checkout is configured with. Span does not invent an
 	// identity and does not overwrite the user's: the commit is theirs.
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = g.Dir
+	cmd := g.gitCmd(ctx, g.Dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -253,8 +256,7 @@ func (g Git) Changed(ctx context.Context, base string) ([]string, error) {
 }
 
 func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bool, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = g.Dir
+	cmd := g.gitCmd(ctx, g.Dir, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()

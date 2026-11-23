@@ -137,12 +137,42 @@ type TreeState struct {
 	Symref string
 	Refs   map[string]string
 	Merge  map[string][]byte
+	// Pin is where the repository was and the shape of its git directory.
+	Pin RepoPin
 	// GitDir and CommonDir are this worktree's git directory and the shared one.
 	GitDir    string
 	CommonDir string
 	// Git are the entries under the git directories that act on later git commands or hold
 	// the merge (config, hooks, info, the merge state files), keyed like common:hooks/x.
 	Git map[string]GitFile
+}
+
+// RepoPin is where the repository was when the conflict phase started and the shape of its
+// git directory, checked with plain file operations before span runs git again.
+type RepoPin struct {
+	WorkTree  string `json:"workTree"`
+	GitDir    string `json:"gitDir"`
+	CommonDir string `json:"commonDir"`
+	// DotGit is the mode of <worktree>/.git; GitFile its content when it is a file.
+	DotGit  uint32 `json:"dotGit"`
+	GitFile string `json:"gitFile,omitempty"`
+	// RealGitDir and RealCommonDir are the directories with every symlink resolved.
+	RealGitDir    string   `json:"realGitDir"`
+	RealCommonDir string   `json:"realCommonDir"`
+	Commondir     *string  `json:"commondir,omitempty"`
+	Gitdir        *string  `json:"gitdirFile,omitempty"`
+	Alternates    *string  `json:"alternates,omitempty"`
+	PackedRefs    string   `json:"packedRefs,omitempty"`
+	Modules       []string `json:"modules,omitempty"`
+	Worktrees     []string `json:"worktrees,omitempty"`
+}
+
+// TamperedError is a repository whose structure changed in a way span will not put back by
+// guessing: it runs no git on it and says which path to inspect.
+type TamperedError struct{ Path string }
+
+func (e *TamperedError) Error() string {
+	return "the agent changed the repository structure; span did not run git. Inspect " + e.Path + " by hand"
 }
 
 // GitFile is one entry under a git directory: a file's bytes, a symlink's target, or a
@@ -210,9 +240,9 @@ type ConflictReplyOption struct {
 	Contents map[string]string `json:"contents"`
 }
 
-// integrator is a source that can merge the base into the branch and resolve what does
+// Integrator is a source that can merge the base into the branch and resolve what does
 // not merge. It is optional: a source without it merges exactly as before.
-type integrator interface {
+type Integrator interface {
 	Integrate(ctx context.Context, base string) (Integration, error)
 	Merging(ctx context.Context) (bool, error)
 	Abort(ctx context.Context) error
@@ -223,6 +253,11 @@ type integrator interface {
 	Snapshot(ctx context.Context) (TreeState, error)
 	Restore(ctx context.Context, before TreeState, keep []string) (Restored, error)
 	Parents(ctx context.Context) ([]string, error)
+	// PinRepo records where the repository is, Verify checks that shape with no git, and
+	// WithPin points every later git command at the pinned repository.
+	PinRepo(ctx context.Context) (RepoPin, error)
+	Verify(pin RepoPin) error
+	WithPin(pin RepoPin) Integrator
 }
 
 // conflictAgent is an agent port that can read a conflict and propose options. Without it
@@ -234,6 +269,7 @@ type conflictAgent interface {
 // conflictPlan is the runner's record of the conflict: the files and what each option
 // writes. The page never writes it, so a chosen command is the one the card showed.
 type conflictPlan struct {
+	Pin       *RepoPin                         `json:"pin,omitempty"`
 	Files     []ConflictFile                   `json:"files"`
 	Proposals int                              `json:"proposals"`
 	Options   map[string]map[string]planOption `json:"options"`
@@ -255,7 +291,7 @@ var (
 // branch. A clean merge, or a check that could not run, leaves the merge to the host exactly
 // as before; note says why nothing was checked. Only a conflict starts the conflict flow.
 func (r *runner) checkBase(ctx context.Context) (string, string, bool, string, error) {
-	src, ok := r.opt.Source.(integrator)
+	src, ok := r.opt.Source.(Integrator)
 	if !ok || strings.TrimSpace(r.cur.Base) == "" {
 		return "", "", false, "", nil
 	}
@@ -276,7 +312,7 @@ func (r *runner) checkBase(ctx context.Context) (string, string, bool, string, e
 // integrate merges the base into the branch to resolve what conflicts. refusal is the
 // host's conflict error when the base moved after the check. handled is false when the base
 // turned out to merge cleanly and the host can merge as before.
-func (r *runner) integrate(ctx context.Context, src integrator, refusal error) (string, string, bool, error) {
+func (r *runner) integrate(ctx context.Context, src Integrator, refusal error) (string, string, bool, error) {
 	r.cur.Pending = nil
 	if r.cur.Resolutions >= maxResolutions {
 		verdict, reason, err := r.record(merge, statement.Hold, ConflictTooManyReason, nil)
@@ -299,9 +335,15 @@ func (r *runner) integrate(ctx context.Context, src integrator, refusal error) (
 		}
 		return "", "", false, nil
 	}
+	pin, err := src.PinRepo(ctx)
+	if err != nil {
+		verdict, reason, recErr := r.record(merge, statement.Hold, "the repository could not be recorded before the conflict: "+err.Error(), nil)
+		return verdict, reason, true, errors.Join(recErr, src.Abort(ctx))
+	}
+	src = src.WithPin(pin)
 	r.cur.Resolutions++
 	r.cur.Conflict = &Conflict{Base: integ.Base, BaseSHA: integ.BaseSHA, State: ConflictProposing, Groups: []ConflictGroup{}}
-	plan := &conflictPlan{Files: integ.Files}
+	plan := &conflictPlan{Files: integ.Files, Pin: &pin}
 	if err := r.writePlan(plan); err != nil {
 		return "", "", true, err
 	}
@@ -315,7 +357,7 @@ func (r *runner) integrate(ctx context.Context, src integrator, refusal error) (
 
 // refused handles a host that would not merge because of conflicts.
 func (r *runner) refused(ctx context.Context, refusal error) (string, string, error) {
-	src, ok := r.opt.Source.(integrator)
+	src, ok := r.opt.Source.(Integrator)
 	if !ok || strings.TrimSpace(r.cur.Base) == "" {
 		r.cur.Pending = nil
 		return r.record(merge, statement.Hold, "merge conflict: "+refusal.Error(), nil)
@@ -329,16 +371,28 @@ func (r *runner) refused(ctx context.Context, refusal error) (string, string, er
 
 // continueConflict picks the conflict up where the person or a crash left it.
 func (r *runner) continueConflict(ctx context.Context) (string, string, error) {
-	src, ok := r.opt.Source.(integrator)
+	src, ok := r.opt.Source.(Integrator)
 	if !ok {
 		return r.record(merge, statement.Hold, "conflict: this source cannot resolve conflicts", nil)
 	}
-	if r.takeSide(conflictAbortFile) != nil {
-		return r.abortConflict(ctx, src)
-	}
+	abort := r.takeSide(conflictAbortFile) != nil
 	plan, err := r.readPlan()
 	if err != nil {
+		if abort {
+			return r.abortConflict(ctx, src)
+		}
 		return r.failConflict("the conflict record is unreadable (" + err.Error() + "); abort it and merge again")
+	}
+	if plan.Pin != nil {
+		// Before any git command: the repository must still be where the conflict started.
+		// A tampered one fails closed, and abort does nothing on it either.
+		if err := src.Verify(*plan.Pin); err != nil {
+			return r.failConflict(err.Error())
+		}
+		src = src.WithPin(*plan.Pin)
+	}
+	if abort {
+		return r.abortConflict(ctx, src)
 	}
 	switch r.cur.Conflict.State {
 	case ConflictApplying:
@@ -372,7 +426,7 @@ func (r *runner) continueConflict(ctx context.Context) (string, string, error) {
 
 // propose asks the build agent for options, falls back to the mechanical ones, and holds
 // for a choice unless the policy may apply a low-risk proposal on its own.
-func (r *runner) propose(ctx context.Context, src integrator, plan *conflictPlan, hint string) (string, string, error) {
+func (r *runner) propose(ctx context.Context, src Integrator, plan *conflictPlan, hint string) (string, string, error) {
 	c := r.cur.Conflict
 	c.State = ConflictProposing
 	if err := r.saveConflict(); err != nil {
@@ -450,7 +504,7 @@ func autoChoices(groups []ConflictGroup) (map[string]string, bool) {
 // askAgent returns nil groups when the options must be the mechanical ones, with the
 // reason in note. The agent runs in the checkout, so whatever it changes there is put back
 // before its proposal is used: nothing reaches the merge commit that no card showed.
-func (r *runner) askAgent(ctx context.Context, src integrator, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string, error) {
+func (r *runner) askAgent(ctx context.Context, src Integrator, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string, error) {
 	proposer, ok := r.opt.Agents.(conflictAgent)
 	if !ok {
 		return nil, nil, "no agent can propose options here; these are the mechanical options", nil
@@ -471,6 +525,10 @@ func (r *runner) askAgent(ctx context.Context, src integrator, plan *conflictPla
 		r.logLine(fmt.Sprintf("merge: asking %s for options on %d conflicted files", target, len(plan.Files)))
 		reply, err := proposer.Propose(ctx, target, r.opt.Workspace, prompt.Conflict(r.promptInput(build, ""), input))
 		restored, restoreErr := src.Restore(ctx, before, nil)
+		var tampered *TamperedError
+		if errors.As(restoreErr, &tampered) {
+			return nil, nil, "", tampered
+		}
 		if restoreErr != nil {
 			return nil, nil, "", fmt.Errorf("what the agent changed in the checkout could not be put back (%s); abort the conflict", restoreErr.Error())
 		}
@@ -825,7 +883,7 @@ func groupKind(members []ConflictFile, said string) string {
 
 // previewOptions fills each option's diff from the bytes it would write against the
 // branch's version, capped so one card cannot carry a megabyte.
-func (r *runner) previewOptions(ctx context.Context, src integrator, files []ConflictFile, groups []ConflictGroup, options map[string]map[string]planOption) {
+func (r *runner) previewOptions(ctx context.Context, src Integrator, files []ConflictFile, groups []ConflictGroup, options map[string]map[string]planOption) {
 	byPath := map[string]ConflictFile{}
 	for _, file := range files {
 		byPath[file.Path] = file
@@ -868,7 +926,7 @@ func capDiff(diff string) string {
 // prove. Nothing is pushed here: the merge commit is published right before the host merge,
 // once prove, QA and inspect passed on it. It is safe to run again: a merge already committed
 // by an earlier wake is not committed twice.
-func (r *runner) applyConflict(ctx context.Context, src integrator, plan *conflictPlan, choices map[string]string) (string, string, error) {
+func (r *runner) applyConflict(ctx context.Context, src Integrator, plan *conflictPlan, choices map[string]string) (string, string, error) {
 	c := r.cur.Conflict
 	for i := range c.Groups {
 		c.Groups[i].Chosen = choices[c.Groups[i].ID]
@@ -900,6 +958,10 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 		}
 		if planned.Command != "" {
 			if err := r.regenerate(ctx, src, plan, planned); err != nil {
+				var tampered *TamperedError
+				if errors.As(err, &tampered) {
+					return r.failConflict(tampered.Error())
+				}
 				return r.retryChoice(err.Error())
 			}
 		}
@@ -923,7 +985,7 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 // regenerate puts the branch's version of its files back, runs the command the person read
 // on the card as argv (never a shell) in the checkout, and leaves its output to be staged. A
 // command that changed anything outside its own files is undone and refused.
-func (r *runner) regenerate(ctx context.Context, src integrator, plan *conflictPlan, planned planOption) error {
+func (r *runner) regenerate(ctx context.Context, src Integrator, plan *conflictPlan, planned planOption) error {
 	reset := map[string]FileResolution{}
 	var own []string
 	for _, file := range plan.Files {
@@ -989,7 +1051,7 @@ func (r *runner) resolved(sha, what string) (string, string, error) {
 // foreignMerge is empty when HEAD is the merge span prepared: its parents are exactly the
 // head the run was on and the base it merged. Anything else (an agent's commit, an amend, a
 // reset) is never pushed.
-func (r *runner) foreignMerge(ctx context.Context, src integrator) string {
+func (r *runner) foreignMerge(ctx context.Context, src Integrator) string {
 	parents, err := src.Parents(ctx)
 	if err != nil {
 		return "the merge commit could not be read: " + err.Error()
@@ -1000,7 +1062,7 @@ func (r *runner) foreignMerge(ctx context.Context, src integrator) string {
 	return ""
 }
 
-func (r *runner) abortConflict(ctx context.Context, src integrator) (string, string, error) {
+func (r *runner) abortConflict(ctx context.Context, src Integrator) (string, string, error) {
 	if err := src.Abort(ctx); err != nil {
 		return r.failConflict("git merge --abort failed: " + err.Error())
 	}
