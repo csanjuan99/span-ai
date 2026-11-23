@@ -343,12 +343,14 @@ own branch, one feature per branch name:
 | `feat/sal-4-cards` | `sal-4-cards` |
 | `fix/sal-4-cards` | `fix-sal-4-cards` |
 | `hotfix/sal-4-cards` | `hotfix-sal-4-cards` |
-| `feat/SAL-4-cards`, `feat/x/y`, `feat/fix-a` | lowercased or slugged, plus `-` and six hex digits of the branch name's SHA-1 |
+| `feat/x/y`, `feat/fix-a` | slugged, plus `-` and six hex digits of the branch name's SHA-1 |
 | `dev`, `main`, a detached `HEAD` | the run id |
 
-A name that had to change (case, `/`, a character other than a letter, digit, `.`, `-` or
+A name that had to change (`/`, a character other than a letter, digit, `.`, `-` or
 `_`, more than 80 characters, or a `feat/` suffix that reads as another kind) carries the
-hash, so two branches never share a feature. A Windows device name (`con`, `nul`, `com1`)
+hash, so two branches never share a feature. A capital letter alone only lowercases the name
+(`feat/SAL-4-cards` is `sal-4-cards`), since branches that differ only in case cannot coexist
+on a case-insensitive checkout. A Windows device name (`con`, `nul`, `com1`)
 gets a `-` after it. A branch that is not `feat/`, `fix/` or `hotfix/` is shared by every
 run started on it, so the run id names the run instead. That feature names the run's
 document `odd/tasks/<feature>.md` and its commit scope `feat(<feature>): span <id>`. The
