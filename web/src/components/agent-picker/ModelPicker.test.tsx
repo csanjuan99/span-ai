@@ -86,4 +86,23 @@ describe("ModelPicker", () => {
     fireEvent.change(pi, { target: { value: "" } })
     expect(save.disabled).toBe(false)
   })
+
+  it("keeps the whole list reachable when a model is already chosen", async () => {
+    render(<ModelPicker project="/p" choice={choice} onSaved={() => undefined} />)
+    // "auto" is saved, and the native suggestion list would show only what matches it.
+    expect((screen.getByLabelText("Cursor model") as HTMLInputElement).value).toBe("auto")
+    expect(await screen.findByText("Browse 2 models")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /gpt-5\.3-codex/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /^auto/ })).toBeTruthy()
+  })
+
+  it("filters the list by what is searched and puts a picked model in the field", async () => {
+    render(<ModelPicker project="/p" choice={choice} onSaved={() => undefined} />)
+    await screen.findByText("Browse 2 models")
+    fireEvent.change(screen.getByLabelText("Search Cursor models"), { target: { value: "codex" } })
+    expect(screen.getByText("1 of 2 models")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^auto/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /gpt-5\.3-codex/ }))
+    expect((screen.getByLabelText("Cursor model") as HTMLInputElement).value).toBe("gpt-5.3-codex")
+  })
 })

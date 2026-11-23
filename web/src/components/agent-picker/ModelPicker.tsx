@@ -1,7 +1,10 @@
+"use client"
+
 import { useEffect, useState } from "react"
 
 import { getJSON, modelList, saveModel, agentChoice } from "@/lib/api"
 import type { AgentChoice, ModelList } from "@/lib/types"
+import { ModelBrowser } from "@/components/agent-picker/ModelBrowser"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -106,6 +109,15 @@ export function ModelPicker({ project, choice, onSaved }: Props) {
                 Save model
               </Button>
             </div>
+            {row.ready ? (
+              <ModelBrowser
+                id={row.id}
+                label={row.label}
+                models={list?.models ?? []}
+                selected={value}
+                onPick={(model) => setDrafts((prev) => ({ ...prev, [row.id]: model }))}
+              />
+            ) : null}
             {!row.ready ? (
               <p className="text-pretty text-sm text-hold">{row.reason ?? "not ready"}. Install Gentle AI for this CLI first.</p>
             ) : null}

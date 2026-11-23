@@ -769,8 +769,9 @@ models:
   pi: xai/grok-4.7
 ```
 
-On the page, each CLI has a **model** field under the Agent picker. It suggests what the CLI
-can offer and accepts any valid name, so a model the list does not show can still be typed:
+On the page, each CLI has a **model** field under the Agent picker and a **Browse N models**
+list beside it: the whole list the CLI reports, with a search, whatever is already chosen. The
+field accepts any valid name, so a model the list does not show can still be typed:
 
 | CLI | Where the suggestions come from |
 | --- | --- |
