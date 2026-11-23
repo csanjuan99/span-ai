@@ -82,6 +82,13 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"spans": engine.Heads(root)})
 	})
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		if !wantsJSON(r) {
+			servePage(pages, w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, engine.CollectMetrics(root))
+	})
 	mux.HandleFunc("POST /quickstart", func(w http.ResponseWriter, r *http.Request) {
 		req, err := storyRequest(r)
 		if err != nil {

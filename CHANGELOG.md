@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: a **metrics** page (`/metrics`, linked from the desk) that reads the runs of the server: how many finished, stopped or are held, how many finished on the first try, per stage the advances, holds, stops and the median and p90 time, which CLI and model ran how many stages and how they ended, and the recent runs. Times run from the previous seal, so they include waiting on a person. Cost and tokens are not shown because runs do not record them.
+
 - **Fixed**: an agent or model picked on the desk while a run was going was ignored, because `span.yaml` was read once when the run's process started and the run kept the default. Each stage now reads it again, and keeps the policy it started with when the file cannot be read at that moment.
 
 - **Added**: every agent stage records the CLI and model it ran with (`agent.run` in the journal), and the run page shows them under **ran with**. A stage with no chosen model says so.

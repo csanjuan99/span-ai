@@ -365,6 +365,12 @@ export function Desk() {
           <span className="text-primary">$ </span>span desk
         </h1>
         <p className="text-pretty text-muted-foreground">Turn a Jira story into a reviewed pull request.</p>
+        <p className="mt-1 text-sm">
+          <Link className="text-primary underline-offset-4 hover:underline" to="/metrics">
+            Metrics
+          </Link>{" "}
+          <span className="text-muted-foreground">how the runs on this server went</span>
+        </p>
       </header>
       <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
       <form className="flex flex-col gap-4" onSubmit={(event) => void run(event)}>
