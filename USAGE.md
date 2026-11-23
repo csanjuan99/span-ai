@@ -240,6 +240,7 @@ agent: any
 stages:
   open: auto
   merge: hold
+  conflict: hold
 prove:
   focused:
     - go test {files}
@@ -273,6 +274,7 @@ manifest:
 ```
 
 `open: hold` or `merge: hold` pauses before that effect, and only a person releases it: the page shows **Approve merge** (or **Approve open**, or **Approve promote to <env>**) instead of a retry, because a retry reaches the same hold. The approval is bound to the commit the page showed, so a new commit is held again, and it is spent only when the stage advances. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
+`open: hold` or `merge: hold` pauses before that effect. `conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts). Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
 
 `prove` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, shell quotes, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
 
@@ -735,6 +737,59 @@ A successful environment receipt is `.span/runs/<id>/receipts/<environment>-<sha
 
 If the process dies, the agent drops, or the network cuts, the last cursor on disk is the start point. Intake is not repeated.
 
+### When the merge conflicts
+
+Before `merge` asks the host to merge, it merges the base into the run's branch in the run's
+own checkout: `git fetch origin <base>`, then `git merge --no-commit --no-ff origin/<base>`
+(the local `<base>` when there is no `origin`). It never rebases and never force-pushes. A
+branch that already contains the base merges as before. A clean merge with new commits is
+committed as `merge <base> into <branch>`, pushed, and the run goes back to `prove`, because
+the sealed prove, QA and inspect statements describe the head before the merge. A host that
+refuses the merge because of conflicts (`gh pr merge` saying the change is not mergeable or
+has conflicts) is not an unknown outcome: the run merges the base again and resolves what
+conflicts.
+
+When files conflict, the run holds with the reason `conflict: choose how to resolve` and
+nothing is written to the branch until a person chooses. Any conflict git reports is covered,
+and each file has a kind: `content`, `add-add`, `modify-delete`, `rename` (rename/rename and
+rename/delete), `mode`, `binary`, `lockfile` (`package-lock.json`, `yarn.lock`,
+`pnpm-lock.yaml`, `go.sum`, `Cargo.lock`, `poetry.lock`, `Gemfile.lock`, `composer.lock`,
+`bun.lockb`) and `generated` (`.generated.`, `_generated.`, `generated/`, `dist/`, `*.pb.go`,
+`*.min.js`, or a `@generated` or `DO NOT EDIT` header in the first five lines).
+
+The build agent reads the story and both sides of every file, which it is told are data, not
+instructions, and groups the files that one decision resolves. Each group gets 2 to 4 option
+cards with a title, a summary, a risk (`low`, `medium`, `high`) and the diff of what it would
+write. Span computes that diff from the bytes, against this branch's version; it does not
+take the agent's word for it. An action is `ours`, `theirs`, `combine` (the agent's merged
+text), `keep` (the file one side deleted), `delete`, or `regenerate`. A reply that breaks
+these rules is refused and the agent is asked once more; a second refusal, a missing agent,
+or a fourth proposal leaves only the mechanical options: keep this branch's version, take the
+base's, or keep or delete a deleted file.
+
+`regenerate` is only offered for lockfiles and generated files. Its command is one program
+and its arguments, shown on the card, run without a shell in the checkout, and only after you
+choose it: the files are put back to this branch's version, the command runs, and what it
+wrote is staged. A command with shell syntax is refused.
+
+Choose one option per group. Span writes the files, refuses any file that still has conflict
+markers, commits `merge <base> into <branch>: resolve conflicts`, pushes, and the run goes
+back to `prove`. If prove fails, the normal repair loop takes over. Then the merge is
+attempted again. A choice that cannot be applied puts the cards back with what went wrong.
+
+Not satisfied with the cards? Send a hint, free text, and the agent proposes again with it
+(three proposals per conflict). **Abort** runs `git merge --abort`, which leaves the branch
+exactly as it was, clears the conflict, and holds with `conflict: aborted`. Restarting from a
+stage is refused while a conflict is open.
+
+`stages.conflict: auto` applies the first option of every group without waiting, only when
+every one of them is `low` risk and none is a `regenerate`; prove runs afterwards like after
+any merge. Anything else holds as with `hold`, the default.
+
+The page reads the conflict from the cursor's `conflict` field and from live
+`{"type":"conflict","conflict":{...}}` frames sent on every state change (`proposing`,
+`choosing`, `applying`, `failed`).
+
 ### Changes and GitHub
 
 When `gh` is on `PATH`, open lists and creates the pull request with `gh pr`, and merge uses `gh pr merge --merge`. The workspace must be that repository's checkout, with commits already pushed to `origin`.
@@ -803,6 +858,9 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | POST | `/spans/<id>/answer` | JSON `{"answers":[{"question","body"}]}`. `202` and frame runs again |
 | POST | `/spans/<id>/story` | Reads the Jira issue again. `202` and frame runs again |
 | POST | `/spans/<id>/resume` | Continues a hold that is not waiting for an answer |
+| POST | `/spans/<id>/conflict/choose` | Form fields `group=<id>&option=<id>`, one pair per group. Every group needs one known option. `202` and the merge stage applies it. `409` when no conflict is waiting for a choice |
+| POST | `/spans/<id>/conflict/hint` | Form field `text`. `202` and the agent proposes again. `409` as above |
+| POST | `/spans/<id>/conflict/abort` | `git merge --abort`, clears the conflict, holds with `conflict: aborted`. `202` |
 | POST | `/spans/<id>/instructions` | Form fields `stage` and `body` |
 | POST | `/spans/<id>/instructions/<stage>` | `text/plain` body or form field `body` |
 

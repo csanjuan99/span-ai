@@ -10,6 +10,9 @@ agent: any
 stages:
   open: auto
   merge: auto
+  # How a merge conflict with the base is resolved. hold waits for a person to choose an
+  # option; auto applies the first option only when every group is low risk.
+  conflict: hold
 jira:
   blockStatus: Block
 prove:

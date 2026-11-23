@@ -9,6 +9,25 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 - **Fixed**: a stage held by its mode (`merge: hold`, `open: hold`, a promote environment in `hold`) could never be released: the page offered "Fix and retry", which reached the same hold again. The page now offers an approval (`POST /spans/{id}/approve`), bound to the commit it showed and spent when the stage advances.
 - **Fixed**: `span.yaml` was staged into the story's branch by the commit, so a checkout of another branch lost it and a run recorded without a project could not be resumed (`open .../span.yaml: no such file`).
 
+### Merge conflicts are resolved on cards
+
+- **Detected before the merge.** The merge stage merges the base into the run's branch with
+  `git merge --no-commit --no-ff origin/<base>` in the run's own checkout before it asks the
+  host. No rebase, no force push. A `gh pr merge` refused because of conflicts is classified
+  as a conflict, never as `merge outcome unknown`.
+- **Any conflict.** Content, add/add, modify/delete, rename/rename, rename/delete, mode,
+  binary, lockfiles and generated files. The build agent groups the files and proposes 2 to 4
+  options per group with a risk; span computes each option's diff from the bytes.
+- **Nothing written without a choice.** The run holds with `conflict: choose how to
+  resolve`. Choose per group, give the agent a hint to propose again, or abort, which runs
+  `git merge --abort`. Applying commits the merge, pushes it, and sends the run back to
+  `prove`, so the sealed statements always describe the head that is merged.
+- **Regenerate, never on its own.** Lockfiles and generated files can offer a `regenerate`
+  command, shown on the card and run without a shell only after it is chosen.
+- **Policy.** `stages.conflict: hold|auto`, default `hold`. `auto` applies the first options
+  only when every group is low risk.
+- **Routes.** `POST /spans/<id>/conflict/choose`, `/hint` and `/abort`; the cursor carries
+  `conflict` and the socket sends `conflict` frames.
 
 ### Repairs prove only what the change can affect
 
