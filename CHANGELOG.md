@@ -11,23 +11,34 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ### Merge conflicts are resolved on cards
 
-- **Detected before the merge.** The merge stage merges the base into the run's branch with
-  `git merge --no-commit --no-ff origin/<base>` in the run's own checkout before it asks the
-  host. No rebase, no force push. A `gh pr merge` refused because of conflicts is classified
-  as a conflict, never as `merge outcome unknown`.
+- **Detected before the merge, without touching the tree.** The merge stage runs `git
+  merge-tree --write-tree HEAD origin/<base>` after fetching the base (single-branch clones
+  included). A clean base is left to the host exactly as before: no merge commit, no extra
+  prove. No base, no fetch, or a git older than 2.38 skips the check and says so. A `gh pr
+  merge` refused for conflicts (read from gh's stderr only) is classified as a conflict, never
+  as `merge outcome unknown`; branch policy, required checks and reviews stay plain failures.
 - **Any conflict.** Content, add/add, modify/delete, rename/rename, rename/delete, mode,
-  binary, lockfiles and generated files. The build agent groups the files and proposes 2 to 4
-  options per group with a risk; span computes each option's diff from the bytes.
-- **Nothing written without a choice.** The run holds with `conflict: choose how to
-  resolve`. Choose per group, give the agent a hint to propose again, or abort, which runs
-  `git merge --abort`. Applying commits the merge, pushes it, and sends the run back to
-  `prove`, so the sealed statements always describe the head that is merged.
+  binary, lockfiles, generated files, and type conflicts (file against symlink or directory,
+  submodules), which keep their real path and mode. The build agent groups the files and
+  proposes 2 to 4 options per group; span computes each option's diff from the bytes.
+- **Span's risk, not the agent's.** `combine` and `keep` can be low, `ours` is at least
+  medium, `theirs`, `delete` and `regenerate` are always high.
+- **Nothing written without a choice, nothing published without prove.** The run holds with
+  `conflict: choose how to resolve`. Choose per group, give the agent a hint, or abort
+  (`git merge --abort`, with tracked leftovers put back). Applying stages through git itself,
+  commits the merge and sends the run back to `prove`; the merge commit is pushed only right
+  before the host merge, once prove, QA and inspect passed on it. At most three resolutions
+  per run.
+- **The checkout stays honest.** What the agent or a regenerate command changes outside the
+  conflict is put back, and the card says which files. No resolution writes through a
+  symlink.
 - **Regenerate, never on its own.** Lockfiles and generated files can offer a `regenerate`
-  command, shown on the card and run without a shell only after it is chosen.
+  command from an allowlist of package managers and build tools, shown on the card and run
+  without a shell only after it is chosen.
 - **Policy.** `stages.conflict: hold|auto`, default `hold`. `auto` applies the first options
-  only when every group is low risk.
+  only when span's risk for every group is low.
 - **Routes.** `POST /spans/<id>/conflict/choose`, `/hint` and `/abort`; the cursor carries
-  `conflict` and the socket sends `conflict` frames.
+  `conflict`, `resolutions` and `unpushed`, and the socket sends `conflict` frames.
 
 ### Repairs prove only what the change can affect
 

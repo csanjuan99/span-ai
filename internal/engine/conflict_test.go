@@ -25,6 +25,45 @@ type fakeGit struct {
 	finishes     int
 	aborts       int
 	messages     []string
+	// preflights are returned in order; once they run out the base merges cleanly.
+	preflights []Preflight
+	checked    int
+	// restored is what Restore reports changed outside the kept paths, call by call.
+	restored  [][]string
+	snapshots int
+	keeps     [][]string
+	// pushedAt is how many check commands had run at each push.
+	pushedAt []int
+	check    *scriptCheck
+}
+
+func (g *fakeGit) Preflight(context.Context, string) (Preflight, error) {
+	g.checked++
+	if len(g.preflights) == 0 {
+		return Preflight{Checked: true, Base: "origin/dev", BaseSHA: "dev-sha"}, nil
+	}
+	next := g.preflights[0]
+	g.preflights = g.preflights[1:]
+	return next, nil
+}
+func (g *fakeGit) Snapshot(context.Context) (TreeState, error) {
+	g.snapshots++
+	return TreeState{}, nil
+}
+func (g *fakeGit) Restore(_ context.Context, _ TreeState, keep []string) ([]string, error) {
+	g.keeps = append(g.keeps, keep)
+	if len(g.restored) == 0 {
+		return nil, nil
+	}
+	next := g.restored[0]
+	g.restored = g.restored[1:]
+	return next, nil
+}
+func (g *fakeGit) Push(ctx context.Context) error {
+	if g.check != nil {
+		g.pushedAt = append(g.pushedAt, len(g.check.calls))
+	}
+	return g.fakeSource.Push(ctx)
 }
 
 func (g *fakeGit) Integrate(context.Context, string) (Integration, error) {
@@ -54,8 +93,8 @@ func (g *fakeGit) FinishMerge(_ context.Context, message string) (string, error)
 	g.sha = fmt.Sprintf("merge-%d", g.finishes)
 	return g.sha, nil
 }
-func (g *fakeGit) Preview(_ context.Context, path, before string, res FileResolution) (string, error) {
-	return fmt.Sprintf("--- a/%s (%s)\n+++ b/%s %s\n", path, before, path, string(res.Content)+res.Blob), nil
+func (g *fakeGit) Preview(_ context.Context, path string, before FileSide, res FileResolution) (string, error) {
+	return fmt.Sprintf("--- a/%s (%s)\n+++ b/%s %s\n", path, before.SHA, path, string(res.Content)+res.Blob), nil
 }
 
 // proposeAgents answers the conflict prompt with scripted replies.
@@ -131,7 +170,14 @@ type conflictRig struct {
 func newConflictRig(t *testing.T, integrations ...Integration) *conflictRig {
 	t.Helper()
 	opt, agents, source, review, _, check := baseOpt(t)
-	git := &fakeGit{fakeSource: source, integrations: integrations}
+	git := &fakeGit{fakeSource: source, integrations: integrations, check: check}
+	for _, integration := range integrations {
+		if len(integration.Files) > 0 {
+			// The preflight sees the conflict the integration then reports.
+			git.preflights = []Preflight{{Checked: true, Conflicts: true, Base: "origin/dev", BaseSHA: "dev-sha"}}
+			break
+		}
+	}
 	source.dirty = false
 	source.sha = "head-sha"
 	proposer := &proposeAgents{fakeAgents: agents}
@@ -244,12 +290,14 @@ func TestReplyValidationRefusesBadProposals(t *testing.T) {
 		},
 		"bad risk":   func(r *ConflictReply) { r.Groups[0].Options[0].Risk = "none" },
 		"bad action": func(r *ConflictReply) { r.Groups[0].Options[0].Action = "rebase" },
-		"markers":    func(r *ConflictReply) { r.Groups[0].Options[0].Content = "<<<<<<< HEAD\n" },
+		"markers":    func(r *ConflictReply) { r.Groups[0].Options[0].Content = "<<<<<<< HEAD\na\n=======\nb\n>>>>>>> dev\n" },
 		"regenerate content": func(r *ConflictReply) {
 			r.Groups[0].Options[1] = ConflictReplyOption{ID: "x", Title: "x", Risk: "low", Action: "regenerate", Command: "go mod tidy"}
 		},
 		"shell command":        func(r *ConflictReply) { r.Groups[1].Options[0].Command = "go mod tidy; rm -rf ~" },
 		"empty command":        func(r *ConflictReply) { r.Groups[1].Options[0].Command = " " },
+		"unlisted program":     func(r *ConflictReply) { r.Groups[1].Options[0].Command = "rm -rf node_modules" },
+		"program by path":      func(r *ConflictReply) { r.Groups[1].Options[0].Command = "./go mod tidy" },
 		"newline in command":   func(r *ConflictReply) { r.Groups[1].Options[0].Command = "go mod tidy\nrm x" },
 		"duplicate group":      func(r *ConflictReply) { r.Groups[1].ID = "g1" },
 		"bad group id":         func(r *ConflictReply) { r.Groups[0].ID = "../g" },
@@ -287,8 +335,8 @@ func TestChoosingAppliesCommitsPushesAndProvesAgain(t *testing.T) {
 	if rig.git.messages[0] != "merge origin/dev into feat/payments: resolve conflicts" {
 		t.Fatalf("message %q", rig.git.messages[0])
 	}
-	if rig.git.pushes == 0 {
-		t.Fatal("the merge commit was not pushed")
+	if rig.git.pushes != 1 || len(rig.git.pushedAt) != 1 || rig.git.pushedAt[0] <= proves {
+		t.Fatalf("the merge commit must be pushed once, after prove ran on it: pushes %d at %v (prove calls before %d)", rig.git.pushes, rig.git.pushedAt, proves)
 	}
 	if len(rig.check.calls) <= proves {
 		t.Fatal("prove did not run again on the merged head")
@@ -427,11 +475,12 @@ func TestRegenerateRunsOnlyAfterItIsChosen(t *testing.T) {
 }
 
 func TestAHostConflictRefusalEntersTheSamePath(t *testing.T) {
-	rig := newConflictRig(t, Integration{Clean: true, Base: "origin/dev"}, conflictedApp())
+	rig := newConflictRig(t, conflictedApp())
+	rig.git.preflights = nil
 	rig.opt.Review = &refusingReview{fakeReview: rig.review, err: fmt.Errorf("%w: gh pr merge: not mergeable", ErrConflict)}
 	rig.agents.replies = []ConflictReply{combineReply("medium")}
 	got := rig.resume(t)
-	if got.Reason != ConflictChooseReason || rig.git.integrated != 2 {
+	if got.Reason != ConflictChooseReason || rig.git.integrated != 1 {
 		t.Fatalf("%+v integrated %d", got, rig.git.integrated)
 	}
 	if cur := rig.cursor(t); cur.Pending != nil || strings.Contains(cur.Reason, "unknown") {
@@ -452,14 +501,178 @@ func TestAHostConflictWithoutAnIntegratorIsNotAnUnknownOutcome(t *testing.T) {
 	}
 }
 
-func TestACleanMergeOfTheBaseIsProvedBeforeTheHostMerges(t *testing.T) {
-	rig := newConflictRig(t, Integration{Clean: true, Merged: true, Base: "origin/dev", BaseSHA: "dev-sha"})
+func TestABranchMerelyBehindItsBaseMergesAsBefore(t *testing.T) {
+	rig := newConflictRig(t)
 	got := rig.resume(t)
-	if got.Verdict != statement.Advance || rig.git.finishes != 1 || rig.git.pushes == 0 || rig.review.merges != 1 {
-		t.Fatalf("%+v finishes %d pushes %d merges %d", got, rig.git.finishes, rig.git.pushes, rig.review.merges)
+	if got.Verdict != statement.Advance || rig.git.checked != 1 || rig.git.integrated != 0 || rig.git.finishes != 0 || rig.git.pushes != 0 || rig.review.merges != 1 {
+		t.Fatalf("%+v checked %d integrated %d finishes %d pushes %d merges %d", got, rig.git.checked, rig.git.integrated, rig.git.finishes, rig.git.pushes, rig.review.merges)
 	}
-	if cur := rig.cursor(t); cur.Iteration != 2 || cur.GitSHA != "merge-1" {
-		t.Fatalf("cursor %+v", cur)
+	if cur := rig.cursor(t); cur.Iteration != 1 {
+		t.Fatalf("a clean base sent the run back to prove: %+v", cur)
+	}
+}
+
+func TestAnUncheckedBaseLeavesTheMergeToTheHost(t *testing.T) {
+	rig := newConflictRig(t)
+	rig.git.preflights = []Preflight{{Note: "the base dev could not be fetched from origin"}}
+	got := rig.resume(t)
+	if got.Verdict != statement.Advance || rig.review.merges != 1 || rig.git.integrated != 0 {
+		t.Fatalf("%+v", got)
+	}
+	st, _, _ := statement.Read(filepath.Join(rig.opt.Root, rig.id, "iter", "1"), merge)
+	if !strings.Contains(st.Reason, "could not be fetched") {
+		t.Fatalf("merge note %q", st.Reason)
+	}
+}
+
+func TestAPreflightConflictThatMergesCleanlyIsAbortedAndMerged(t *testing.T) {
+	rig := newConflictRig(t, Integration{Clean: true, Merged: true, Base: "origin/dev"})
+	rig.git.preflights = []Preflight{{Checked: true, Conflicts: true, Base: "origin/dev"}}
+	got := rig.resume(t)
+	if got.Verdict != statement.Advance || rig.git.finishes != 0 || rig.git.aborts != 1 || rig.review.merges != 1 {
+		t.Fatalf("%+v finishes %d aborts %d merges %d", got, rig.git.finishes, rig.git.aborts, rig.review.merges)
+	}
+}
+
+func TestResolutionsAreCappedPerRun(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	cur := rig.cursor(t)
+	cur.Resolutions = 3
+	if err := writeCursorFile(filepath.Join(rig.opt.Root, rig.id), cur); err != nil {
+		t.Fatal(err)
+	}
+	got := rig.resume(t)
+	if got.Verdict != statement.Hold || got.Reason != "conflict: too many resolutions; the base keeps moving" || rig.git.integrated != 0 {
+		t.Fatalf("%+v integrated %d", got, rig.git.integrated)
+	}
+}
+
+func TestAFailedProveNeverPublishesTheMergeCommit(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	rig.resume(t)
+	if err := ChooseConflict(rig.opt.Root, rig.id, map[string]string{"g1": "both"}); err != nil {
+		t.Fatal(err)
+	}
+	rig.check.fail = 20
+	got := rig.resume(t)
+	if got.Verdict != statement.Hold || rig.git.finishes != 1 {
+		t.Fatalf("%+v finishes %d", got, rig.git.finishes)
+	}
+	if rig.git.pushes != 0 || rig.review.merges != 0 {
+		t.Fatalf("pushed %d merged %d after a failing prove", rig.git.pushes, rig.review.merges)
+	}
+}
+
+func TestAMergeHeldForApprovalAsksAgainForTheMergedHead(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.opt.Policy.Stages.Merge = "hold"
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	cur := rig.cursor(t)
+	cur.Hold = true
+	if err := writeCursorFile(filepath.Join(rig.opt.Root, rig.id), cur); err != nil {
+		t.Fatal(err)
+	}
+	if err := Approve(rig.opt.Root, rig.id, merge, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := rig.resume(t); got.Reason != ConflictChooseReason {
+		t.Fatalf("%+v", got)
+	}
+	if err := ChooseConflict(rig.opt.Root, rig.id, map[string]string{"g1": "both"}); err != nil {
+		t.Fatal(err)
+	}
+	got := rig.resume(t)
+	if got.Reason != "merge is hold" || rig.git.pushes != 0 || rig.review.merges != 0 {
+		t.Fatalf("the merged head was published without an approval: %+v pushes %d", got, rig.git.pushes)
+	}
+	if err := Approve(rig.opt.Root, rig.id, merge, ""); err != nil {
+		t.Fatal(err)
+	}
+	got = rig.resume(t)
+	if got.Verdict != statement.Advance || rig.git.pushes != 1 || rig.review.merges != 1 {
+		t.Fatalf("%+v pushes %d merges %d", got, rig.git.pushes, rig.review.merges)
+	}
+}
+
+func TestEffectiveRiskIgnoresALowLabelOnALossyOption(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.opt.Policy.Stages.Conflict = "auto"
+	reply := combineReply("low")
+	reply.Groups[0].Options = []ConflictReplyOption{
+		{ID: "drop", Title: "Delete it", Risk: "low", Action: "delete"},
+		{ID: "base", Title: "Take the base", Risk: "low", Action: "theirs"},
+		{ID: "mine", Title: "Keep mine", Risk: "low", Action: "ours"},
+	}
+	rig.agents.replies = []ConflictReply{reply}
+	got := rig.resume(t)
+	if got.Reason != ConflictChooseReason || rig.git.finishes != 0 {
+		t.Fatalf("a delete labelled low was applied: %+v", got)
+	}
+	var risks []string
+	for _, option := range rig.cursor(t).Conflict.Groups[0].Options {
+		risks = append(risks, option.Risk)
+	}
+	if strings.Join(risks, ",") != "high,high,medium" {
+		t.Fatalf("card risks %v", risks)
+	}
+}
+
+func TestStrayAgentEditsAreRestoredAndNoted(t *testing.T) {
+	rig := newConflictRig(t, conflictedApp())
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	rig.git.restored = [][]string{{"b.txt", "d.txt"}}
+	rig.resume(t)
+	if rig.git.snapshots == 0 || len(rig.git.keeps) == 0 {
+		t.Fatal("the tree was not checked after the agent ran")
+	}
+	c := rig.cursor(t).Conflict
+	if c.State != ConflictChoosing || !strings.Contains(c.Note, "outside the conflict") || !strings.Contains(c.Note, "b.txt") {
+		t.Fatalf("%+v", c)
+	}
+}
+
+func TestARegenerateThatTouchesOtherFilesIsRefused(t *testing.T) {
+	lock := Integration{Base: "origin/dev", BaseSHA: "dev-sha", Files: []ConflictFile{{
+		Path: "go.sum", Kind: "lockfile",
+		Ours: FileSide{Present: true, SHA: "o", Mode: "100644"}, Theirs: FileSide{Present: true, SHA: "t", Mode: "100644"},
+	}}}
+	rig := newConflictRig(t, lock)
+	rig.agents.replies = []ConflictReply{{Groups: []ConflictReplyGroup{{ID: "deps", Files: []string{"go.sum"}, Options: []ConflictReplyOption{
+		{ID: "tidy", Title: "Regenerate", Risk: "low", Action: "regenerate", Command: "go mod tidy"},
+		{ID: "mine", Title: "Mine", Risk: "low", Action: "ours"},
+	}}}}}
+	rig.resume(t)
+	rig.git.restored = [][]string{{"go.mod"}}
+	if err := ChooseConflict(rig.opt.Root, rig.id, map[string]string{"deps": "tidy"}); err != nil {
+		t.Fatal(err)
+	}
+	got := rig.resume(t)
+	c := rig.cursor(t).Conflict
+	if got.Reason != ConflictChooseReason || rig.git.finishes != 0 || c == nil || !strings.Contains(c.Note, "go.mod") {
+		t.Fatalf("%+v %+v", got, c)
+	}
+	if keep := rig.git.keeps[len(rig.git.keeps)-1]; strings.Join(keep, ",") != "go.sum" {
+		t.Fatalf("the command's own files were not kept: %v", keep)
+	}
+}
+
+func TestATypeConflictOffersOnlyOneSideOrTheOther(t *testing.T) {
+	files := []ConflictFile{{Path: "f", Kind: "other", Ours: FileSide{Present: true, SHA: "l", Mode: "120000"}, Theirs: FileSide{Present: true, SHA: "t", Mode: "100644"}, Temps: []string{"f~abc1234"}}}
+	reply := ConflictReply{Groups: []ConflictReplyGroup{{ID: "g1", Files: []string{"f"}, Options: []ConflictReplyOption{
+		{ID: "both", Title: "Combine", Risk: "low", Action: "combine", Content: "x\n"},
+		{ID: "mine", Title: "Mine", Risk: "low", Action: "ours"},
+	}}}}
+	if _, _, err := validateReply(reply, files); err == nil {
+		t.Fatal("combine was accepted for a type conflict")
+	}
+	reply.Groups[0].Options[0] = ConflictReplyOption{ID: "base", Title: "Base", Risk: "low", Action: "theirs"}
+	_, options, err := validateReply(reply, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := options["g1"]["mine"].Files["f"]; res.Mode != "120000" || len(res.Remove) != 1 {
+		t.Fatalf("ours %+v", res)
 	}
 }
 
@@ -483,16 +696,21 @@ func TestASecondWakeWhileApplyingDoesNotCommitTwice(t *testing.T) {
 }
 
 func TestAFailedPushIsPushedAgainOnResume(t *testing.T) {
-	rig := newConflictRig(t, Integration{Clean: true, Merged: true, Base: "origin/dev"})
+	rig := newConflictRig(t, conflictedApp())
+	rig.agents.replies = []ConflictReply{combineReply("medium")}
+	rig.resume(t)
+	if err := ChooseConflict(rig.opt.Root, rig.id, map[string]string{"g1": "both"}); err != nil {
+		t.Fatal(err)
+	}
 	push := &failingPush{fakeGit: rig.git, left: 1}
 	rig.opt.Source = push
 	got := rig.resume(t)
-	if got.Verdict != statement.Hold || !strings.Contains(got.Reason, "not pushed") {
+	if got.Verdict != statement.Hold || !strings.Contains(got.Reason, "not pushed") || rig.review.merges != 0 {
 		t.Fatalf("%+v", got)
 	}
 	got = rig.resume(t)
-	if got.Verdict != statement.Advance || rig.git.finishes != 1 || rig.git.integrated != 2 {
-		t.Fatalf("%+v finishes %d integrated %d", got, rig.git.finishes, rig.git.integrated)
+	if got.Verdict != statement.Advance || rig.git.finishes != 1 || rig.git.pushes != 1 || rig.review.merges != 1 {
+		t.Fatalf("%+v finishes %d pushes %d", got, rig.git.finishes, rig.git.pushes)
 	}
 }
 
@@ -531,5 +749,21 @@ func TestTheConflictJSONMatchesTheContract(t *testing.T) {
 	want := `{"type":"conflict","conflict":{"base":"origin/dev","baseSHA":"s","state":"choosing","note":"","groups":[{"id":"g1","kind":"lockfile","files":["go.sum"],"summary":"x","options":[{"id":"o1","title":"t","summary":"s","risk":"low","action":"regenerate","command":"go mod tidy","diff":"d"}],"chosen":"o1"}]}}`
 	if string(raw) != want {
 		t.Fatalf("got  %s\nwant %s", raw, want)
+	}
+}
+
+func TestConflictMarkersNeedAllThreeLinesInOrder(t *testing.T) {
+	for text, want := range map[string]bool{
+		"<<<<<<< HEAD\na\n=======\nb\n>>>>>>> dev\n":     true,
+		"<<<<<<< HEAD\r\na\r\n=======\r\nb\r\n>>>>>>> x": true,
+		"a quoted line\n>>>>>>> dev\n":                   false,
+		"<<<<<<< HEAD\nonly a start\n":                   false,
+		"Title\n=======\n":                               false,
+		">>>>>>> x\n=======\n<<<<<<< y\n":                false,
+		"<<<<<<< a\n=======\x00\n>>>>>>> b\n":            false,
+	} {
+		if got := HasConflictMarkers([]byte(text)); got != want {
+			t.Errorf("HasConflictMarkers(%q) = %v, want %v", text, got, want)
+		}
 	}
 }

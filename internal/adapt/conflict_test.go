@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -250,7 +252,7 @@ func TestResolveWritesEachSideAndFinishesTheMerge(t *testing.T) {
 	a := onlyFile(t, got, "a.txt", "content")
 	b := onlyFile(t, got, "b.txt", "content")
 	ctx := context.Background()
-	preview, err := g.Preview(ctx, "b.txt", b.Ours.SHA, engine.FileResolution{Blob: b.Theirs.SHA, Mode: b.Theirs.Mode})
+	preview, err := g.Preview(ctx, "b.txt", b.Ours, engine.FileResolution{Blob: b.Theirs.SHA, Mode: b.Theirs.Mode})
 	if err != nil || !strings.Contains(preview, "-ours") || !strings.Contains(preview, "+theirs") || !strings.HasPrefix(preview, "--- a/b.txt\n+++ b/b.txt\n") {
 		t.Fatalf("preview %q %v", preview, err)
 	}
@@ -327,22 +329,6 @@ func TestIntegrateIgnoresTheUntrackedPolicy(t *testing.T) {
 	got := integrate(t, dir)
 	if !got.Clean || !got.Merged {
 		t.Fatalf("%+v", got)
-	}
-}
-
-func TestIsConflictMessage(t *testing.T) {
-	for text, want := range map[string]bool{
-		"GraphQL: Pull Request is not mergeable (mergePullRequest)":                        true,
-		"X Pull request #12 is not mergeable: the merge commit cannot be cleanly created.": true,
-		"the base branch has merge conflicts":                                              true,
-		"This branch has conflicts that must be resolved":                                  true,
-		"HTTP 502: Bad Gateway":                                                            false,
-		"could not resolve to a PullRequest":                                               false,
-		"":                                                                                 false,
-	} {
-		if got := IsConflictMessage(text); got != want {
-			t.Errorf("IsConflictMessage(%q) = %v, want %v", text, got, want)
-		}
 	}
 }
 
@@ -482,5 +468,518 @@ func TestTheMergeStageResolvesARealConflict(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, id, "merged")); err != nil {
 		t.Fatal("the change was not merged after prove")
+	}
+}
+
+func symlinkOrSkip(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+}
+
+// The branch made f a symlink to a file outside the checkout; the base edited f as a file.
+// No resolution may write through the link.
+func TestResolveNeverWritesThroughASymlink(t *testing.T) {
+	symlinkOrSkip(t)
+	out := t.TempDir()
+	target := filepath.Join(out, "target")
+	write(t, out, "target", "outside, untouched\n")
+	dir := diverged(t,
+		func(d string) { write(t, d, "f", "base\n") },
+		func(d string) {
+			must(t, os.Remove(filepath.Join(d, "f")))
+			must(t, os.Symlink(target, filepath.Join(d, "f")))
+		},
+		func(d string) { write(t, d, "f", "theirs\n") },
+	)
+	integrate(t, dir)
+	theirs := git(t, dir, "rev-parse", "dev:f")
+	g := Git{Dir: dir}
+	_ = g.Resolve(context.Background(), map[string]engine.FileResolution{"f": {Blob: theirs, Mode: "100644"}})
+	if body, err := os.ReadFile(target); err != nil || string(body) != "outside, untouched\n" {
+		t.Fatalf("the file outside the checkout changed: %q %v", body, err)
+	}
+}
+
+// The base made f a symlink; git leaves it at a temporary f~<sha> name in the tree.
+func TestResolveNeverWritesThroughAnIncomingSymlink(t *testing.T) {
+	symlinkOrSkip(t)
+	out := t.TempDir()
+	target := filepath.Join(out, "target")
+	write(t, out, "target", "outside, untouched\n")
+	dir := diverged(t,
+		func(d string) { write(t, d, "f", "base\n") },
+		func(d string) { write(t, d, "f", "ours\n") },
+		func(d string) {
+			must(t, os.Remove(filepath.Join(d, "f")))
+			must(t, os.Symlink(target, filepath.Join(d, "f")))
+		},
+	)
+	integrate(t, dir)
+	ours := git(t, dir, "rev-parse", "feat/x:f")
+	g := Git{Dir: dir}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "f") {
+			_ = g.Resolve(context.Background(), map[string]engine.FileResolution{entry.Name(): {Blob: ours, Mode: "100644"}})
+		}
+	}
+	if body, err := os.ReadFile(target); err != nil || string(body) != "outside, untouched\n" {
+		t.Fatalf("the file outside the checkout changed: %q %v", body, err)
+	}
+}
+
+func TestResolveRefusesAPathThroughASymlinkedDirectory(t *testing.T) {
+	symlinkOrSkip(t)
+	out := t.TempDir()
+	dir := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	integrate(t, dir)
+	must(t, os.Symlink(out, filepath.Join(dir, "sub")))
+	err := Git{Dir: dir}.Resolve(context.Background(), map[string]engine.FileResolution{"sub/x": {Write: true, Content: []byte("x\n")}})
+	if err == nil {
+		t.Fatal("a path through a symlinked directory was accepted")
+	}
+	if _, err := os.Stat(filepath.Join(out, "x")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a file was written through the symlink")
+	}
+}
+
+func TestIntegrateHandlesASubmoduleConflict(t *testing.T) {
+	sub := repo(t)
+	commitAll(t, sub, "s", "1\n")
+	s1 := git(t, sub, "rev-parse", "HEAD")
+	commitAll(t, sub, "s", "2\n")
+	s2 := git(t, sub, "rev-parse", "HEAD")
+	commitAll(t, sub, "s", "3\n")
+	s3 := git(t, sub, "rev-parse", "HEAD")
+	// Gitlinks are set in the index directly: no checkout of the submodule is needed.
+	dir := repo(t)
+	link := func(sha string) { git(t, dir, "update-index", "--add", "--cacheinfo", "160000,"+sha+",lib") }
+	git(t, dir, "checkout", "-q", "-b", "dev")
+	write(t, dir, "README.md", "readme\n")
+	git(t, dir, "add", "README.md")
+	link(s1)
+	git(t, dir, "commit", "-q", "-m", "base")
+	git(t, dir, "checkout", "-q", "-b", "feat/x")
+	link(s2)
+	git(t, dir, "commit", "-q", "-m", "ours")
+	git(t, dir, "checkout", "-q", "dev")
+	link(s3)
+	git(t, dir, "commit", "-q", "-m", "theirs")
+	git(t, dir, "checkout", "-q", "feat/x")
+	g := Git{Dir: dir}
+	got, err := g.Integrate(context.Background(), "dev")
+	if err != nil {
+		t.Fatalf("a submodule conflict broke the merge: %v", err)
+	}
+	file := onlyFile(t, got, "lib", "other")
+	if file.Ours.Mode != "160000" || file.Theirs.SHA != s3 || file.Ours.Text != "" {
+		t.Fatalf("%+v", file)
+	}
+	if err := g.Resolve(context.Background(), map[string]engine.FileResolution{"lib": {Blob: s3, Mode: "160000"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.FinishMerge(context.Background(), "merge"); err != nil {
+		t.Fatal(err)
+	}
+	if entry := git(t, dir, "ls-tree", "HEAD", "lib"); !strings.HasPrefix(entry, "160000 commit "+s3) {
+		t.Fatalf("lib = %q", entry)
+	}
+}
+
+func TestIntegrateFetchesTheBaseIntoASingleBranchClone(t *testing.T) {
+	origin := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	clone := t.TempDir()
+	git(t, clone, "clone", "-q", "--single-branch", "-b", "feat/x", origin, ".")
+	git(t, clone, "config", "user.email", "span@example.test")
+	git(t, clone, "config", "user.name", "Span")
+	got, err := Git{Dir: clone}.Integrate(context.Background(), "dev")
+	if err != nil {
+		t.Fatalf("a single-branch clone could not merge its base: %v", err)
+	}
+	if got.Base != "origin/dev" || len(got.Files) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// A regenerate command or an agent may touch a tracked file outside the merge; abort still
+// leaves the branch exactly as it was.
+func TestAbortRestoresTrackedFilesACommandTouched(t *testing.T) {
+	dir := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n"); write(t, d, "b.txt", "b\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	integrate(t, dir)
+	write(t, dir, "b.txt", "changed by a command\n")
+	if err := (Git{Dir: dir}).Abort(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if status := git(t, dir, "status", "--porcelain", "--untracked-files=no"); status != "" {
+		t.Fatalf("abort left %q", status)
+	}
+}
+
+// A document that quotes one marker line is not a conflict left behind.
+func TestResolveAcceptsTextThatQuotesOneMarker(t *testing.T) {
+	dir := diverged(t,
+		func(d string) { write(t, d, "doc.md", "base\n") },
+		func(d string) { write(t, d, "doc.md", "ours\n") },
+		func(d string) { write(t, d, "doc.md", "theirs\n") },
+	)
+	integrate(t, dir)
+	text := "Git writes a line like\n\n>>>>>>> dev\n\nat the end of a conflict.\n"
+	if err := (Git{Dir: dir}).Resolve(context.Background(), map[string]engine.FileResolution{"doc.md": {Write: true, Content: []byte(text)}}); err != nil {
+		t.Fatalf("one quoted marker was refused: %v", err)
+	}
+}
+
+func TestIsConflictMessageReadsOnlyConflicts(t *testing.T) {
+	for text, want := range map[string]bool{
+		"X Pull request #12 is not mergeable: the merge commit cannot be cleanly created.": true,
+		"GraphQL: Pull Request has merge conflicts (mergePullRequest)":                     true,
+		"This branch has conflicts that must be resolved":                                  true,
+		"X Pull request #12 is not mergeable: the base branch policy prohibits the merge.": false,
+		"GraphQL: Pull Request is not mergeable (mergePullRequest)":                        false,
+		"Required status check \"ci\" is expected.":                                        false,
+		"Review required: at least 1 approving review is required":                         false,
+		"conflict": false,
+	} {
+		if got := IsConflictMessage(text); got != want {
+			t.Errorf("IsConflictMessage(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
+
+func TestHostMergeClassifiesStderrNotTheCommandLine(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake gh is a shell script")
+	}
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho \"$GH_STDERR\" >&2\nexit 1\n"
+	must(t, os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_STDERR", "HTTP 502: Bad Gateway")
+	host := Host{Workspace: t.TempDir(), State: t.TempDir()}
+	err := host.Merge(context.Background(), "https://example.test/acme/resolve-conflicts/pull/3")
+	if err == nil || errors.Is(err, ErrConflict) {
+		t.Fatalf("a URL with 'conflicts' in it made a conflict: %v", err)
+	}
+}
+
+func TestPreflightFindsConflictsWithoutTouchingTheTree(t *testing.T) {
+	dir := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	g := Git{Dir: dir}
+	head := git(t, dir, "rev-parse", "HEAD")
+	got, err := g.Preflight(context.Background(), "dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Checked || !got.Conflicts || got.Base != "dev" || got.BaseSHA != git(t, dir, "rev-parse", "dev") {
+		t.Fatalf("%+v", got)
+	}
+	if merging, _ := g.Merging(context.Background()); merging || git(t, dir, "rev-parse", "HEAD") != head || git(t, dir, "status", "--porcelain") != "" {
+		t.Fatal("the preflight touched the checkout")
+	}
+	behind := diverged(t, nil, func(d string) { write(t, d, "ours.txt", "o\n") }, func(d string) { write(t, d, "theirs.txt", "t\n") })
+	got, err = Git{Dir: behind}.Preflight(context.Background(), "dev")
+	if err != nil || !got.Checked || got.Conflicts {
+		t.Fatalf("a branch merely behind its base: %+v %v", got, err)
+	}
+	missing, err := Git{Dir: behind}.Preflight(context.Background(), "nope")
+	if err != nil || missing.Checked || missing.Note == "" {
+		t.Fatalf("a missing base must skip the check with a note: %+v %v", missing, err)
+	}
+}
+
+func TestPreflightFetchesTheBaseIntoASingleBranchClone(t *testing.T) {
+	origin := diverged(t,
+		func(d string) { write(t, d, "a.txt", "base\n") },
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	clone := t.TempDir()
+	git(t, clone, "clone", "-q", "--single-branch", "-b", "feat/x", origin, ".")
+	got, err := Git{Dir: clone}.Preflight(context.Background(), "dev")
+	if err != nil || !got.Checked || !got.Conflicts || got.Base != "origin/dev" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func treeFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var names []string
+	must(t, filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() {
+			rel, _ := filepath.Rel(dir, path)
+			names = append(names, filepath.ToSlash(rel))
+		}
+		return nil
+	}))
+	return names
+}
+
+func resolveSide(t *testing.T, dir string, file engine.ConflictFile, side engine.FileSide) {
+	t.Helper()
+	g := Git{Dir: dir}
+	res := engine.FileResolution{Delete: true, Remove: file.Temps}
+	if side.Present {
+		res = engine.FileResolution{Blob: side.SHA, Mode: side.Mode, Remove: file.Temps}
+	}
+	if err := g.Resolve(context.Background(), map[string]engine.FileResolution{file.Path: res}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.FinishMerge(context.Background(), "merge"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range append(treeFiles(t, dir), strings.Split(git(t, dir, "ls-tree", "-r", "--name-only", "HEAD"), "\n")...) {
+		if strings.Contains(name, "~") {
+			t.Fatalf("a temporary name was kept: %s", name)
+		}
+	}
+}
+
+func TestATypeChangeKeepsTheRealPathAndMode(t *testing.T) {
+	symlinkOrSkip(t)
+	for _, pick := range []string{"ours", "theirs"} {
+		t.Run(pick, func(t *testing.T) {
+			dir := diverged(t,
+				func(d string) { write(t, d, "f", "base\n") },
+				func(d string) {
+					must(t, os.Remove(filepath.Join(d, "f")))
+					must(t, os.Symlink("README.md", filepath.Join(d, "f")))
+				},
+				func(d string) { write(t, d, "f", "theirs\n") },
+			)
+			got := integrate(t, dir)
+			if len(got.Files) != 1 {
+				t.Fatalf("one path, one decision: %+v", got.Files)
+			}
+			file := onlyFile(t, got, "f", "other")
+			if len(file.Temps) != 1 || file.Ours.Mode != "120000" || file.Theirs.Mode != "100644" {
+				t.Fatalf("%+v", file)
+			}
+			side, want := file.Ours, "120000"
+			if pick == "theirs" {
+				side, want = file.Theirs, "100644"
+			}
+			resolveSide(t, dir, file, side)
+			if entry := git(t, dir, "ls-tree", "HEAD", "f"); !strings.HasPrefix(entry, want+" ") {
+				t.Fatalf("f = %q, want mode %s", entry, want)
+			}
+		})
+	}
+}
+
+func TestADirectoryFileConflictKeepsOneShape(t *testing.T) {
+	for _, pick := range []string{"ours", "theirs"} {
+		t.Run(pick, func(t *testing.T) {
+			dir := diverged(t, nil,
+				func(d string) { write(t, d, "d", "file\n") },
+				func(d string) { write(t, d, "d/x", "in a dir\n") },
+			)
+			got := integrate(t, dir)
+			file := onlyFile(t, got, "d", "other")
+			side := file.Ours
+			if pick == "theirs" {
+				side = file.Theirs
+			}
+			resolveSide(t, dir, file, side)
+			tree := git(t, dir, "ls-tree", "-r", "--name-only", "HEAD")
+			if pick == "ours" && (!strings.Contains(tree, "d\n") && !strings.HasSuffix(tree, "\nd") || strings.Contains(tree, "d/x")) {
+				t.Fatalf("ours keeps the file d: %q", tree)
+			}
+			if pick == "theirs" && !strings.Contains(tree, "d/x") {
+				t.Fatalf("theirs keeps the directory d: %q", tree)
+			}
+			if status := git(t, dir, "status", "--porcelain"); status != "" {
+				t.Fatalf("tree not clean: %q", status)
+			}
+		})
+	}
+}
+
+func TestRestoreUndoesWhatAnAgentChangedOutsideTheConflict(t *testing.T) {
+	dir := diverged(t,
+		func(d string) {
+			write(t, d, "a.txt", "base\n")
+			write(t, d, "b.txt", "b\n")
+			write(t, d, "c.txt", "c\n")
+		},
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	integrate(t, dir)
+	g := Git{Dir: dir}
+	ctx := context.Background()
+	index, status := git(t, dir, "ls-files", "-s"), git(t, dir, "status", "--porcelain")
+	before, err := g.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "b.txt", "staged by the agent\n")
+	git(t, dir, "add", "b.txt")
+	write(t, dir, "c.txt", "edited by the agent\n")
+	write(t, dir, "d.txt", "new from the agent\n")
+	changed, err := g.Restore(ctx, before, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(changed, ",") != "b.txt,c.txt,d.txt" {
+		t.Fatalf("restored %v", changed)
+	}
+	if git(t, dir, "ls-files", "-s") != index || git(t, dir, "status", "--porcelain") != status {
+		t.Fatal("the checkout is not what it was before the agent ran")
+	}
+	if body, _ := os.ReadFile(filepath.Join(dir, "c.txt")); string(body) != "c\n" {
+		t.Fatalf("c.txt = %q", body)
+	}
+}
+
+// realRun is a clone of an origin whose dev and feat/x conflict on a.txt, with a run held
+// at merge on feat/x.
+type realRun struct {
+	origin, clone, root, id, head string
+	opt                           engine.Options
+}
+
+func newRealRun(t *testing.T, agents engine.Agents, prove string) *realRun {
+	t.Helper()
+	origin := diverged(t,
+		func(d string) {
+			write(t, d, "a.txt", "base\n")
+			write(t, d, "b.txt", "b\n")
+			write(t, d, "c.txt", "c\n")
+		},
+		func(d string) { write(t, d, "a.txt", "ours\n") },
+		func(d string) { write(t, d, "a.txt", "theirs\n") },
+	)
+	git(t, origin, "config", "receive.denyCurrentBranch", "ignore")
+	clone := t.TempDir()
+	git(t, clone, "clone", "-q", "-b", "feat/x", origin, ".")
+	git(t, clone, "config", "user.email", "span@example.test")
+	git(t, clone, "config", "user.name", "Span")
+	run := &realRun{origin: origin, clone: clone, root: t.TempDir(), id: "span-r", head: git(t, clone, "rev-parse", "HEAD")}
+	url := "local:" + run.id + ":feat/x"
+	write(t, run.root, filepath.Join(run.id, "change.url"), url+"\n")
+	write(t, run.root, filepath.Join(run.id, "brief.md"), "Keep a.txt.\n")
+	raw, err := json.Marshal(engine.Cursor{ID: run.id, Iteration: 1, Stage: "merge", GitSHA: run.head, ChangeURL: url, Branch: "feat/x", Base: "dev", Workspace: clone})
+	must(t, err)
+	write(t, run.root, filepath.Join(run.id, "cursor.json"), string(raw))
+	off := false
+	run.opt = engine.Options{
+		Workspace: clone, Root: run.root, Brief: "Keep a.txt.",
+		Policy: policy.File{Feature: "payments", Prove: policy.Bands{Fast: []string{prove}, Baseline: &off}},
+		Agents: agents, Check: Exec{}, Source: Git{Dir: clone},
+		Review: LocalReview{Dir: run.root}, Release: CommandRelease{},
+	}
+	return run
+}
+
+func (run *realRun) resume(t *testing.T) engine.Result {
+	t.Helper()
+	got, err := engine.Resume(context.Background(), run.opt, run.id)
+	must(t, err)
+	return got
+}
+
+// strayAgent proposes a valid combine and, on the way, stages b, edits c and creates d.
+type strayAgent struct{ quietAgents }
+
+func (strayAgent) Propose(_ context.Context, _, workspace, _ string) (engine.ConflictReply, error) {
+	for _, step := range [][]string{{"sh", "-c", "echo staged > b.txt && git add b.txt && echo edited > c.txt && echo new > d.txt"}} {
+		cmd := exec.Command(step[0], step[1:]...)
+		cmd.Dir = workspace
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return engine.ConflictReply{}, fmt.Errorf("%v: %s", err, out)
+		}
+	}
+	return engine.ConflictReply{Groups: []engine.ConflictReplyGroup{{ID: "g1", Files: []string{"a.txt"}, Options: []engine.ConflictReplyOption{
+		{ID: "both", Title: "Both", Risk: "low", Action: "combine", Content: "ours\ntheirs\n"},
+		{ID: "mine", Title: "Mine", Risk: "medium", Action: "ours"},
+	}}}}, nil
+}
+
+func TestAnAgentsStrayEditsNeverReachTheMergeCommit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	run := newRealRun(t, strayAgent{}, "git --version")
+	if got := run.resume(t); got.Reason != engine.ConflictChooseReason {
+		t.Fatalf("%+v", got)
+	}
+	snap, err := engine.Load(run.root, run.id)
+	must(t, err)
+	if !strings.Contains(snap.Cursor.Conflict.Note, "outside the conflict") {
+		t.Fatalf("note %q", snap.Cursor.Conflict.Note)
+	}
+	must(t, engine.ChooseConflict(run.root, run.id, map[string]string{"g1": "both"}))
+	if got := run.resume(t); got.Verdict != "advance" {
+		t.Fatalf("%+v", got)
+	}
+	if changed := git(t, run.clone, "diff", "--name-only", "HEAD^1", "HEAD"); changed != "a.txt" {
+		t.Fatalf("the merge commit carries %q", changed)
+	}
+	if status := git(t, run.clone, "status", "--porcelain"); status != "" {
+		t.Fatalf("tree %q", status)
+	}
+}
+
+func TestAbortAfterAStrayAgentLeavesTheTreeAsItWas(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent fake uses sh")
+	}
+	run := newRealRun(t, strayAgent{}, "git --version")
+	run.resume(t)
+	must(t, engine.AbortConflict(run.root, run.id))
+	if got := run.resume(t); got.Reason != engine.ConflictAbortedReason {
+		t.Fatalf("%+v", got)
+	}
+	if head := git(t, run.clone, "rev-parse", "HEAD"); head != run.head {
+		t.Fatalf("head moved to %s", head)
+	}
+	if status := git(t, run.clone, "status", "--porcelain"); status != "" {
+		t.Fatalf("abort left %q", status)
+	}
+}
+
+func TestAMergeCommitIsNotPushedWhileProveFails(t *testing.T) {
+	run := newRealRun(t, quietAgents{}, "git definitely-not-a-command")
+	run.resume(t)
+	must(t, engine.ChooseConflict(run.root, run.id, map[string]string{"g1": "theirs"}))
+	got := run.resume(t)
+	if got.Verdict == "advance" {
+		t.Fatalf("%+v", got)
+	}
+	if git(t, run.clone, "rev-parse", "HEAD^2") == "" {
+		t.Fatal("no merge commit")
+	}
+	if pushed := git(t, run.origin, "rev-parse", "feat/x"); pushed != run.head {
+		t.Fatalf("the unproven merge commit reached origin: %s", pushed)
+	}
+	if _, err := os.Stat(filepath.Join(run.root, run.id, "merged")); err == nil {
+		t.Fatal("merged with a failing prove")
 	}
 }

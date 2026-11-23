@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"span/internal/prompt"
@@ -33,6 +35,7 @@ const (
 const (
 	ConflictChooseReason  = "conflict: choose how to resolve"
 	ConflictAbortedReason = "conflict: aborted"
+	ConflictTooManyReason = "conflict: too many resolutions; the base keeps moving"
 )
 
 // The page writes the person's decision beside the cursor, which the runner owns; the
@@ -43,8 +46,8 @@ const (
 	conflictAbortFile  = "conflict-abort"
 	conflictPlanFile   = "conflict-plan.json"
 
-	pushKind             = "push"
 	maxConflictProposals = 3
+	maxResolutions       = 3
 	conflictDiffCap      = 64 * 1024
 	conflictPromptBudget = 1 << 20
 	maxHint              = 4000
@@ -92,13 +95,34 @@ type Integration struct {
 	Files   []ConflictFile
 }
 
-// ConflictFile is one path git could not merge, with its three sides.
+// ConflictFile is one path git could not merge, with its three sides. Temps are the
+// names git parked a side under (f~HEAD, f~<sha>) when the two sides had different types;
+// they are removed by every resolution.
 type ConflictFile struct {
 	Path   string   `json:"path"`
 	Kind   string   `json:"kind"`
 	Ours   FileSide `json:"ours"`
 	Theirs FileSide `json:"theirs"`
 	Base   FileSide `json:"base"`
+	Temps  []string `json:"temps,omitempty"`
+}
+
+// Preflight is a merge of the base computed without touching the checkout. Checked is
+// false when it could not be computed; Note says why, and the host decides the merge.
+type Preflight struct {
+	Checked   bool
+	Conflicts bool
+	Base      string
+	BaseSHA   string
+	Note      string
+}
+
+// TreeState is what the index and the tracked tree held at one moment, so whatever an agent
+// or a command changed outside the conflict can be put back.
+type TreeState struct {
+	Index     map[string]string
+	Dirty     map[string]bool
+	Untracked map[string]bool
 }
 
 // FileSide is one version of a conflicted file. Text is empty for binary content and cut
@@ -121,6 +145,9 @@ type FileResolution struct {
 	Write   bool   `json:"write,omitempty"`
 	Content []byte `json:"content,omitempty"`
 	Stage   bool   `json:"stage,omitempty"`
+	// Remove are extra paths (a type conflict's temporary names) dropped from the index and
+	// the tree.
+	Remove []string `json:"remove,omitempty"`
 }
 
 // ConflictReply is the agent's proposal.
@@ -158,7 +185,10 @@ type integrator interface {
 	Abort(ctx context.Context) error
 	Resolve(ctx context.Context, files map[string]FileResolution) error
 	FinishMerge(ctx context.Context, message string) (string, error)
-	Preview(ctx context.Context, path, before string, res FileResolution) (string, error)
+	Preview(ctx context.Context, path string, before FileSide, res FileResolution) (string, error)
+	Preflight(ctx context.Context, base string) (Preflight, error)
+	Snapshot(ctx context.Context) (TreeState, error)
+	Restore(ctx context.Context, before TreeState, keep []string) ([]string, error)
 }
 
 // conflictAgent is an agent port that can read a conflict and propose options. Without it
@@ -187,44 +217,55 @@ var (
 	conflictID      = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// integrate merges the base into the branch before the host is asked to merge. refusal is
-// the host's conflict error when the base moved after the change was opened. handled is
-// false when the merge can go ahead as it always did.
-func (r *runner) integrate(ctx context.Context, refusal error) (string, string, bool, error) {
+// checkBase asks, without touching the checkout, whether the base merges cleanly into the
+// branch. A clean merge, or a check that could not run, leaves the merge to the host exactly
+// as before; note says why nothing was checked. Only a conflict starts the conflict flow.
+func (r *runner) checkBase(ctx context.Context) (string, string, bool, string, error) {
 	src, ok := r.opt.Source.(integrator)
 	if !ok || strings.TrimSpace(r.cur.Base) == "" {
-		if refusal != nil {
-			r.cur.Pending = nil
-			verdict, reason, err := r.record(merge, statement.Hold, "merge conflict: "+refusal.Error(), nil)
-			return verdict, reason, true, err
-		}
-		return "", "", false, nil
+		return "", "", false, "", nil
+	}
+	pre, err := src.Preflight(ctx, r.cur.Base)
+	if err != nil {
+		return "", "", false, "no conflict check: " + err.Error(), nil
+	}
+	if !pre.Checked {
+		return "", "", false, "no conflict check: " + pre.Note, nil
+	}
+	if !pre.Conflicts {
+		return "", "", false, "", nil
+	}
+	verdict, reason, handled, err := r.integrate(ctx, src, nil)
+	return verdict, reason, handled, "", err
+}
+
+// integrate merges the base into the branch to resolve what conflicts. refusal is the
+// host's conflict error when the base moved after the check. handled is false when the base
+// turned out to merge cleanly and the host can merge as before.
+func (r *runner) integrate(ctx context.Context, src integrator, refusal error) (string, string, bool, error) {
+	r.cur.Pending = nil
+	if r.cur.Resolutions >= maxResolutions {
+		verdict, reason, err := r.record(merge, statement.Hold, ConflictTooManyReason, nil)
+		return verdict, reason, true, err
 	}
 	integ, err := src.Integrate(ctx, r.cur.Base)
 	if err != nil {
-		r.cur.Pending = nil
 		verdict, reason, err := r.record(merge, statement.Hold, "could not merge "+r.cur.Base+" into the branch: "+err.Error(), nil)
 		return verdict, reason, true, err
 	}
 	if len(integ.Files) == 0 {
-		if !integ.Merged {
-			if refusal != nil {
-				r.cur.Pending = nil
-				verdict, reason, err := r.record(merge, statement.Hold, "merge conflict reported by the host, but "+integ.Base+" merges cleanly here: "+refusal.Error(), nil)
-				return verdict, reason, true, err
-			}
-			return "", "", false, nil
+		// No merge commit is made for a clean base: the host merges it, as before.
+		if err := src.Abort(ctx); err != nil {
+			verdict, reason, recErr := r.record(merge, statement.Hold, "the trial merge of "+integ.Base+" could not be undone: "+err.Error(), nil)
+			return verdict, reason, true, recErr
 		}
-		r.cur.Pending = nil
-		sha, err := src.FinishMerge(ctx, r.mergeMessage(integ.Base, ""))
-		if err != nil {
-			verdict, reason, recErr := r.record(merge, statement.Hold, "the merge of "+integ.Base+" was not committed: "+err.Error(), nil)
-			return verdict, reason, true, errors.Join(recErr, src.Abort(ctx))
+		if refusal != nil {
+			verdict, reason, err := r.record(merge, statement.Hold, "merge conflict reported by the host, but "+integ.Base+" merges cleanly here: "+refusal.Error(), nil)
+			return verdict, reason, true, err
 		}
-		verdict, reason, err := r.pushAndReprove(ctx, sha, "merged "+integ.Base+" into the branch cleanly")
-		return verdict, reason, true, err
+		return "", "", false, nil
 	}
-	r.cur.Pending = nil
+	r.cur.Resolutions++
 	r.cur.Conflict = &Conflict{Base: integ.Base, BaseSHA: integ.BaseSHA, State: ConflictProposing, Groups: []ConflictGroup{}}
 	plan := &conflictPlan{Files: integ.Files}
 	if err := r.writePlan(plan); err != nil {
@@ -236,6 +277,20 @@ func (r *runner) integrate(ctx context.Context, refusal error) (string, string, 
 	r.logLine(fmt.Sprintf("merge: %s does not merge cleanly: %d conflicted files", integ.Base, len(integ.Files)))
 	verdict, reason, err := r.propose(ctx, src, plan, "")
 	return verdict, reason, true, err
+}
+
+// refused handles a host that would not merge because of conflicts.
+func (r *runner) refused(ctx context.Context, refusal error) (string, string, error) {
+	src, ok := r.opt.Source.(integrator)
+	if !ok || strings.TrimSpace(r.cur.Base) == "" {
+		r.cur.Pending = nil
+		return r.record(merge, statement.Hold, "merge conflict: "+refusal.Error(), nil)
+	}
+	verdict, reason, handled, err := r.integrate(ctx, src, refusal)
+	if err != nil || handled {
+		return verdict, reason, err
+	}
+	return r.record(merge, statement.Hold, "merge conflict: "+refusal.Error(), nil)
 }
 
 // continueConflict picks the conflict up where the person or a crash left it.
@@ -294,7 +349,7 @@ func (r *runner) propose(ctx context.Context, src integrator, plan *conflictPlan
 	note := ""
 	if plan.Proposals < maxConflictProposals {
 		plan.Proposals++
-		groups, options, note = r.askAgent(ctx, plan, hint)
+		groups, options, note = r.askAgent(ctx, src, plan, hint)
 	} else {
 		note = fmt.Sprintf("the agent already proposed %d times; these are the mechanical options", maxConflictProposals)
 	}
@@ -352,8 +407,9 @@ func autoChoices(groups []ConflictGroup) (map[string]string, bool) {
 }
 
 // askAgent returns nil groups when the options must be the mechanical ones, with the
-// reason in note.
-func (r *runner) askAgent(ctx context.Context, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string) {
+// reason in note. The agent runs in the checkout, so whatever it changes there is put back
+// before its proposal is used: nothing reaches the merge commit that no card showed.
+func (r *runner) askAgent(ctx context.Context, src integrator, plan *conflictPlan, hint string) ([]ConflictGroup, map[string]map[string]planOption, string) {
 	proposer, ok := r.opt.Agents.(conflictAgent)
 	if !ok {
 		return nil, nil, "no agent can propose options here; these are the mechanical options"
@@ -364,21 +420,56 @@ func (r *runner) askAgent(ctx context.Context, plan *conflictPlan, hint string) 
 	}
 	input := prompt.ConflictInput{Base: r.cur.Conflict.Base, Branch: r.cur.Branch, Files: promptFiles(plan.Files), Hint: hint}
 	rejected := ""
+	var stray []string
 	for attempt := 0; attempt < 2; attempt++ {
 		input.Rejected = rejected
+		before, err := src.Snapshot(ctx)
+		if err != nil {
+			return nil, nil, "the checkout could not be read before asking the agent (" + err.Error() + "); these are the mechanical options"
+		}
 		r.logLine(fmt.Sprintf("merge: asking %s for options on %d conflicted files", target, len(plan.Files)))
 		reply, err := proposer.Propose(ctx, target, r.opt.Workspace, prompt.Conflict(r.promptInput(build, ""), input))
+		changed, restoreErr := src.Restore(ctx, before, nil)
+		if restoreErr != nil {
+			return nil, nil, "what the agent changed in the checkout could not be put back (" + restoreErr.Error() + "); these are the mechanical options"
+		}
+		stray = append(stray, changed...)
 		if err != nil {
-			return nil, nil, "the agent did not answer (" + err.Error() + "); these are the mechanical options"
+			return nil, nil, joinNotes(strayNote(stray), "the agent did not answer ("+err.Error()+"); these are the mechanical options")
 		}
 		groups, options, err := validateReply(reply, plan.Files)
 		if err == nil {
-			return groups, options, ""
+			return groups, options, strayNote(stray)
 		}
 		rejected = err.Error()
 		r.logLine("merge: the agent's options were refused: " + rejected)
 	}
-	return nil, nil, "the agent's options were refused twice (" + rejected + "); these are the mechanical options"
+	return nil, nil, joinNotes(strayNote(stray), "the agent's options were refused twice ("+rejected+"); these are the mechanical options")
+}
+
+func strayNote(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	var unique []string
+	for _, path := range paths {
+		if !seen[path] {
+			seen[path] = true
+			unique = append(unique, path)
+		}
+	}
+	return "the agent changed files outside the conflict (" + strings.Join(unique, ", ") + "); they were restored"
+}
+
+func joinNotes(notes ...string) string {
+	var kept []string
+	for _, note := range notes {
+		if note != "" {
+			kept = append(kept, note)
+		}
+	}
+	return strings.Join(kept, ". ")
 }
 
 // promptFiles copies the sides for the prompt, leaving out text past the prompt budget so
@@ -465,7 +556,7 @@ func validateReply(reply ConflictReply, files []ConflictFile) ([]ConflictGroup, 
 			options[rg.ID][ro.ID] = planned
 			group.Options = append(group.Options, ConflictOption{
 				ID: ro.ID, Title: clip(ro.Title, 120), Summary: clip(ro.Summary, 2000),
-				Risk: ro.Risk, Action: ro.Action, Command: planned.Command,
+				Risk: effectiveRisk(ro.Action, ro.Risk), Action: ro.Action, Command: planned.Command,
 			})
 		}
 		groups = append(groups, group)
@@ -481,6 +572,11 @@ func validateReply(reply ConflictReply, files []ConflictFile) ([]ConflictGroup, 
 // resolveOption turns one option into what it writes for each file of its group.
 func resolveOption(ro ConflictReplyOption, members []ConflictFile, kind string) (planOption, error) {
 	out := planOption{Files: map[string]FileResolution{}}
+	for _, file := range members {
+		if typeConflict(file) && ro.Action != "ours" && ro.Action != "theirs" {
+			return planOption{}, fmt.Errorf("%s has a different type on each side; only ours or theirs can resolve it", file.Path)
+		}
+	}
 	switch ro.Action {
 	case "ours", "theirs", "delete", "keep":
 		for _, file := range members {
@@ -498,26 +594,26 @@ func resolveOption(ro ConflictReplyOption, members []ConflictFile, kind string) 
 			if !ok {
 				return planOption{}, fmt.Errorf("combine has no content for %s", file.Path)
 			}
-			if markers(text) {
+			if HasConflictMarkers([]byte(text)) {
 				return planOption{}, fmt.Errorf("the content for %s still has conflict markers", file.Path)
 			}
 			mode := file.Ours.Mode
 			if mode == "" {
 				mode = file.Theirs.Mode
 			}
-			out.Files[file.Path] = FileResolution{Write: true, Content: []byte(text), Mode: mode}
+			out.Files[file.Path] = FileResolution{Write: true, Content: []byte(text), Mode: mode, Remove: file.Temps}
 		}
 	case "regenerate":
 		if kind != "lockfile" && kind != "generated" {
 			return planOption{}, errors.New("regenerate is only for lockfile or generated files")
 		}
-		command := strings.TrimSpace(ro.Command)
-		if command == "" || strings.ContainsAny(command, ";&|<>$`\\\n\r\"'*?(){}[]~!#") {
-			return planOption{}, fmt.Errorf("command %q is empty or has shell syntax", ro.Command)
+		command, err := regenerateCommand(ro.Command)
+		if err != nil {
+			return planOption{}, err
 		}
 		out.Command = command
 		for _, file := range members {
-			out.Files[file.Path] = FileResolution{Stage: true}
+			out.Files[file.Path] = FileResolution{Stage: true, Remove: file.Temps}
 		}
 	default:
 		return planOption{}, fmt.Errorf("action %q is not one of %s", ro.Action, strings.Join(conflictActions, ", "))
@@ -529,9 +625,9 @@ func resolveOption(ro ConflictReplyOption, members []ConflictFile, kind string) 
 func sideResolution(file ConflictFile, action string) FileResolution {
 	pickSide := func(side FileSide) FileResolution {
 		if !side.Present {
-			return FileResolution{Delete: true}
+			return FileResolution{Delete: true, Remove: file.Temps}
 		}
-		return FileResolution{Blob: side.SHA, Mode: side.Mode}
+		return FileResolution{Blob: side.SHA, Mode: side.Mode, Remove: file.Temps}
 	}
 	switch action {
 	case "ours":
@@ -544,8 +640,52 @@ func sideResolution(file ConflictFile, action string) FileResolution {
 		}
 		return pickSide(file.Theirs)
 	default:
-		return FileResolution{Delete: true}
+		return FileResolution{Delete: true, Remove: file.Temps}
 	}
+}
+
+// typeConflict is a path whose sides are different kinds of thing (a file and a symlink or
+// a directory, or a submodule): only one side or the other can win.
+func typeConflict(file ConflictFile) bool {
+	return len(file.Temps) > 0 || file.Ours.Mode == "160000" || file.Theirs.Mode == "160000" || file.Base.Mode == "160000"
+}
+
+// riskFloor is the least risk each action can carry. The agent's label can raise it, never
+// lower it: an option that drops one side's work is never low risk, whatever it says.
+var riskFloor = map[string]string{"combine": "low", "keep": "low", "ours": "medium"}
+
+func effectiveRisk(action, said string) string {
+	floor, ok := riskFloor[action]
+	if !ok {
+		floor = "high"
+	}
+	rank := map[string]int{"low": 0, "medium": 1, "high": 2}
+	if rank[said] > rank[floor] {
+		return said
+	}
+	return floor
+}
+
+// regenerators are the programs a regenerate option may run. A lockfile or a generated
+// file is rebuilt by its package manager or build tool, not by anything else.
+var regenerators = map[string]bool{
+	"npm": true, "pnpm": true, "yarn": true, "bun": true, "npx": true, "go": true, "cargo": true,
+	"poetry": true, "pip": true, "pip3": true, "uv": true, "bundle": true, "composer": true,
+	"dotnet": true, "gradle": true, "mvn": true, "make": true,
+}
+
+// regenerateCommand checks a regenerate command: one allowed program by name, its arguments,
+// and no shell syntax, because it runs as argv.
+func regenerateCommand(command string) (string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" || strings.ContainsAny(command, ";&|<>$`\\\n\r\"'*?(){}[]~!#") {
+		return "", fmt.Errorf("command %q is empty or has shell syntax", command)
+	}
+	program := strings.Fields(command)[0]
+	if !regenerators[program] {
+		return "", fmt.Errorf("command %q does not start with a package manager or build tool span runs (npm, pnpm, yarn, bun, npx, go, cargo, poetry, pip, pip3, uv, bundle, composer, dotnet, gradle, mvn, make)", command)
+	}
+	return command, nil
 }
 
 // mechanicalOptions are the options span can offer without an agent: one side or the
@@ -601,7 +741,7 @@ func mechanicalOptions(files []ConflictFile, base string) ([]ConflictGroup, map[
 			}
 			options[id][ch.id] = planned
 			group.Options = append(group.Options, ConflictOption{
-				ID: ch.id, Title: ch.title, Summary: ch.summary, Risk: "medium", Action: ch.id,
+				ID: ch.id, Title: ch.title, Summary: ch.summary, Risk: effectiveRisk(ch.id, "medium"), Action: ch.id,
 			})
 		}
 		groups = append(groups, group)
@@ -656,7 +796,7 @@ func (r *runner) previewOptions(ctx context.Context, src integrator, files []Con
 					fmt.Fprintf(&b, "%s is rewritten by `%s` after you choose this option.\n", path, planned.Command)
 					continue
 				}
-				diff, err := src.Preview(ctx, path, byPath[path].Ours.SHA, res)
+				diff, err := src.Preview(ctx, path, byPath[path].Ours, res)
 				if err != nil {
 					fmt.Fprintf(&b, "%s: no preview (%s)\n", path, err.Error())
 					continue
@@ -678,9 +818,10 @@ func capDiff(diff string) string {
 	return diff[:conflictDiffCap] + "\n[diff cut at 64 KiB]\n"
 }
 
-// applyConflict writes the chosen options, commits the merge, pushes it, and sends the run
-// back to prove. It is safe to run again: a merge already committed by an earlier wake is
-// pushed, not committed twice.
+// applyConflict writes the chosen options, commits the merge and sends the run back to
+// prove. Nothing is pushed here: the merge commit is published right before the host merge,
+// once prove, QA and inspect passed on it. It is safe to run again: a merge already committed
+// by an earlier wake is not committed twice.
 func (r *runner) applyConflict(ctx context.Context, src integrator, plan *conflictPlan, choices map[string]string) (string, string, error) {
 	c := r.cur.Conflict
 	for i := range c.Groups {
@@ -698,7 +839,7 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 	if !merging {
 		head, headErr := r.opt.Source.Head(ctx)
 		if headErr == nil && head != "" && head != r.cur.GitSHA {
-			return r.pushAndReprove(ctx, head, "resolved the conflict with "+c.Base+" ("+summary+")")
+			return r.resolved(head, "resolved the conflict with "+c.Base+" ("+summary+")")
 		}
 		return r.failConflict("the merge is no longer in progress in the checkout; abort the conflict and run the merge again")
 	}
@@ -724,25 +865,40 @@ func (r *runner) applyConflict(ctx context.Context, src integrator, plan *confli
 	if err != nil {
 		return r.retryChoice("the merge could not be committed: " + err.Error())
 	}
-	return r.pushAndReprove(ctx, sha, "resolved the conflict with "+c.Base+" ("+summary+")")
+	return r.resolved(sha, "resolved the conflict with "+c.Base+" ("+summary+")")
 }
 
-// regenerate puts the branch's version of the files back, runs the command the person read
-// on the card as argv (never a shell) in the checkout, and leaves its output to be staged.
+// regenerate puts the branch's version of its files back, runs the command the person read
+// on the card as argv (never a shell) in the checkout, and leaves its output to be staged. A
+// command that changed anything outside its own files is undone and refused.
 func (r *runner) regenerate(ctx context.Context, src integrator, plan *conflictPlan, planned planOption) error {
 	reset := map[string]FileResolution{}
+	var own []string
 	for _, file := range plan.Files {
 		if _, ok := planned.Files[file.Path]; ok {
 			reset[file.Path] = sideResolution(file, "keep")
+			own = append(own, file.Path)
 		}
 	}
+	sort.Strings(own)
 	if err := src.Resolve(ctx, reset); err != nil {
 		return fmt.Errorf("the files could not be reset before %s: %w", planned.Command, err)
 	}
-	r.logLine("merge: running " + planned.Command + " to regenerate the conflicted files")
-	out, err := r.opt.Check.Run(ctx, planned.Command, r.opt.Workspace)
+	before, err := src.Snapshot(ctx)
 	if err != nil {
-		return fmt.Errorf("%s did not run: %w", planned.Command, err)
+		return fmt.Errorf("the checkout could not be read before %s: %w", planned.Command, err)
+	}
+	r.logLine("merge: running " + planned.Command + " to regenerate the conflicted files")
+	out, runErr := r.opt.Check.Run(ctx, planned.Command, r.opt.Workspace)
+	changed, err := src.Restore(ctx, before, own)
+	if err != nil {
+		return fmt.Errorf("what %s changed could not be put back: %w", planned.Command, err)
+	}
+	if len(changed) > 0 {
+		return fmt.Errorf("%s changed files outside its group (%s); they were restored", planned.Command, strings.Join(changed, ", "))
+	}
+	if runErr != nil {
+		return fmt.Errorf("%s did not run: %w", planned.Command, runErr)
 	}
 	if out.ExitCode != 0 {
 		return fmt.Errorf("%s exited %d", planned.Command, out.ExitCode)
@@ -760,21 +916,13 @@ func (r *runner) retryChoice(note string) (string, string, error) {
 	return r.holdChoosing()
 }
 
-// pushAndReprove publishes a merge commit and sends the run back to prove: the statements
-// already sealed describe the head before the merge. A push that fails is remembered as
-// pending, so a resume pushes the same commit instead of merging the base again.
-func (r *runner) pushAndReprove(ctx context.Context, sha, what string) (string, string, error) {
-	r.cur.Pending = &Pending{Kind: pushKind, SHA: sha}
+// resolved records the merge commit and sends the run back to prove: the statements already
+// sealed describe the head before the merge. The commit stays local until doMerge pushes it.
+func (r *runner) resolved(sha, what string) (string, string, error) {
+	r.cur.GitSHA = sha
+	r.cur.Unpushed = true
 	r.cur.Conflict = nil
 	r.clearConflictFiles()
-	if err := r.save(); err != nil {
-		return "", "", err
-	}
-	if err := r.opt.Source.Push(ctx); err != nil {
-		return r.record(merge, statement.Hold, what+", but the merge commit was not pushed: "+err.Error()+". Resume to push it again.", nil)
-	}
-	r.cur.Pending = nil
-	r.cur.GitSHA = sha
 	reason := what + "; prove runs again on " + short(sha)
 	if _, _, err := r.record(merge, statement.Hold, reason, func(s *statement.Statement) {
 		s.GitSHA = sha
@@ -977,9 +1125,22 @@ func choosingConflict(root, id string, states ...string) (Cursor, string, error)
 	return cur, dir, nil
 }
 
-func markers(text string) bool {
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "<<<<<<<") || strings.HasPrefix(line, ">>>>>>>") {
+// HasConflictMarkers reports a text that still carries a git conflict: a start marker line,
+// then a separator line, then an end marker line, in that order. A document that quotes one
+// of them is not a conflict. Binary content is never checked: its bytes are not lines.
+func HasConflictMarkers(data []byte) bool {
+	if bytes.IndexByte(data, 0) >= 0 {
+		return false
+	}
+	state := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		switch {
+		case state == 0 && (line == "<<<<<<<" || strings.HasPrefix(line, "<<<<<<< ")):
+			state = 1
+		case state == 1 && line == "=======":
+			state = 2
+		case state == 2 && (line == ">>>>>>>" || strings.HasPrefix(line, ">>>>>>> ")):
 			return true
 		}
 	}

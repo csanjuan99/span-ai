@@ -182,6 +182,11 @@ type Cursor struct {
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
 	// Conflict is a merge of the base into the branch waiting on a person or in progress.
 	Conflict *Conflict `json:"conflict,omitempty"`
+	// Resolutions counts the conflicts this run resolved; the base cannot move forever.
+	Resolutions int `json:"resolutions,omitempty"`
+	// Unpushed is a merge commit that is only local. It is pushed right before the host is
+	// asked to merge, once prove, QA and inspect passed on it.
+	Unpushed bool `json:"unpushed,omitempty"`
 }
 
 // AgentBlock is an agent CLI that cannot work until a person acts. It is a hold,
@@ -1080,9 +1085,6 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if r.cur.Conflict != nil {
 		return r.continueConflict(ctx)
 	}
-	if p := r.cur.Pending; p != nil && p.Kind == pushKind {
-		return r.pushAndReprove(ctx, p.SHA, "pushed the merge commit")
-	}
 	if r.gated(r.opt.Policy.MergeMode(), merge, "") {
 		return r.record(merge, statement.Hold, "merge is hold", nil)
 	}
@@ -1094,24 +1096,41 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(merge, statement.Hold, "merge lookup failed: "+err.Error(), nil)
 	}
+	note := ""
 	if !merged {
-		// The base is merged into the branch first, so a conflict is found and resolved here
-		// instead of being a refusal from the host.
-		if verdict, reason, handled, err := r.integrate(ctx, nil); err != nil || handled {
+		// A conflict with the base is found here, without touching the checkout, instead of
+		// being a refusal from the host. A clean base is left to the host, as before.
+		verdict, reason, handled, why, err := r.checkBase(ctx)
+		if err != nil || handled {
 			return verdict, reason, err
+		}
+		note = why
+		if r.cur.Unpushed {
+			// A resolved merge commit is published only now, once it passed prove, QA and
+			// inspect, so a failing check never reaches the change.
+			if err := r.opt.Source.Push(ctx); err != nil {
+				return r.record(merge, statement.Hold, "the merge commit was not pushed: "+err.Error()+". Resume to push it again.", nil)
+			}
+			r.cur.Unpushed = false
+			if err := r.save(); err != nil {
+				return "", "", err
+			}
 		}
 		if err := r.opt.Review.Merge(ctx, r.cur.ChangeURL); err != nil {
 			if errors.Is(err, ErrConflict) {
 				// The base moved after the check above. Nothing was merged, so this is known.
-				verdict, reason, _, err := r.integrate(ctx, err)
-				return verdict, reason, err
+				return r.refused(ctx, err)
 			}
 			return r.record(merge, statement.Hold, "merge outcome unknown: "+err.Error(), nil)
 		}
 	}
 	r.cur.Pending = nil
 	r.spendApproval(merge, "")
-	return r.record(merge, statement.Advance, "merged", func(s *statement.Statement) {
+	reason := "merged"
+	if note != "" {
+		reason += " (" + note + ")"
+	}
+	return r.record(merge, statement.Advance, reason, func(s *statement.Statement) {
 		s.ChangeURL = r.cur.ChangeURL
 	})
 }

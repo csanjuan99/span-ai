@@ -320,7 +320,7 @@ The order is fixed: intake, frame, build, prove, qa, inspect, open, merge, promo
 | qa | Checks each acceptance line against a test declaration and reads a per-test report | `hold` when the command did not start. A failed gate returns to build with its output. A story with no acceptance lines skips this stage |
 | inspect | A separate read of the diff | A blocking finding returns to build. The third block holds |
 | open | Looks up the change, pushes, and opens it | `hold` when the mode is `hold`, the push fails, or the create result is unknown |
-| merge | Merges when it is not already merged | `hold` when the mode is `hold` or the result cannot be confirmed |
+| merge | Checks the base for conflicts, then merges when it is not already merged | `hold` when the mode is `hold`, a conflict waits for a choice, or the result cannot be confirmed. A resolved conflict returns to prove |
 | promote | Walks environments in order | `hold` on a `hold` environment or an unknown result. `stop` when the command finished and failed |
 | note | Records lead time from frame | Reached only after promote advances |
 
@@ -739,52 +739,78 @@ If the process dies, the agent drops, or the network cuts, the last cursor on di
 
 ### When the merge conflicts
 
-Before `merge` asks the host to merge, it merges the base into the run's branch in the run's
-own checkout: `git fetch origin <base>`, then `git merge --no-commit --no-ff origin/<base>`
-(the local `<base>` when there is no `origin`). It never rebases and never force-pushes. A
-branch that already contains the base merges as before. A clean merge with new commits is
-committed as `merge <base> into <branch>`, pushed, and the run goes back to `prove`, because
-the sealed prove, QA and inspect statements describe the head before the merge. A host that
-refuses the merge because of conflicts (`gh pr merge` saying the change is not mergeable or
-has conflicts) is not an unknown outcome: the run merges the base again and resolves what
-conflicts.
+Before `merge` asks the host to merge, it checks whether the base merges cleanly into the
+run's branch without touching the checkout: `git fetch origin
++refs/heads/<base>:refs/remotes/origin/<base>` (so a single-branch or CI clone gets the base
+too; the local `<base>` when there is no `origin`), then `git merge-tree --write-tree HEAD
+origin/<base>`. A clean result changes nothing: a branch that is merely behind its base is
+left to the host exactly as before, with no merge commit and no extra prove. When the base
+cannot be fetched or found, or git is older than 2.38 and has no `merge-tree --write-tree`,
+nothing is checked, the host decides, and the merge statement says why. A host that refuses
+the merge because of conflicts (`gh pr merge` saying the merge commit cannot be cleanly
+created, or that the change has merge conflicts) is not an unknown outcome either: the run
+resolves the conflict. Only gh's stderr is read, never the command line, and a refusal from
+branch policy, a required check or a missing review stays a plain failure.
 
-When files conflict, the run holds with the reason `conflict: choose how to resolve` and
-nothing is written to the branch until a person chooses. Any conflict git reports is covered,
-and each file has a kind: `content`, `add-add`, `modify-delete`, `rename` (rename/rename and
-rename/delete), `mode`, `binary`, `lockfile` (`package-lock.json`, `yarn.lock`,
-`pnpm-lock.yaml`, `go.sum`, `Cargo.lock`, `poetry.lock`, `Gemfile.lock`, `composer.lock`,
-`bun.lockb`) and `generated` (`.generated.`, `_generated.`, `generated/`, `dist/`, `*.pb.go`,
-`*.min.js`, or a `@generated` or `DO NOT EDIT` header in the first five lines).
+On a conflict, the run merges the base in its own checkout with `git merge --no-commit
+--no-ff origin/<base>`. It never rebases and never force-pushes. It holds with the reason
+`conflict: choose how to resolve`, and nothing is written to the branch until a person
+chooses. Any conflict git reports is covered, and each file has a kind: `content`, `add-add`,
+`modify-delete`, `rename` (rename/rename and rename/delete), `mode`, `binary`, `lockfile`
+(`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `go.sum`, `Cargo.lock`, `poetry.lock`,
+`Gemfile.lock`, `composer.lock`, `bun.lockb`), `generated` (`.generated.`, `_generated.`,
+`generated/`, `dist/`, `*.pb.go`, `*.min.js`, or a `@generated` or `DO NOT EDIT` header in the
+first five lines), and `other`: a path whose sides are different kinds of thing (a file
+against a symlink or a directory, or a submodule). git parks one side of those under a
+temporary `path~HEAD` or `path~<sha>` name; span folds it back into the real path, offers
+only `ours` or `theirs`, and keeps the side's real mode, so a symlink stays a symlink and a
+submodule records its commit.
 
-The build agent reads the story and both sides of every file, which it is told are data, not
-instructions, and groups the files that one decision resolves. Each group gets 2 to 4 option
-cards with a title, a summary, a risk (`low`, `medium`, `high`) and the diff of what it would
-write. Span computes that diff from the bytes, against this branch's version; it does not
-take the agent's word for it. An action is `ours`, `theirs`, `combine` (the agent's merged
-text), `keep` (the file one side deleted), `delete`, or `regenerate`. A reply that breaks
-these rules is refused and the agent is asked once more; a second refusal, a missing agent,
-or a fourth proposal leaves only the mechanical options: keep this branch's version, take the
-base's, or keep or delete a deleted file.
+The build agent reads the story and both sides of every file, framed by delimiters that
+carry a random nonce and marked as data, not instructions, and groups the files that one
+decision resolves. Each group gets 2 to 4 option cards with a title, a summary, a risk and
+the diff of what it would write. Span computes that diff from the bytes, against this
+branch's version. The risk on the card is span's, not the agent's: the agent can raise it but
+not lower it below what the action can lose. `combine` and `keep` can be `low`, `ours` is at
+least `medium`, and `theirs`, `delete` and `regenerate` are always `high`. An action is
+`ours`, `theirs`, `combine` (the agent's merged text), `keep` (the file one side deleted),
+`delete`, or `regenerate`. A reply that breaks these rules is refused and the agent is asked
+once more; a second refusal, a missing agent, or a fourth proposal leaves only the mechanical
+options: keep this branch's version, take the base's, or keep or delete a deleted file.
 
-`regenerate` is only offered for lockfiles and generated files. Its command is one program
-and its arguments, shown on the card, run without a shell in the checkout, and only after you
-choose it: the files are put back to this branch's version, the command runs, and what it
-wrote is staged. A command with shell syntax is refused.
+The agent runs in the checkout. Whatever it stages, edits or creates outside what span
+resolves is put back before its proposal is used, and the card's note says which files it
+touched. No file reaches the merge commit unless a card showed it.
 
-Choose one option per group. Span writes the files, refuses any file that still has conflict
-markers, commits `merge <base> into <branch>: resolve conflicts`, pushes, and the run goes
-back to `prove`. If prove fails, the normal repair loop takes over. Then the merge is
-attempted again. A choice that cannot be applied puts the cards back with what went wrong.
+`regenerate` is only offered for lockfiles and generated files. Its command must start with
+one of `npm`, `pnpm`, `yarn`, `bun`, `npx`, `go`, `cargo`, `poetry`, `pip`, `pip3`, `uv`,
+`bundle`, `composer`, `dotnet`, `gradle`, `mvn` or `make`, by name, and carry no shell syntax.
+It is shown on the card and runs as argv in the checkout only after you choose it: the files
+are put back to this branch's version, the command runs, and what it wrote is staged. A
+command that changes any other file is undone and the cards come back with a note naming
+those files.
+
+Choose one option per group. Span stages each path through git itself (`git update-index`
+and `git checkout-index`), never by writing the file directly, refuses a path through a
+symlinked directory, and refuses a text that still has a conflict (a `<<<<<<<` line, a
+`=======` line and a `>>>>>>>` line, in that order). It commits `merge <base> into <branch>:
+resolve conflicts` and the run goes back to `prove`, because the sealed prove, QA and inspect
+statements describe the head before the merge. The merge commit stays local until prove, QA
+and inspect passed on it: it is pushed right before the host is asked to merge, so a failing
+check never publishes it. If prove fails, the normal repair loop takes over. With `merge:
+hold`, the merged head needs its own approval before that push. A choice that cannot be
+applied puts the cards back with what went wrong. A run resolves at most three conflicts;
+after that it holds with `conflict: too many resolutions; the base keeps moving`.
 
 Not satisfied with the cards? Send a hint, free text, and the agent proposes again with it
-(three proposals per conflict). **Abort** runs `git merge --abort`, which leaves the branch
-exactly as it was, clears the conflict, and holds with `conflict: aborted`. Restarting from a
-stage is refused while a conflict is open.
+(three proposals per conflict). **Abort** runs `git merge --abort`, puts back any tracked file
+a command touched outside the merge, clears the conflict, and holds with `conflict: aborted`:
+the branch is exactly as it was. Restarting from a stage is refused while a conflict is open.
 
 `stages.conflict: auto` applies the first option of every group without waiting, only when
-every one of them is `low` risk and none is a `regenerate`; prove runs afterwards like after
-any merge. Anything else holds as with `hold`, the default.
+span's risk for every one of them is `low` (so never a `regenerate`, `theirs` or `delete`).
+Prove runs afterwards like after any merge, and nothing is pushed until it passes. Anything
+else holds as with `hold`, the default.
 
 The page reads the conflict from the cursor's `conflict` field and from live
 `{"type":"conflict","conflict":{...}}` frames sent on every state change (`proposing`,

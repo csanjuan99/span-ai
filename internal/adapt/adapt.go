@@ -326,13 +326,28 @@ func (h Host) Merge(ctx context.Context, url string) error {
 		return LocalReview{Dir: h.State}.Merge(ctx, url)
 	}
 	_, err := h.gh(ctx, "pr", "merge", url, "--merge")
-	if err != nil && IsConflictMessage(err.Error()) {
+	var refused *ghError
+	if errors.As(err, &refused) && IsConflictMessage(refused.stderr) {
 		// A conflict is a known outcome: nothing was merged, so the run can resolve it
-		// instead of holding on an unknown one.
+		// instead of holding on an unknown one. Only gh's own words are read: the command
+		// line carries the URL, and a repository can be named after conflicts.
 		return fmt.Errorf("%w: %s", ErrConflict, err.Error())
 	}
 	return err
 }
+
+// ghError is a gh command that failed, with its stderr kept apart from the command line.
+type ghError struct {
+	args   []string
+	err    error
+	stderr string
+}
+
+func (e *ghError) Error() string {
+	return fmt.Sprintf("gh %s: %v: %s", strings.Join(e.args, " "), e.err, e.stderr)
+}
+
+func (e *ghError) Unwrap() error { return e.err }
 
 func (h Host) gh(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "gh", args...)
@@ -341,7 +356,7 @@ func (h Host) gh(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gh %s: %w: %s", strings.Join(args, " "), err, stderr.String())
+		return "", &ghError{args: args, err: err, stderr: stderr.String()}
 	}
 	return stdout.String(), nil
 }
