@@ -9,7 +9,10 @@ vi.mock("@/lib/api", () => ({ getJSON: (url: string) => getJSON(url) }))
 import { Metrics } from "@/pages/Metrics"
 
 afterEach(cleanup)
-beforeEach(() => getJSON.mockReset())
+beforeEach(() => {
+  // Braces matter: a hook that returns a function has it run as cleanup, which would call the mock again.
+  getJSON.mockReset()
+})
 
 function show() {
   render(
@@ -40,5 +43,12 @@ describe("Metrics", () => {
     expect(screen.getByText("1h 05m")).toBeTruthy()
     expect(screen.getByText(/ollama\/m$/, { selector: "th span" })).toBeTruthy()
     expect(screen.getByText(/not recorded by runs yet/)).toBeTruthy()
+  })
+
+  it("says why the numbers are missing when the server cannot be read", async () => {
+    getJSON.mockRejectedValue(new Error("the server is down"))
+    show()
+    expect(await screen.findByText(/the server is down/)).toBeTruthy()
+    expect(screen.queryByRole("table")).toBeNull()
   })
 })
