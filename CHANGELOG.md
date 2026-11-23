@@ -6,6 +6,7 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: restarting a run from a stage kept the commit and the change link of the earlier attempt. The run now reads the commit the branch is on when it continues, and a restart before open drops the old change link. The branch and working tree are never reset.
 - **Changed**: the Ledger tab groups records into rounds (a new round starts when a stage repeats), with a verdict icon, short copyable commit and digest chips, the pull request as `PR #n`, and each command as a terminal line that shows its output when it fails.
 - **Changed**: the Implementation tab shows the patch as a code diff: one card per file with its status, `+n −n` counts and a change bar, hunks with line numbers on both sides, and the files a cut patch did not reach listed with their counts.
 - **Fixed**: when inspect sent a change back to build, build was never told why: it rebuilt without the finding, so the same problem could come back until the third block held the run. The finding now opens the next build prompt ("Inspect sent this change back") and is cleared when inspect passes.
