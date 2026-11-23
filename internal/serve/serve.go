@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"span/internal/agent"
+	"span/internal/branch"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
@@ -126,6 +127,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, set)
 	})
+	mux.HandleFunc("GET /branches", handleBranches)
 	mux.HandleFunc("GET /jira", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("path")
 		account, err := jira.Load(project)
@@ -728,12 +730,20 @@ func configureOnly(ctx context.Context, req setup.Request) (string, error) {
 	}
 	var b strings.Builder
 	for _, target := range targets {
+		project, err := policy.ProjectBase(target.Path)
+		if err != nil {
+			return "", err
+		}
+		kind, base, err := branch.Choose(target.Story, req.Kind, req.Base, project)
+		if err != nil {
+			return "", err
+		}
 		res, err := setup.Configure(setup.Request{
 			Workspace: target.Path,
 			Story:     target.Story,
-			Kind:      req.Kind,
+			Kind:      kind,
 			Issue:     target.Issue,
-			Base:      req.Base,
+			Base:      base,
 			Force:     req.Force,
 		})
 		if err != nil {

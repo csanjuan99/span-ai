@@ -26,7 +26,7 @@ What auto-configuration writes, only if `span.yaml` is missing:
 
 `--force` rewrites `span.yaml`. An existing file is left in place.
 
-The project must already be a git repository with the base branch: `dev` for `feat/` and `fix/`, `master` for `hotfix/`.
+The project must already be a git repository with the base branch on `origin` (or locally, when there is no `origin` remote): `dev` for `feat/` and `fix/`, `master` for `hotfix/`, unless the run or `span.yaml` names another one. See [Where a branch starts and where its PR goes](#where-a-branch-starts-and-where-its-pr-goes).
 
 ## Where Span writes
 
@@ -157,11 +157,14 @@ If you also pass `--story`, that text is the brief and the issue key is still us
 
 Only three prefixes exist.
 
-| Prefix | Starts from | Use |
+| Prefix | Starts from by default | Use |
 | --- | --- | --- |
 | `feat/` | `dev` | a new story |
 | `fix/` | `dev` | an adjustment |
 | `hotfix/` | `master` | an adjustment from master |
+
+The defaults apply only when nobody chose a base. A base named with `--base`, the desk's
+**Base branch** field, or `base:` in `span.yaml` may be any valid branch name, for any prefix.
 
 The text after the prefix is inferred when the span starts. A linked key such as `AET-1478`, from `--issue` or from the story text, produces `feat/AET-1478-show-channels`. Without a key, the first line becomes a slug: `feat/add-saved-cards`.
 
@@ -171,6 +174,94 @@ The text after the prefix is inferred when the span starts. A linked key such as
 ./span quickstart --workspace /path/to/project --kind fix --issue AET-1478 --story "Show channels"
 ./span quickstart --workspace /path/to/project --base master --story "Refund the double charge"
 ```
+
+### Where a branch starts and where its PR goes
+
+The base is one branch with two jobs: the story's branch is cut from it, and the pull
+request opens into it (`gh pr create --base=<base> --head=<branch>`). Span always passes the
+base; without it GitHub picks the repository's default branch, usually `main`, whatever
+the branch was cut from.
+
+The base is chosen in this order, first match wins:
+
+1. The run names it: `--base` on `quickstart` or `run`, the **Base branch** field on the
+   desk, or the `base` form field of `POST /quickstart`. It is used for any kind.
+2. `base:` in `span.yaml`, for `feat/` and `fix/` only. A hotfix keeps `master`, and this
+   line never decides the kind: with `base: master`, a story without `--kind` is still a
+   `feat/` (or a `fix/` when it starts with `fix:`), now cut from `master`.
+3. The default: `dev` for `feat/` and `fix/`, `master` for `hotfix/`.
+
+Without `--kind`, a story is `feat/` unless it starts with `fix:`, `bug:` or `hotfix:`. The
+one exception is kept from before: `--base master` named for the run, without `--kind`,
+still means `hotfix/`. Any other named base leaves the inferred kind alone.
+
+```yaml
+# span.yaml: every feat and fix in this checkout starts from, and opens into, release/2.1
+base: release/2.1
+```
+
+Stacked work is a base that is another feature branch. SAL-4 builds on SAL-3, which is not
+merged yet:
+
+```bash
+./span quickstart --workspace /path/to/project --issue SAL-4 --base feat/SAL-3-wallet
+```
+
+The branch `feat/SAL-4-...` starts from `feat/SAL-3-wallet` and its pull request targets
+`feat/SAL-3-wallet`, so the review shows only SAL-4's change. When SAL-3 merges, retarget
+SAL-4's pull request to SAL-3's own base.
+
+**What a base may be.** A branch name, as `git check-ref-format --branch` accepts it, that
+is not `HEAD`, does not start with `-`, has no spaces around it, and does not look like a
+commit (7 to 40 hex digits). Tags and commits are not bases. Anything else is refused
+before git or gh sees it, wherever it came from (flag, desk, form, `span.yaml`):
+
+```text
+invalid base branch "--repo=evil/x": use a branch name, not an option, HEAD, or a commit
+```
+
+**Where the branch is cut from.** Span first fetches the base from `origin` (best effort,
+into `refs/remotes/origin/<base>` only; your own branch is never moved). When origin has it,
+the new branch is cut from `origin/<base>`, even when your local branch is behind or has
+diverged from it: a stale local `dev` must not decide where new work starts. Without
+origin's copy, the local branch is used; offline, the local branch wins silently. The new
+branch does not track its base.
+
+**The base must be on origin.** Before the first stage, and again just before the push at
+open, the base must exist on `origin` (a repository without an `origin` remote has no forge,
+so a local branch is enough there). A base that is only local, a tag, or missing holds the
+run, before any build work and before any push:
+
+```text
+base branch feat/SAL-3-wallet does not exist on origin; push it or choose another base
+```
+
+A run whose base is the branch it is on also holds before the first stage. A run with no
+base at all holds at open instead of opening a pull request.
+
+**A pull request on the wrong base holds.** Span looks at every open pull request for the
+branch. One that targets the base is reused. When none does, for example one opened against
+`main` before this check existed, Span does not reuse it and does not edit it:
+
+```text
+the open change https://github.com/o/r/pull/7 targets main but this run's base is dev; retarget it (gh pr edit 7 --base dev) or close it, then resume
+```
+
+With several, each is named and the command retargets the first. Retarget or close, then
+resume the run.
+
+**`span run` now has a base too.** It used to open into whatever GitHub called the default
+branch. Now it uses `--base`, else `base:` in `span.yaml`, else `dev` (`master` for a
+`--branch hotfix/...`). This is a deliberate change: on a repository without that base, or
+on a checkout that is on the base itself, the run holds before the first stage. The base is
+also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
+diffs against it.
+
+The desk fills the field's suggestions from `GET /branches?path=<folder>`: the local and
+`origin` branches of that repository, `origin/` stripped, the default base first, then the
+50 most recently committed, then the rest alphabetically, 200 in all; and `default`, the base
+an empty field means (`base:` in `span.yaml`, else `dev`). The placeholder shows `master`
+when the kind is `hotfix`.
 
 ## House style
 
@@ -651,8 +742,9 @@ These are the only worktree commands Span runs. Nothing is inferred:
 
 | Command | When |
 | --- | --- |
-| `git worktree add <path> <branch>` | the branch already exists |
-| `git worktree add -b <branch> <path> <base>` | the branch is new, from `dev` |
+| `git worktree add -- <path> <branch>` | the branch already exists |
+| `git worktree add --no-track -b <branch> -- <path> <base>` | the branch is new, from its [base](#where-a-branch-starts-and-where-its-pr-goes) (`origin/<base>` when origin has it) |
+| `git fetch --quiet origin -- +refs/heads/<base>:refs/remotes/origin/<base>` | before every new branch and every base check; best effort |
 | `git worktree list --porcelain` | deciding whether this branch already has a tree |
 | `git worktree remove --force <path>` | dropping an isolated tree; the branch survives |
 | `git worktree prune` | forgetting trees whose directory is gone |
@@ -737,7 +829,7 @@ If the process dies, the agent drops, or the network cuts, the last cursor on di
 
 ### Changes and GitHub
 
-When `gh` is on `PATH`, open lists and creates the pull request with `gh pr`, and merge uses `gh pr merge --merge`. The workspace must be that repository's checkout, with commits already pushed to `origin`.
+When `gh` is on `PATH`, open lists the branch's pull requests with `gh pr list --head=<branch> --json url,baseRefName`, creates one with `gh pr create --base=<base> --head=<branch>`, and merge uses `gh pr merge --merge`. The base is the run's, see [Where a branch starts and where its PR goes](#where-a-branch-starts-and-where-its-pr-goes). The workspace must be that repository's checkout, with commits already pushed to `origin`.
 
 When `gh` is absent, the change is recorded as `local:<id>:<branch>` in `.span/runs/<id>/change.url`. A local merge writes `merged` beside it. That does not publish to a forge.
 

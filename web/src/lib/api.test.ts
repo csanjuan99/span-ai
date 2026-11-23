@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { approveStage, liveFrame, startRun } from "@/lib/api"
+import { approveStage, basePlaceholder, branchChoice, branchLine, liveFrame, snapshot, startRun } from "@/lib/api"
 
 function reply(status: number, body: unknown) {
   vi.stubGlobal(
@@ -109,5 +109,39 @@ describe("liveFrame offset", () => {
     expect(liveFrame({ type: "transcript", offset: 16 }).offset).toBe(16)
     expect(liveFrame({ type: "transcript", offset: -1 }).offset).toBeUndefined()
     expect(liveFrame({ type: "transcript", offset: "16" }).offset).toBeUndefined()
+  })
+})
+
+describe("branchChoice", () => {
+  it("keeps the branch names and the default base", () => {
+    expect(branchChoice({ branches: ["dev", "feat/SAL-3", 4, ""], default: "feat/SAL-3" })).toEqual({
+      branches: ["dev", "feat/SAL-3"],
+      defaultBase: "feat/SAL-3",
+    })
+  })
+
+  it("falls back to dev when the reply says nothing", () => {
+    expect(branchChoice(null)).toEqual({ branches: [], defaultBase: "dev" })
+  })
+})
+
+describe("branchLine", () => {
+  it("names the branch and the base it opens into", () => {
+    const span = snapshot({ cursor: { branch: "feat/SAL-4", base: "feat/SAL-3" } })
+    expect(span.cursor.base).toBe("feat/SAL-3")
+    expect(branchLine(span.cursor)).toBe("branch feat/SAL-4 · base feat/SAL-3")
+  })
+
+  it("shows the base alone, and nothing for a run with neither", () => {
+    expect(branchLine({ branch: "", base: "dev" })).toBe("base dev")
+    expect(branchLine({ branch: "", base: "" })).toBe("")
+  })
+})
+
+describe("basePlaceholder", () => {
+  it("shows master for a hotfix and the project default otherwise", () => {
+    expect(basePlaceholder("hotfix", "release/2.1")).toBe("master")
+    expect(basePlaceholder("feat", "release/2.1")).toBe("release/2.1")
+    expect(basePlaceholder("infer", "dev")).toBe("dev")
   })
 })

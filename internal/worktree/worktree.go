@@ -4,8 +4,9 @@
 //
 // The commands here are the whole surface Span uses. Nothing is inferred:
 //
-//	git worktree add <path> <branch>          the branch already exists
-//	git worktree add -b <branch> <path> <base>  the branch is new
+//	git worktree add -- <path> <branch>                       the branch already exists
+//	git worktree add --no-track -b <branch> -- <path> <base>  the branch is new
+//	git fetch --quiet origin -- +refs/heads/<base>:refs/remotes/origin/<base>  best effort
 //	git worktree list --porcelain             what is checked out where
 //	git worktree remove --force <path>        drop an isolated tree
 //	git worktree prune                        forget trees that are gone
@@ -16,6 +17,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	branchpkg "span/internal/branch"
 )
 
 // Runner runs one git command in a repository. adapt.Git implements it.
@@ -31,12 +34,81 @@ type Entry struct {
 	Head   string
 }
 
+// StartPoint is the full ref a new branch is cut from for base. It always tries a
+// best-effort fetch of the base from origin first, then prefers refs/remotes/origin/<base>:
+// a local base that is behind or has diverged must not decide what a new branch starts
+// from. Without origin's copy it uses the local branch; when the fetch failed (offline) and
+// both exist, the local branch wins silently. The person's local base branch is never
+// moved. Tags and commits are not bases; anything else is a branch.MissingBase error, and a
+// base git could read as an option never reaches git.
+func StartPoint(ctx context.Context, run Runner, repo, base string) (string, error) {
+	if err := branchpkg.CheckBase(base); err != nil {
+		return "", err
+	}
+	local, remote := "refs/heads/"+base, "refs/remotes/origin/"+base
+	fetchErr := fetchBase(ctx, run, repo, base)
+	if fetchErr == nil && hasRef(ctx, run, repo, remote) {
+		return remote, nil
+	}
+	if hasRef(ctx, run, repo, local) {
+		return local, nil
+	}
+	if hasRef(ctx, run, repo, remote) {
+		return remote, nil
+	}
+	return "", branchpkg.MissingBase{Name: base, Cause: fetchErr}
+}
+
+// OnOrigin reports whether base is a branch the forge can target: origin has it after a
+// best-effort fetch. A repository without an origin remote has no forge, so its local
+// branch is enough. An invalid base is an error, not a false.
+func OnOrigin(ctx context.Context, run Runner, repo, base string) (bool, error) {
+	if err := branchpkg.CheckBase(base); err != nil {
+		return false, err
+	}
+	if !hasOrigin(ctx, run, repo) {
+		return hasRef(ctx, run, repo, "refs/heads/"+base), nil
+	}
+	remote := "refs/remotes/origin/" + base
+	// A failed fetch (offline) leaves the remote-tracking ref already known to decide.
+	if err := fetchBase(ctx, run, repo, base); err != nil && !hasRef(ctx, run, repo, remote) {
+		return false, nil
+	}
+	return hasRef(ctx, run, repo, remote), nil
+}
+
+// fetchBase refreshes origin's copy of base into its remote-tracking ref only. It never
+// touches refs/heads, so the person's own branch stays where they left it. A missing origin
+// remote is reported like any other failed fetch.
+func fetchBase(ctx context.Context, run Runner, repo, base string) error {
+	if !hasOrigin(ctx, run, repo) {
+		return fmt.Errorf("no origin remote")
+	}
+	_, err := run.Git(ctx, repo, "fetch", "--quiet", "origin", "--", "+refs/heads/"+base+":refs/remotes/origin/"+base)
+	return err
+}
+
+func hasOrigin(ctx context.Context, run Runner, repo string) bool {
+	_, err := run.Git(ctx, repo, "config", "--get", "remote.origin.url")
+	return err == nil
+}
+
+// hasRef checks one full ref name (refs/heads/... or refs/remotes/...) exactly; it never
+// resolves arbitrary text the way rev-parse does.
+func hasRef(ctx context.Context, run Runner, repo, ref string) bool {
+	_, err := run.Git(ctx, repo, "show-ref", "--verify", "--quiet", "--", ref)
+	return err == nil
+}
+
 // Add checks out branch at path. A branch that does not exist yet is created from base;
 // one that does is reused, so resuming a run lands on the same tree instead of a second
 // copy of the same branch.
 func Add(ctx context.Context, run Runner, repo, path, branch, base string) error {
 	if strings.TrimSpace(branch) == "" {
 		return fmt.Errorf("worktree needs a branch")
+	}
+	if !branchpkg.ValidRef(branch) {
+		return fmt.Errorf("worktree branch %q is not a valid branch name", branch)
 	}
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("worktree needs a path")
@@ -56,28 +128,26 @@ func Add(ctx context.Context, run Runner, repo, path, branch, base string) error
 	if err != nil {
 		return err
 	}
-	args := []string{"worktree", "add"}
 	// The last argument is what gets checked out: the branch when it already exists, the
-	// base commit when the branch is being created.
-	start := branch
-	if !exists {
-		if strings.TrimSpace(base) == "" {
-			return fmt.Errorf("branch %s does not exist and no base was given", branch)
-		}
-		args = append(args, "-b", branch)
-		start = base
+	// base ref when the branch is being created. "--" keeps both from being read as options.
+	if exists {
+		_, err = run.Git(ctx, repo, "worktree", "add", "--", path, branch)
+		return err
 	}
-	args = append(args, path, start)
-	_, err = run.Git(ctx, repo, args...)
+	if strings.TrimSpace(base) == "" {
+		return fmt.Errorf("branch %s does not exist and no base was given", branch)
+	}
+	start, err := StartPoint(ctx, run, repo, base)
+	if err != nil {
+		return err
+	}
+	// --no-track: the new branch pushes to its own name and is not tied to its base.
+	_, err = run.Git(ctx, repo, "worktree", "add", "--no-track", "-b", branch, "--", path, start)
 	return err
 }
 
 func hasBranch(ctx context.Context, run Runner, repo, branch string) (bool, error) {
-	_, err := run.Git(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
-	if err != nil {
-		return false, nil
-	}
-	return true, nil
+	return hasRef(ctx, run, repo, "refs/heads/"+branch), nil
 }
 
 // List reads what git has checked out for this repository.

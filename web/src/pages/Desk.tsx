@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { Link, useNavigate } from "react-router"
 
-import { agentList, getJSON, postForm, rememberServeToken, serveToken, startRun, type Started } from "@/lib/api"
+import { agentList, basePlaceholder, branchChoice, getJSON, postForm, rememberServeToken, serveToken, startRun, type Started } from "@/lib/api"
 import { agentReviewMs, deskAgentLine, timelineLines, withAgent, type TimelineAction } from "@/lib/timeline"
-import type { AgentStatus, SpanHead } from "@/lib/types"
+import type { AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
 import { spanHeadsOf } from "@/lib/api"
 import { Shell } from "@/components/shell/Shell"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
@@ -90,6 +90,8 @@ export function Desk() {
   const [issue, setIssue] = useState("")
   const [story, setStory] = useState("")
   const [kind, setKind] = useState("infer")
+  const [base, setBase] = useState("")
+  const [branches, setBranches] = useState<BranchChoice>({ branches: [], defaultBase: "dev" })
   const [spans, setSpans] = useState<SpanHead[]>([])
   const [url, setUrl] = useState("")
   const [email, setEmail] = useState("")
@@ -163,9 +165,24 @@ export function Desk() {
     }
   }
 
+  // The base list belongs to the folder too. A folder that cannot be read keeps the field
+  // usable: a typed branch name is still checked by the run before anything is cut.
+  async function readBranches(project: string) {
+    if (project.trim() === "") {
+      setBranches({ branches: [], defaultBase: "dev" })
+      return
+    }
+    try {
+      setBranches(branchChoice(await getJSON(`/branches?path=${encodeURIComponent(project)}`)))
+    } catch {
+      setBranches({ branches: [], defaultBase: "dev" })
+    }
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void readSession(workspace)
+      void readBranches(workspace)
     }, 250)
     return () => window.clearTimeout(timer)
   }, [workspace])
@@ -250,6 +267,13 @@ export function Desk() {
     const data = new FormData(event.currentTarget)
     if (kind === "infer") {
       data.delete("kind")
+    }
+    // An empty base is no choice: the server applies span.yaml's base, else the kind's default.
+    // A typed one is sent without the spaces a paste brings; the server refuses anything else.
+    if (base.trim() === "") {
+      data.delete("base")
+    } else {
+      data.set("base", base.trim())
     }
     try {
       const result = await startRun(data)
@@ -390,6 +414,26 @@ export function Desk() {
             </SelectContent>
           </Select>
           {kind !== "infer" ? <input type="hidden" name="kind" value={kind} /> : null}
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="base">Base branch</Label>
+          <Input
+            id="base"
+            name="base"
+            list="base-branches"
+            className="w-64"
+            placeholder={basePlaceholder(kind, branches.defaultBase)}
+            value={base}
+            onChange={(event) => setBase(event.target.value)}
+          />
+          <datalist id="base-branches">
+            {branches.branches.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <p className="text-pretty text-sm text-muted-foreground">
+            The branch is cut from here and its pull request opens into it. Empty uses {basePlaceholder(kind, branches.defaultBase)}.
+          </p>
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="story">Story</Label>
