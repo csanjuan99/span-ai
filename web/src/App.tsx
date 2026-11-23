@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router"
 
 import { ErrorBoundary } from "@/components/error-boundary/ErrorBoundary"
 import { Desk } from "@/pages/Desk"
+import { Metrics } from "@/pages/Metrics"
 import { SpanPage } from "@/pages/SpanPage"
 
 /** One page behind its own boundary; moving to another route clears a caught fault. */
@@ -21,6 +22,14 @@ export function App() {
           element={
             <Guarded>
               <Desk />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/metrics"
+          element={
+            <Guarded>
+              <Metrics />
             </Guarded>
           }
         />

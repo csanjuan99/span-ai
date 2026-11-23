@@ -741,6 +741,16 @@ which `span.yaml` speaks:
 The run remembers the folder it was launched from, so `resume` and a resume from the page apply
 the same policy. A folder with no `span.yaml` changes nothing.
 
+### Metrics
+
+`/metrics` (linked from the desk) summarises every run under the server's state directory: runs
+by outcome, how many finished without a repair or a second iteration, and per stage the
+advances, holds and stops with the median and p90 time. A stage's time runs from the previous
+sealed record to its own, so it includes waiting on a person. The agents table counts the
+stages each CLI and model ran and how they ended; runs started before the journal recorded
+agents do not appear in it. Cost and tokens are not shown because runs do not record them.
+The same data is `GET /metrics` with `Accept: application/json`.
+
 ### Choosing the model of each agent
 
 **Gentle AI and its configuration are required.** Span does not pick models by itself:
