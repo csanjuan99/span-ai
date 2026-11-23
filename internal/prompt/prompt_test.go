@@ -93,3 +93,10 @@ func TestBuildAsksForDecisionAndRiskLinesInTheLog(t *testing.T) {
 		}
 	}
 }
+
+func TestFrameExplainsWhatAClaimIsAndForbidsLeavingThemOut(t *testing.T) {
+	got := Frame(Input{})
+	if !strings.Contains(got, "claims lists each thing") || !strings.Contains(got, "never leave it empty") {
+		t.Fatalf("the frame prompt asks for claims without saying what they are:\n%s", got)
+	}
+}

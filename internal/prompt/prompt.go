@@ -29,6 +29,7 @@ func Frame(in Input) string {
 	return preamble(in) + `
 Read the story in the language it is written. Carry what it already decides into this JSON.
 {"claims":[],"assumptions":[],"questions":[],"acceptance":[],"outOfScope":false}
+claims lists each thing the story says must be true when the work is done, one entry each, in the story's words. A story that asks for anything has at least one claim, so never leave it empty.
 acceptance lists each criterion the story already states, one entry, in the story's words.
 A question is allowed only when the story cannot be implemented without inventing a requirement.
 Do not invent a criterion the story does not state.

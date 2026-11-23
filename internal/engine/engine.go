@@ -790,7 +790,7 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		return r.block(ctx, questions)
 	}
 	if len(doc.Claims) == 0 {
-		return r.record(frame, statement.Hold, "frame produced no claims", nil)
+		return r.record(frame, statement.Hold, "frame produced no claims: the agent returned the story with nothing to check. Resume to ask again, or make the story say what must be true when it is done.", nil)
 	}
 	now := r.opt.now()
 	r.cur.FrameAdvancedAt = &now
