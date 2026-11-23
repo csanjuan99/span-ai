@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"span/internal/statement"
@@ -137,11 +138,22 @@ type refusingReview struct {
 
 func (r *refusingReview) Merge(context.Context, string) error { return r.err }
 
-type events struct{ list []Event }
+// events records what a run publishes. Like the real hub it is safe to call from the run and
+// from the transcript goroutine at once.
+type events struct {
+	mu   sync.Mutex
+	list []Event
+}
 
-func (e *events) Publish(_ string, event Event) { e.list = append(e.list, event) }
+func (e *events) Publish(_ string, event Event) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.list = append(e.list, event)
+}
 
 func (e *events) conflicts() []*Conflict {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	var out []*Conflict
 	for _, event := range e.list {
 		if event.Type == "conflict" {
