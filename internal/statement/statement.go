@@ -10,7 +10,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -19,12 +22,22 @@ const (
 	Stop    = "stop"
 )
 
+// TailBytes is how much of a command's output travels with a statement. The
+// failure is at the end, so the tail is what a reader needs and what the next
+// build prompt receives. The whole output stays in the log file.
+const TailBytes = 4096
+
 // Command is one declared check, not a shell script.
 type Command struct {
-	Command  string `json:"command"`
-	ExitCode int    `json:"exitCode"`
-	Error    string `json:"error,omitempty"`
-	Band     string `json:"band,omitempty"`
+	Command     string `json:"command"`
+	ExitCode    int    `json:"exitCode"`
+	Error       string `json:"error,omitempty"`
+	Band        string `json:"band,omitempty"`
+	Output      string `json:"output,omitempty"`
+	LogPath     string `json:"logPath,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// Preexisting marks a failure the base commit already had. It is shown, not counted.
+	Preexisting bool `json:"preexisting,omitempty"`
 }
 
 // Statement is the control record for one stage in one iteration.
@@ -45,6 +58,10 @@ type Statement struct {
 	ManifestDigest     string    `json:"manifestDigest,omitempty"`
 	HandoffDigests     []string  `json:"handoffDigests,omitempty"`
 	Attributable       bool      `json:"attributable,omitempty"`
+	Fingerprint        string    `json:"fingerprint,omitempty"`
+	Inconclusive       bool      `json:"inconclusive,omitempty"`
+	Cap                int       `json:"cap,omitempty"`
+	Weight             string    `json:"weight,omitempty"`
 	Time               time.Time `json:"time"`
 	Digest             string    `json:"digest,omitempty"`
 }
@@ -127,14 +144,61 @@ func markdown(s *Statement) string {
 		body += "\n## Commands\n\n"
 		for _, c := range s.Commands {
 			line := fmt.Sprintf("- `%s` exit %d", c.Command, c.ExitCode)
+			if c.Band != "" {
+				line += " (" + c.Band + ")"
+			}
 			if c.Error != "" {
-				line += " (" + c.Error + ")"
+				line += " " + c.Error
+			}
+			if c.Preexisting {
+				line += " already failing on the base commit, not counted"
 			}
 			body += line + "\n"
+			if c.LogPath != "" {
+				body += "  Log: " + c.LogPath + "\n"
+			}
+			if c.Output != "" {
+				body += "\n```\n" + strings.TrimRight(c.Output, "\n") + "\n```\n"
+			}
 		}
+	}
+	if s.Inconclusive {
+		body += "\nInconclusive: the same command passed and failed on this commit.\n"
 	}
 	body += "\nDigest: " + s.Digest + "\n"
 	return body
+}
+
+// Tail is the last TailBytes of output, marked when the start was dropped.
+// A caller stores this on the statement; the whole output goes to the log file.
+func Tail(output string) string {
+	if len(output) <= TailBytes {
+		return output
+	}
+	cut := len(output) - TailBytes
+	for cut < len(output) && !utf8.RuneStart(output[cut]) {
+		cut++
+	}
+	return "…" + output[cut:]
+}
+
+// Signature is the stable identity of a failure. Two runs that failed the same
+// way share it, whatever order the parts arrived in. It exists so a repair loop
+// can tell progress from a repeat without a model.
+func Signature(parts ...string) string {
+	seen := make(map[string]bool, len(parts))
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		clean := strings.Join(strings.Fields(strings.ToLower(part)), " ")
+		if clean == "" || seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		kept = append(kept, clean)
+	}
+	sort.Strings(kept)
+	sum := sha256.Sum256([]byte(strings.Join(kept, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 func writeAtomic(path string, data []byte) error {
