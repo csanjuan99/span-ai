@@ -158,3 +158,21 @@ describe("approvalOf", () => {
     expect(approvalOf(null)).toBeNull()
   })
 })
+
+describe("a run held on a merge conflict", () => {
+  const failure = activeFailure({ statements: [statement()], cursor: cursor() })
+
+  it("offers no generic action while the person chooses: the conflict panel owns it", () => {
+    expect(holdAction({ failure, questions: 0, stop: false, done: false, conflict: "choose" })).toBeNull()
+  })
+
+  it("offers the normal resume after an abort, with a neutral hint", () => {
+    const action = holdAction({ failure, questions: 0, stop: false, done: false, conflict: "aborted" })
+    expect(action?.label).toBe("Resume")
+    expect(action?.hint).toContain("merge was aborted")
+  })
+
+  it("keeps the old behavior when there is no conflict", () => {
+    expect(holdAction({ failure, questions: 0, stop: false, done: false, conflict: null })?.label).toBe("Fix and retry")
+  })
+})

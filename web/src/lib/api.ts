@@ -1,17 +1,24 @@
-import type {
-  AcceptanceView,
-  Cursor,
-  Gate,
-  ImplementationView,
-  LiveFrame,
-  QACase,
-  Snapshot,
-  Statement,
-  StatementCommand,
-  AgentChoice,
-  AgentState,
-  AgentStatus,
-  SpanHead,
+import {
+  conflictActions,
+  conflictKinds,
+  conflictRisks,
+  conflictStates,
+  type AcceptanceView,
+  type Conflict,
+  type ConflictGroup,
+  type ConflictOption,
+  type Cursor,
+  type Gate,
+  type ImplementationView,
+  type LiveFrame,
+  type QACase,
+  type Snapshot,
+  type Statement,
+  type StatementCommand,
+  type AgentChoice,
+  type AgentState,
+  type AgentStatus,
+  type SpanHead,
 } from "@/lib/types"
 
 /** One run a submission started. A submission over several repos starts one per repo. */
@@ -140,11 +147,73 @@ function statement(value: unknown): Statement {
   }
 }
 
+/** The first allowed value equal to the input, or the fallback. Narrows without a cast. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.find((item) => item === value) ?? fallback
+}
+
+function conflictOption(value: unknown): ConflictOption | undefined {
+  if (!isRecord(value) || text(value.id) === "") {
+    return undefined
+  }
+  return {
+    id: text(value.id),
+    title: text(value.title),
+    summary: text(value.summary),
+    risk: oneOf(value.risk, conflictRisks, "high"),
+    action: oneOf(value.action, conflictActions, "keep"),
+    command: text(value.command),
+    diff: text(value.diff),
+  }
+}
+
+function present<T>(item: T | undefined): item is T {
+  return item !== undefined
+}
+
+function conflictGroup(value: unknown): ConflictGroup | undefined {
+  if (!isRecord(value) || text(value.id) === "") {
+    return undefined
+  }
+  const options = Array.isArray(value.options) ? value.options.map(conflictOption).filter(present) : []
+  if (options.length === 0) {
+    return undefined
+  }
+  return {
+    id: text(value.id),
+    kind: oneOf(value.kind, conflictKinds, "other"),
+    files: stringList(value.files),
+    summary: text(value.summary),
+    options,
+    chosen: text(value.chosen),
+  }
+}
+
+/**
+ * Reads the conflict the merge stage is resolving. Unknown enums degrade to the safe
+ * reading instead of throwing, and a choosing conflict without one usable group is
+ * dropped, so the page never offers an empty choice. The other states have no cards yet
+ * or anymore, so they keep an empty list.
+ */
+export function conflictOf(value: unknown): Conflict | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+  const state = oneOf(value.state, conflictStates, "proposing")
+  const groups = Array.isArray(value.groups) ? value.groups.map(conflictGroup).filter(present) : []
+  if (state === "choosing" && groups.length === 0) {
+    return undefined
+  }
+  return { base: text(value.base), baseSHA: text(value.baseSHA), state, note: text(value.note), groups }
+}
+
 function cursor(value: unknown): Cursor {
   if (!isRecord(value)) {
     throw new Error("cursor is missing")
   }
+  const conflict = conflictOf(value.conflict)
   return {
+    ...(conflict === undefined ? {} : { conflict }),
     id: text(value.id),
     stage: text(value.stage),
     iteration: count(value.iteration),
@@ -265,6 +334,10 @@ export function liveFrame(value: unknown): LiveFrame {
   }
   if (value.span != null) {
     frame.span = snapshot(value.span)
+  }
+  const conflict = conflictOf(value.conflict)
+  if (conflict !== undefined) {
+    frame.conflict = conflict
   }
   return frame
 }
@@ -483,6 +556,26 @@ export async function stopRun(id: string): Promise<string> {
   const body = await postForm(`/spans/${encodeURIComponent(id)}/stop`, new URLSearchParams())
   const record = isRecord(body) ? body : {}
   return text(record.reason)
+}
+
+/** Applies the person's choice: one `group`/`option` pair per group, in group order. */
+export async function chooseConflict(id: string, pairs: { group: string; option: string }[]): Promise<unknown> {
+  const body = new URLSearchParams()
+  for (const pair of pairs) {
+    body.append("group", pair.group)
+    body.append("option", pair.option)
+  }
+  return postForm(`/spans/${encodeURIComponent(id)}/conflict/choose`, body)
+}
+
+/** Sends the person's hint so the agent proposes the options again. */
+export async function hintConflict(id: string, hint: string): Promise<unknown> {
+  return postForm(`/spans/${encodeURIComponent(id)}/conflict/hint`, new URLSearchParams({ text: hint }))
+}
+
+/** Runs `git merge --abort`: the branch is left exactly as it was. */
+export async function abortConflict(id: string): Promise<unknown> {
+  return postForm(`/spans/${encodeURIComponent(id)}/conflict/abort`, new URLSearchParams())
 }
 
 function spanHeadOf(value: unknown): SpanHead {
