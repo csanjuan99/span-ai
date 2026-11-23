@@ -34,7 +34,7 @@ var Specs = []Spec{
 	},
 	{
 		ID: "codex", Label: "Codex", Binary: "codex",
-		Args:   []string{"exec", "--sandbox", "workspace-write", "--approve-for-me"},
+		Args:   []string{"exec", "--approve-for-me"},
 		Marker: ".codex/AGENTS.md", Needle: "Organic Driven Development",
 	},
 	{

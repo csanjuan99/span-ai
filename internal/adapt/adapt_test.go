@@ -150,3 +150,30 @@ func TestGitCommitLeavesThePolicyFileOutOfTheBranch(t *testing.T) {
 		t.Fatalf("span.yaml is the person's policy, not the story's work; tracked %q", out)
 	}
 }
+
+func TestGitCommitWorksWhenTheRepositoryIgnoresSpanState(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	dir := repo(t)
+	if err := os.MkdirAll(filepath.Join(dir, ".span"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		".gitignore": ".span/\nspan.yaml\n", "main.go": "package main\n", "span.yaml": "agent: any\n", ".span/state": "x\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := (Git{Dir: dir}).Commit(context.Background(), "feat: start"); err != nil {
+		t.Fatalf("a repository that ignores .span and span.yaml stopped the commit: %v", err)
+	}
+	out, err := exec.Command("git", "-C", dir, "ls-files").CombinedOutput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != ".gitignore\nmain.go\n" {
+		t.Fatalf("tracked %q", out)
+	}
+}

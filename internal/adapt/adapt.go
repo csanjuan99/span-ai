@@ -131,13 +131,27 @@ func (g Git) Dirty(ctx context.Context) (bool, error) {
 func (g Git) Commit(ctx context.Context, message string) (string, error) {
 	// span.yaml is the person's policy, not the story's work: committing it puts it on one
 	// branch only, and the next checkout of another branch loses it.
-	if _, err := g.output(ctx, "add", "-A", "--", ".", ":(exclude).span", ":(exclude)span.yaml"); err != nil {
+	// An exclude of a path the repository already ignores makes git add exit 1, so only
+	// paths that are not ignored are named. An ignored one is not staged either way.
+	args := []string{"add", "-A", "--", "."}
+	for _, path := range []string{".span", "span.yaml"} {
+		if !g.ignored(ctx, path) {
+			args = append(args, ":(exclude)"+path)
+		}
+	}
+	if _, err := g.output(ctx, args...); err != nil {
 		return "", err
 	}
 	if _, err := g.output(ctx, "commit", "-m", message); err != nil {
 		return "", err
 	}
 	return g.Head(ctx)
+}
+
+// ignored reports whether a .gitignore rule covers path. A failed check reads as not
+// ignored, which keeps the exclude and so the previous behaviour.
+func (g Git) ignored(ctx context.Context, path string) bool {
+	return g.gitCmd(ctx, g.Dir, "check-ignore", "-q", "--", path).Run() == nil
 }
 
 func (g Git) Push(ctx context.Context) error {

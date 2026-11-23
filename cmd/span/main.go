@@ -131,7 +131,13 @@ func resume(args []string) int {
 	}
 	project := *workspace
 	tree, policyFile := *workspace, *policyPath
-	if snap, err := engine.Load(*spans, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
+	// Without --spans the runs are in the workspace, as options() reads them. Looking in ""
+	// found nothing, so an isolated run resumed in the project instead of its own worktree.
+	root := *spans
+	if root == "" {
+		root = filepath.Join(*workspace, ".span", "runs")
+	}
+	if snap, err := engine.Load(root, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
 		project = snap.Cursor.Project
 		// An isolated run is resumed in its own worktree, not in the project.
 		if snap.Cursor.Workspace != "" {
@@ -140,6 +146,8 @@ func resume(args []string) int {
 		if policyFile == "" {
 			policyFile = projectPolicy(project)
 		}
+		// The run's state stays where it was found, not under its worktree.
+		*spans = root
 	}
 	if policyFile == "" {
 		policyFile = resolvePolicy(*spans, tree, "")
