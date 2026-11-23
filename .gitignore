@@ -2,3 +2,5 @@
 .span/
 *.test
 bin/
+# Local AI runtime state
+.atl/
