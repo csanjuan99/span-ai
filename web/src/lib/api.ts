@@ -615,6 +615,11 @@ export async function saveModel(project: string, cli: string, model: string): Pr
   return postForm("/agent/model", new URLSearchParams({ project, cli, model }))
 }
 
+/** Delete one run's record. The server refuses a run that is being driven. */
+export async function deleteRun(id: string): Promise<void> {
+  await postForm(`/spans/${encodeURIComponent(id)}/delete`, new URLSearchParams())
+}
+
 /** Save the agent the project runs. The server rewrites one line of span.yaml. */
 export async function saveAgent(project: string, id: string): Promise<unknown> {
   return postForm("/agent", new URLSearchParams({ project, agent: id }))
