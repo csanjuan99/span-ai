@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Changed**: the Ledger tab groups records into rounds (a new round starts when a stage repeats), with a verdict icon, short copyable commit and digest chips, the pull request as `PR #n`, and each command as a terminal line that shows its output when it fails.
+- **Changed**: the Implementation tab shows the patch as a code diff: one card per file with its status, `+n −n` counts and a change bar, hunks with line numbers on both sides, and the files a cut patch did not reach listed with their counts.
 - **Fixed**: when inspect sent a change back to build, build was never told why: it rebuilt without the finding, so the same problem could come back until the third block held the run. The finding now opens the next build prompt ("Inspect sent this change back") and is cleared when inspect passes.
 - **Changed**: resuming a run held at `inspect cap:` gives build another round with the finding and restarts the count of blocks, instead of re-running inspect to the same verdict. Each extra round still needs a person to resume.
 
