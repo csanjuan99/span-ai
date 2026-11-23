@@ -30,6 +30,7 @@ import (
 	"span/internal/prompt"
 	"span/internal/prove"
 	"span/internal/qa"
+	"span/internal/runlock"
 	"span/internal/statement"
 	"span/internal/transcript"
 )
@@ -45,7 +46,6 @@ const (
 	merge    = "merge"
 	promote  = "promote"
 	note     = "note"
-	maxIter  = 3
 	maxSteps = 40
 
 	missingAcceptance = "Acceptance criteria are missing."
@@ -114,23 +114,34 @@ type Agents interface {
 
 // Options configures one run. Root is the directory that holds span ids.
 type Options struct {
-	Workspace string
-	Root      string
-	Policy    policy.File
-	Brief     string
-	Issue     string
-	Branch    string
-	Base      string
-	Files     []handoff.File
-	Issues    IssueBoard
-	Now       func() time.Time
-	Agents    Agents
-	Check     prove.Checker
-	Source    Source
-	Review    Review
-	Release   Releaser
-	Watch     Publisher
-	Secrets   []string
+	// HeldWorkspace is a checkout claim the caller already holds. The run uses it instead of
+	// taking the checkout again and releases it when the work ends. A launcher takes the
+	// claim before it writes anything into the project, so a second launch cannot rewrite
+	// span.yaml or the brief under a run that is starting.
+	HeldWorkspace *runlock.Lock
+	Workspace     string
+	Root          string
+	Policy        policy.File
+	Brief         string
+	Issue         string
+	Branch        string
+	Base          string
+	Files         []handoff.File
+	Issues        IssueBoard
+	Now           func() time.Time
+	Agents        Agents
+	Check         prove.Checker
+	Source        Source
+	Review        Review
+	Release       Releaser
+	Watch         Publisher
+	Secrets       []string
+	// Worktree is true when the workspace is a linked git worktree, so parallel runs do
+	// not share a tree. The prompt says so and the agent may not switch branches.
+	Worktree bool
+	// Project is the checkout the run belongs to. The policy and the Jira account live
+	// there, while the code lives in the worktree.
+	Project string
 }
 
 // Result is how far the span got.
@@ -144,25 +155,52 @@ type Result struct {
 
 // Cursor is the resume point. It is written before the next stage starts.
 type Cursor struct {
-	ID              string     `json:"id"`
-	Iteration       int        `json:"iteration"`
-	Stage           string     `json:"stage"`
-	Hold            bool       `json:"hold"`
-	Stop            bool       `json:"stop"`
-	Done            bool       `json:"done"`
-	Reason          string     `json:"reason,omitempty"`
-	GitSHA          string     `json:"gitSHA,omitempty"`
-	ChangeURL       string     `json:"changeURL,omitempty"`
-	Pending         *Pending   `json:"pending,omitempty"`
-	InspectBlocks   int        `json:"inspectBlocks"`
-	LastDigest      string     `json:"lastDigest,omitempty"`
-	FrameAdvancedAt *time.Time `json:"frameAdvancedAt,omitempty"`
-	StartedAt       time.Time  `json:"startedAt"`
-	Branch          string     `json:"branch,omitempty"`
-	Base            string     `json:"base,omitempty"`
-	Workspace       string     `json:"workspace,omitempty"`
-	Issue           string     `json:"issue,omitempty"`
-	Questions       []string   `json:"questions,omitempty"`
+	ID              string      `json:"id"`
+	Iteration       int         `json:"iteration"`
+	Stage           string      `json:"stage"`
+	Hold            bool        `json:"hold"`
+	Stop            bool        `json:"stop"`
+	Done            bool        `json:"done"`
+	Reason          string      `json:"reason,omitempty"`
+	GitSHA          string      `json:"gitSHA,omitempty"`
+	ChangeURL       string      `json:"changeURL,omitempty"`
+	Pending         *Pending    `json:"pending,omitempty"`
+	InspectBlocks   int         `json:"inspectBlocks"`
+	LastDigest      string      `json:"lastDigest,omitempty"`
+	FrameAdvancedAt *time.Time  `json:"frameAdvancedAt,omitempty"`
+	StartedAt       time.Time   `json:"startedAt"`
+	Branch          string      `json:"branch,omitempty"`
+	Base            string      `json:"base,omitempty"`
+	Workspace       string      `json:"workspace,omitempty"`
+	Issue           string      `json:"issue,omitempty"`
+	Questions       []string    `json:"questions,omitempty"`
+	Repairs         []Repair    `json:"repairs,omitempty"`
+	WideSHA         string      `json:"wideSHA,omitempty"`
+	Worktree        bool        `json:"worktree,omitempty"`
+	Project         string      `json:"project,omitempty"`
+	Weight          string      `json:"weight,omitempty"`
+	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
+}
+
+// AgentBlock is an agent CLI that cannot work until a person acts. It is a hold,
+// not a stop: the run continues once the account can run again.
+type AgentBlock struct {
+	Kind   string    `json:"kind"`
+	Agent  string    `json:"agent"`
+	Detail string    `json:"detail,omitempty"`
+	Time   time.Time `json:"time"`
+}
+
+// Repair is one failing check that was sent back to build. The ledger is written
+// before the next build starts, so a resume reads the attempts that were already
+// spent instead of starting over.
+type Repair struct {
+	Iteration   int       `json:"iteration"`
+	Stage       string    `json:"stage"`
+	Fingerprint string    `json:"fingerprint,omitempty"`
+	GitSHA      string    `json:"gitSHA,omitempty"`
+	Reason      string    `json:"reason,omitempty"`
+	Time        time.Time `json:"time"`
 }
 
 // Pending is an external effect that was started and may not have finished.
@@ -192,10 +230,12 @@ type Event struct {
 
 // Snapshot is the durable reading of one run.
 type Snapshot struct {
-	Cursor     Cursor                `json:"cursor"`
-	Statements []statement.Statement `json:"statements"`
-	Acceptance []qa.Line             `json:"acceptance"`
-	Gate       *qa.Gate              `json:"gate,omitempty"`
+	Cursor      Cursor                `json:"cursor"`
+	Statements  []statement.Statement `json:"statements"`
+	Acceptance  []qa.Line             `json:"acceptance"`
+	Gate        *qa.Gate              `json:"gate,omitempty"`
+	StageAgents map[string]string     `json:"stageAgents,omitempty"`
+	Label       string                `json:"label,omitempty"`
 }
 
 // Start creates a span and walks until it holds, stops, or finishes.
@@ -223,10 +263,13 @@ func Open(opt Options) (string, error) {
 	cur := Cursor{
 		ID: id, Iteration: 1, Stage: intake, StartedAt: now,
 		Branch: opt.Branch, Base: opt.Base, Workspace: opt.Workspace,
-		Issue: strings.TrimSpace(opt.Issue),
+		Issue: strings.TrimSpace(opt.Issue), Worktree: opt.Worktree, Project: opt.Project,
 	}
 	r := &runner{opt: opt, cur: cur}
 	if err := os.MkdirAll(r.spanDir(), 0o755); err != nil {
+		return "", err
+	}
+	if err := ignoreStateRoot(opt.Root); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(opt.Brief), 0o644); err != nil {
@@ -243,21 +286,23 @@ func Open(opt Options) (string, error) {
 
 // Resume continues a span from its cursor. A stopped or finished span stays there.
 func Resume(ctx context.Context, opt Options, id string) (Result, error) {
-	r, err := load(opt, id)
+	r, release, err := acquire(opt, id)
 	if err != nil {
 		return Result{}, err
 	}
+	defer release()
 	if r.cur.Stop {
 		return r.finish(statement.Stop), nil
 	}
 	if r.cur.Done {
 		return r.finish(statement.Advance), nil
 	}
-	r.cur.Hold = false
+	clearBusyHold(&r.cur)
+	r.takePause()
 	if err := r.save(); err != nil {
 		return Result{}, err
 	}
-	return r.loop(ctx)
+	return r.run(ctx)
 }
 
 // Waiting reports a run that stopped or held for questions and can continue.
@@ -273,10 +318,11 @@ func Waiting(cur Cursor) bool {
 
 // Continue records the answers and runs the waiting span again.
 func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Result, error) {
-	r, err := load(opt, id)
+	r, release, err := acquire(opt, id)
 	if err != nil {
 		return Result{}, err
 	}
+	defer release()
 	if !Waiting(r.cur) {
 		if r.cur.Stop {
 			return r.finish(statement.Stop), nil
@@ -299,15 +345,16 @@ func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Re
 	if err := r.save(); err != nil {
 		return Result{}, err
 	}
-	return r.loop(ctx)
+	return r.run(ctx)
 }
 
 // Reload replaces the brief with the story and runs the waiting span again.
 func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) {
-	r, err := load(opt, id)
+	r, release, err := acquire(opt, id)
 	if err != nil {
 		return Result{}, err
 	}
+	defer release()
 	if !Waiting(r.cur) {
 		if r.cur.Stop {
 			return r.finish(statement.Stop), nil
@@ -329,7 +376,7 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 	if err := r.save(); err != nil {
 		return Result{}, err
 	}
-	return r.loop(ctx)
+	return r.run(ctx)
 }
 
 // IssueKey reads a KEY-123 token from the first line of a brief.
@@ -405,6 +452,95 @@ type runner struct {
 	book     *learn.Book
 	bookPath string
 	shown    map[string][]string
+	last     failure
+}
+
+// failure is what the stage that just ran learned about why it failed. It is set
+// by prove and qa and read once by repair.
+type failure struct {
+	Fingerprint  string
+	Inconclusive bool
+}
+
+// repair decides whether a failing check starts another build. The loop keeps
+// going while each failure is new. The same failure twice means the build did not
+// fix it, so it stops instead of spending another run, and the cap stays as the
+// ceiling while new failures keep appearing.
+func (r *runner) repair(stage, reason string) (string, string) {
+	prev := r.lastRepair()
+	r.noteRepair(stage, reason)
+	if r.last.Inconclusive {
+		return statement.Hold, "inconclusive, the same command passed and failed on this commit: " + reason
+	}
+	if prev != nil && prev.Fingerprint != "" && prev.Fingerprint == r.last.Fingerprint {
+		return statement.Hold, "no progress, the same failure came back: " + reason
+	}
+	// The cap counts repairs, not iterations: a deliberate restart clears the ledger and
+	// therefore gets its own budget. Three repairs means the fourth failure holds.
+	if cap := r.opt.Policy.RepairCapFor(r.weight()); len(r.cur.Repairs) > cap {
+		return statement.Hold, fmt.Sprintf("iteration cap %d: %s", cap, reason)
+	}
+	return "iterate", reason
+}
+
+func (r *runner) noteRepair(stage, reason string) {
+	r.cur.Repairs = append(r.cur.Repairs, Repair{
+		Iteration: r.cur.Iteration, Stage: stage, Fingerprint: r.last.Fingerprint,
+		GitSHA: r.cur.GitSHA, Reason: reason, Time: r.opt.now(),
+	})
+}
+
+func (r *runner) lastRepair() *Repair {
+	if len(r.cur.Repairs) == 0 {
+		return nil
+	}
+	return &r.cur.Repairs[len(r.cur.Repairs)-1]
+}
+
+// stamp writes each command's full output to the run log and keeps a short tail on
+// the statement. The log is what a reader opens; the tail is what a prompt carries.
+func (r *runner) stamp(stage string, commands []statement.Command) []statement.Command {
+	out := make([]statement.Command, len(commands))
+	for i, item := range commands {
+		if item.Output != "" {
+			if path, err := r.writeLog(stage, i, item.Output); err == nil {
+				item.LogPath = path
+			}
+			item.Output = statement.Tail(item.Output)
+		}
+		out[i] = item
+	}
+	return out
+}
+
+func (r *runner) writeLog(stage string, index int, text string) (string, error) {
+	dir := filepath.Join(r.iterDir(), "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%s-%d.log", stage, index+1)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(filepath.Join("iter", strconv.Itoa(r.cur.Iteration), "logs", name)), nil
+}
+
+// run walks the stages and, when the loop fails, leaves the run held with the reason.
+// A run that died mid-stage with hold=false looks identical to a running one on the
+// page, so the person is offered nothing to do. A hold with the error is honest.
+func (r *runner) run(ctx context.Context) (Result, error) {
+	release, busy := r.lockWorkspace()
+	if busy != nil {
+		return r.holdBusy(busy), nil
+	}
+	defer release()
+	res, err := r.loop(ctx)
+	if err != nil {
+		r.cur.Hold = true
+		r.cur.Reason = "the run stopped: " + err.Error()
+		_ = r.save()
+	}
+	return res, err
 }
 
 func (r *runner) loop(ctx context.Context) (Result, error) {
@@ -446,6 +582,14 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 			}
 			continue
 		}
+		if r.takePause() && stage != note {
+			r.cur.Hold = true
+			r.cur.Reason = "paused before " + stage + ". Pick the agent for this stage, then resume."
+			if err := r.save(); err != nil {
+				return Result{}, err
+			}
+			return r.finish(statement.Hold), nil
+		}
 		verdict, reason, err := r.exec(ctx, stage)
 		if err != nil {
 			return Result{}, err
@@ -458,6 +602,7 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 				r.cur.Stage = next(stage)
 			}
 			r.cur.Questions = nil
+			r.cur.AgentBlock = nil
 			r.cur.Reason = reason
 		case statement.Hold:
 			r.cur.Hold = true
@@ -466,10 +611,15 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 			r.cur.Stop = true
 			r.cur.Reason = reason
 		case "iterate":
-			r.cur.Iteration++
-			r.cur.Stage = frame
-			r.cur.InspectBlocks = 0
-			r.cur.Reason = reason
+			decision, why := r.repair(stage, reason)
+			r.cur.Reason = why
+			if decision == "iterate" {
+				r.cur.Iteration++
+				r.cur.Stage = build
+				r.cur.InspectBlocks = 0
+				break
+			}
+			r.cur.Hold = true
 		case "rebuild":
 			r.cur.Stage = build
 			r.cur.Reason = reason
@@ -532,7 +682,7 @@ func (r *runner) doIntake() (string, string, error) {
 }
 
 func (r *runner) doFrame(ctx context.Context) (string, string, error) {
-	sel, err := r.opt.Agents.Select(r.opt.Policy.Agent)
+	target, err := r.pick(frame)
 	if err != nil {
 		return r.record(frame, statement.Hold, err.Error(), nil)
 	}
@@ -544,9 +694,9 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		}
 	}
 	in := r.promptInput(frame, prev)
-	doc, err := r.opt.Agents.Frame(ctx, sel.Build, r.opt.Workspace, prompt.Frame(in))
+	doc, err := r.opt.Agents.Frame(ctx, target, r.opt.Workspace, prompt.Frame(in))
 	if err != nil {
-		return r.record(frame, statement.Hold, err.Error(), nil)
+		return r.agentBlocked(frame, err)
 	}
 	if doc.OutOfScope {
 		return r.record(frame, statement.Stop, "out of scope", nil)
@@ -570,13 +720,16 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 }
 
 func (r *runner) doBuild(ctx context.Context) (string, string, error) {
-	sel, err := r.opt.Agents.Select(r.opt.Policy.Agent)
+	if err := r.recordBaseline(ctx); err != nil {
+		return "", "", err
+	}
+	target, err := r.pick(build)
 	if err != nil {
 		return r.record(build, statement.Hold, err.Error(), nil)
 	}
-	in := r.promptInput(build, "")
-	if err := r.opt.Agents.Build(ctx, sel.Build, r.opt.Workspace, prompt.Build(in)); err != nil {
-		return r.record(build, statement.Hold, err.Error(), nil)
+	in := r.promptInput(build, r.failurePacket())
+	if err := r.opt.Agents.Build(ctx, target, r.opt.Workspace, prompt.Build(in)); err != nil {
+		return r.agentBlocked(build, err)
 	}
 	path := featurePath(r.opt.Workspace, r.opt.Policy.Feature)
 	if err := feature.Valid(path); err != nil {
@@ -595,20 +748,95 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	})
 }
 
+// weight reads the story as it stands now. It is not frozen at intake: frame can install
+// criteria, and a brief that grows into twenty of them earns more checks.
+func (r *runner) weight() string {
+	names, _ := handoffNames(r.spanDir())
+	return r.opt.Policy.Weight(len(qa.Lines(r.opt.Brief)), names)
+}
+
+// provePlan scopes the focused band to the files that declare this story's criteria.
+// The map already exists for QA, so the tool answers what belongs to this story instead
+// of asking a person to write a path filter. No declaration means no scope, and the wide
+// band keeps deciding.
+func (r *runner) provePlan() prove.Plan {
+	weight := r.weight()
+	plan := prove.Plan{Fast: r.opt.Policy.Prove.Fast, Acceptance: r.opt.Policy.Prove.Acceptance}
+	if !policy.WideOn(weight) {
+		plan.Fast = nil
+	}
+	templates := r.opt.Policy.Prove.Focused
+	if r.cur.WideSHA != "" && r.cur.WideSHA == r.cur.GitSHA {
+		// The whole suite already passed on these exact bytes. Running it again buys
+		// nothing and costs its full duration.
+		plan.Fast = nil
+	}
+	files, err := qa.Scope(r.opt.Workspace, qa.Lines(r.opt.Brief))
+	if err != nil || len(files) == 0 {
+		// Nothing to focus on. A prove pass must never be left with no command at all:
+		// the wide band decides again, whatever the weight said.
+		plan.Fast = r.opt.Policy.Prove.Fast
+		return plan
+	}
+	joined := strings.Join(files, " ")
+	if len(templates) == 0 {
+		// Nothing configured: derive the scoped command from the band that was declared
+		// for this weight, so a light story still has something to run.
+		wide := plan.Fast
+		if len(wide) == 0 {
+			wide = r.opt.Policy.Prove.Fast
+		}
+		plan.Focused = prove.DeriveFocus(wide, files)
+		return plan
+	}
+	for _, template := range templates {
+		plan.Focused = append(plan.Focused, strings.ReplaceAll(template, "{files}", joined))
+	}
+	return plan
+}
+
 func (r *runner) doProve(ctx context.Context) (string, string, error) {
-	rep, err := prove.Bands(ctx, r.opt.Check, r.opt.Workspace, r.opt.Policy.Prove.Fast, r.opt.Policy.Prove.Acceptance)
+	plan := r.provePlan()
+	plan.Excuse = r.excuse()
+	r.cur.Weight = r.weight()
+	rep, err := prove.Bands(ctx, r.opt.Check, r.opt.Workspace, plan)
 	if err != nil {
 		return "", "", err
 	}
-	verdict := rep.Outcome
-	if verdict == "iterate" && r.cur.Iteration >= maxIter {
-		verdict = statement.Hold
-		rep.Reason = "iteration cap: " + rep.Reason
+	if plan.Runs() && len(plan.Fast) > 0 && rep.Outcome == statement.Advance && r.cur.GitSHA != "" {
+		r.cur.WideSHA = r.cur.GitSHA
 	}
-	return r.record(proveSt, verdict, rep.Reason, func(s *statement.Statement) {
-		s.Commands = rep.Commands
+	r.last = failure{Fingerprint: rep.Fingerprint}
+	return r.record(proveSt, rep.Outcome, rep.Reason, func(s *statement.Statement) {
+		s.Commands = r.stamp(proveSt, rep.Commands)
 		s.GitSHA = r.cur.GitSHA
 		s.Attributable = rep.Outcome == "iterate"
+		s.Fingerprint = rep.Fingerprint
+		s.Weight = r.cur.Weight
+		s.Cap = r.opt.Policy.RepairCapFor(r.cur.Weight)
+	})
+}
+
+// agentBlocked records an agent that ran out of quota or credentials. The reason
+// names the action a person has to take, because nothing in the project can fix it.
+func (r *runner) agentBlocked(stage string, err error) (string, string, error) {
+	blocked, ok := agent.AsBlocked(err)
+	if !ok {
+		return r.record(stage, statement.Hold, err.Error(), nil)
+	}
+	r.cur.AgentBlock = &AgentBlock{
+		Kind: blocked.Kind, Agent: blocked.Agent, Detail: blocked.Detail, Time: r.opt.now(),
+	}
+	var why string
+	switch blocked.Kind {
+	case agent.Credentials:
+		why = fmt.Sprintf("agent credentials missing (%s): %s. Log in to that CLI, then resume.", blocked.Agent, blocked.Detail)
+	default:
+		why = fmt.Sprintf("agent quota exhausted (%s): %s. Resume after the limit resets, or set agent: to another CLI.", blocked.Agent, blocked.Detail)
+	}
+	return r.record(stage, statement.Hold, why, func(s *statement.Statement) {
+		s.Fingerprint = statement.Signature(blocked.Agent, blocked.Kind, blocked.Detail)
+		s.Cap = r.opt.Policy.RepairCap()
 	})
 }
 
@@ -652,12 +880,15 @@ func (r *runner) doQA(ctx context.Context) (string, string, error) {
 		return "", "", err
 	}
 	command := r.opt.Policy.QACommand(r.browserQA())
-	gate := qa.Gate{Command: command, Checks: make([]qa.Check, 0, len(lines))}
+	covered, coverErr := qa.Covered(r.opt.Workspace, lines)
+	if coverErr != nil {
+		return "", "", coverErr
+	}
 	if command == "" || prove.Prose(command) {
+		gate := qa.Gate{Command: command, Verdict: qa.Unverified, Checks: make([]qa.Check, 0, len(lines))}
 		for _, line := range lines {
-			gate.Checks = append(gate.Checks, qa.Check{ID: line.ID, Result: "unverified"})
+			gate.Checks = append(gate.Checks, qa.Check{ID: line.ID, Result: qa.Unverified})
 		}
-		gate.Verdict = "unverified"
 		if err := r.writeGate(gate); err != nil {
 			return "", "", err
 		}
@@ -669,46 +900,110 @@ func (r *runner) doQA(ctx context.Context) (string, string, error) {
 			s.Commands = []statement.Command{{Command: command, Band: "qa", Error: reason}}
 		})
 	}
-	code, err := r.opt.Check.Run(ctx, command, r.opt.Workspace)
-	ran := err == nil
-	if !ran {
-		code = 0
+	prev, hadProve, _ := statement.Read(r.iterDir(), proveSt)
+	if hadProve && r.reusableQA(prev, command, ctx) {
+		gate := qa.Judge(lines, 0, covered, qa.Outcomes{})
+		gate.Command = command
+		gate.Evidence = "prove"
+		gate.Reason = command + " already passed on this commit in a clean tree; it was not run again"
+		if err := r.writeGate(gate); err != nil {
+			return "", "", err
+		}
+		fill := func(s *statement.Statement) {
+			s.Commands = []statement.Command{{Command: command, Band: "qa"}}
+			s.GitSHA = r.cur.GitSHA
+			s.Fingerprint = statement.Signature(command, gate.Reason)
+			s.Cap = r.opt.Policy.RepairCap()
+		}
+		if gate.Verdict == qa.Pass {
+			return r.record(qaSt, statement.Advance, "acceptance gate passed; "+command+" was not run again", fill)
+		}
+		r.last = failure{Fingerprint: statement.Signature(command, gate.Reason)}
+		return r.record(qaSt, "iterate", gate.Reason, fill)
 	}
-	covered, coverErr := qa.Covered(r.opt.Workspace, lines)
-	if coverErr != nil {
-		return "", "", coverErr
+	started := r.opt.now()
+	out, runErr := r.opt.Check.Run(ctx, command, r.opt.Workspace)
+	item := statement.Command{Command: command, Band: "qa", ExitCode: out.ExitCode, Output: out.Text}
+	if runErr != nil {
+		item.Error = runErr.Error()
+		return r.record(qaSt, statement.Hold, command+" did not run: "+runErr.Error(), func(s *statement.Statement) {
+			s.Commands = r.stamp(qaSt, []statement.Command{item})
+		})
 	}
-	gate = qa.Judge(lines, code, ran, covered)
+	outcomes, reportPath, findErr := qa.Find(r.opt.Workspace, r.opt.Policy.QA.Report, started)
+	if findErr != nil {
+		return "", "", findErr
+	}
+	greenBefore := hadProve && prev.GitSHA != "" && prev.GitSHA == r.cur.GitSHA && provePassed(prev, command)
+	if out.ExitCode != 0 && !greenBefore {
+		if verdict, reason, ok, err := r.excusedQA(lines, covered, outcomes, reportPath, item, out); ok || err != nil {
+			return verdict, reason, err
+		}
+	}
+	gate := qa.Judge(lines, out.ExitCode, covered, outcomes)
 	gate.Command = command
+	gate.Report = reportPath
 	if err := r.writeGate(gate); err != nil {
 		return "", "", err
 	}
-	item := statement.Command{Command: command, ExitCode: code, Band: "qa"}
-	if err != nil {
-		item.Error = err.Error()
-		return r.record(qaSt, statement.Hold, command+" did not run: "+err.Error(), func(s *statement.Statement) {
-			s.Commands = []statement.Command{item}
-		})
+	r.last = failure{
+		Fingerprint:  statement.Signature(command, gate.Verdict, failingIDs(gate), prove.Fingerprint(command, out.Text)),
+		Inconclusive: out.ExitCode != 0 && greenBefore,
 	}
-	if gate.Verdict != "pass" {
-		return r.record(qaSt, statement.Hold, "acceptance gate "+gate.Verdict, func(s *statement.Statement) {
-			s.Commands = []statement.Command{item}
-		})
-	}
-	return r.record(qaSt, statement.Advance, "acceptance gate passed", func(s *statement.Statement) {
-		s.Commands = []statement.Command{item}
+	fill := func(s *statement.Statement) {
+		s.Commands = r.stamp(qaSt, []statement.Command{item})
 		s.GitSHA = r.cur.GitSHA
-	})
+		s.Fingerprint = r.last.Fingerprint
+		s.Inconclusive = r.last.Inconclusive
+		s.Cap = r.opt.Policy.RepairCap()
+	}
+	if out.ExitCode == 0 && gate.Verdict == qa.Pass {
+		return r.record(qaSt, statement.Advance, "acceptance gate passed", fill)
+	}
+	return r.record(qaSt, "iterate", "acceptance gate "+gate.Verdict+": "+gate.Reason, fill)
+}
+
+// reusableQA reports whether this exact command already passed on this commit in a
+// clean tree. Re-running it would verify the same bytes a second time and turn a
+// flaky test into a red gate.
+func (r *runner) reusableQA(prev statement.Statement, command string, ctx context.Context) bool {
+	if prev.Verdict != statement.Advance || prev.GitSHA == "" || prev.GitSHA != r.cur.GitSHA {
+		return false
+	}
+	if !provePassed(prev, command) {
+		return false
+	}
+	dirty, err := r.opt.Source.Dirty(ctx)
+	return err == nil && !dirty
+}
+
+func provePassed(prev statement.Statement, command string) bool {
+	for _, item := range prev.Commands {
+		if item.Command == command && item.ExitCode == 0 && item.Error == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func failingIDs(gate qa.Gate) string {
+	var ids []string
+	for _, check := range gate.Checks {
+		if check.Result == qa.Fail {
+			ids = append(ids, check.ID)
+		}
+	}
+	return strings.Join(ids, " ")
 }
 
 func (r *runner) doInspect(ctx context.Context) (string, string, error) {
-	sel, err := r.opt.Agents.Select(r.opt.Policy.Agent)
+	target, err := r.pick(inspect)
 	if err != nil {
 		return r.record(inspect, statement.Hold, err.Error(), nil)
 	}
-	doc, err := r.opt.Agents.Inspect(ctx, sel.Inspect, r.opt.Workspace, prompt.Inspect(r.promptInput(inspect, "")))
+	doc, err := r.opt.Agents.Inspect(ctx, target, r.opt.Workspace, prompt.Inspect(r.promptInput(inspect, "")))
 	if err != nil {
-		return r.record(inspect, statement.Hold, err.Error(), nil)
+		return r.agentBlocked(inspect, err)
 	}
 	if !doc.Blocking {
 		return r.record(inspect, statement.Advance, doc.Reason, nil)
@@ -904,7 +1199,47 @@ func (r *runner) ensureBranch(ctx context.Context) error {
 	return r.opt.Source.EnsureBranch(ctx, r.opt.Base, r.opt.Branch)
 }
 
-func (r *runner) promptInput(stage, proveReport string) prompt.Input {
+// failurePacket is what build needs to fix the check that failed. It is built from
+// the statement already on disk: no model, no second suite, no extra command.
+func (r *runner) failurePacket() string {
+	if r.cur.Iteration <= 1 {
+		return ""
+	}
+	dir := filepath.Join(r.spanDir(), "iter", strconv.Itoa(r.cur.Iteration-1))
+	var b strings.Builder
+	for _, stage := range []string{proveSt, qaSt} {
+		prev, ok, err := statement.Read(dir, stage)
+		if err != nil || !ok || prev.Verdict == statement.Advance {
+			continue
+		}
+		fmt.Fprintf(&b, "The %s check failed.\nReason: %s\n", stage, prev.Reason)
+		if prev.Cap > 0 {
+			fmt.Fprintf(&b, "Attempt %d of %d.\n", prev.Iteration, prev.Cap)
+		}
+		for _, item := range prev.Commands {
+			if (item.ExitCode == 0 && item.Error == "") || item.Preexisting {
+				continue
+			}
+			fmt.Fprintf(&b, "Command: %s\nExit: %d\n", item.Command, item.ExitCode)
+			if item.Error != "" {
+				fmt.Fprintf(&b, "Error: %s\n", item.Error)
+			}
+			if item.LogPath != "" {
+				fmt.Fprintf(&b, "Full log: %s\n", filepath.Join(r.spanDir(), filepath.FromSlash(item.LogPath)))
+			}
+			if item.Output != "" {
+				fmt.Fprintf(&b, "Last lines:\n%s\n", strings.TrimRight(item.Output, "\n"))
+			}
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	b.WriteString("Fix this failure. Do not restart the feature, and do not widen the change beyond what the failure needs.\n")
+	return b.String()
+}
+
+func (r *runner) promptInput(stage, failure string) prompt.Input {
 	text, _, _ := readInstructions(r.opt.Workspace, r.spanDir(), stage)
 	names, _ := handoffNames(r.spanDir())
 	root := r.opt.Policy.Harness
@@ -937,8 +1272,8 @@ func (r *runner) promptInput(stage, proveReport string) prompt.Input {
 	return prompt.Input{
 		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.opt.Policy.Feature),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
-		Handoffs:    handoff.Paths(r.cur.ID, names),
-		ProveReport: proveReport, Manifest: manifest,
+		Handoffs: handoff.Paths(r.cur.ID, names),
+		Failure:  failure, Manifest: manifest,
 		Standards: harness.Catalog(root), Acceptance: ids, Browser: browser,
 		Lessons: lessons,
 	}
