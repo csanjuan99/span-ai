@@ -122,13 +122,22 @@ func (r *runner) takePause() bool {
 	return true
 }
 
+// agentWanted is the CLI a stage asks for: the run's choice for it, else the one span.yaml
+// names. Empty and "any" both leave the pick to the first ready CLI.
+func (r *runner) agentWanted(stageChoice string) string {
+	if stageChoice != "" {
+		return stageChoice
+	}
+	return r.opt.Policy.Agent
+}
+
 // pick decides which binary runs a stage. The run's choice for that stage wins, then
 // the policy, then the first ready CLI. Inspect keeps using a different CLI from build
 // when nothing was chosen, so a review is not the model that wrote the change.
 func (r *runner) pick(stage string) (string, error) {
 	want := ""
 	if UsesAgent(stage) {
-		want = ReadStageAgents(r.spanDir())[stage]
+		want = r.agentWanted(ReadStageAgents(r.spanDir())[stage])
 	}
 	sel, err := r.opt.Agents.Select(want)
 	if err != nil {

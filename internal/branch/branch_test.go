@@ -303,3 +303,23 @@ func TestFeatureOfNamesEveryBranchApart(t *testing.T) {
 		t.Fatal("ValidFeature does not follow the feature rule")
 	}
 }
+
+// Span numbers acceptance criteria AC-1, AC-2. Those match the shape of a Jira key, so a
+// story with criteria must not be filed under one of them.
+func TestAcceptanceCriterionIdsAreNotStoryKeys(t *testing.T) {
+	story := "Add a Median function.\nAcceptance criteria:\n1. AC-1 Median of 1,3,2 is 2."
+	plan, err := Derive(story, "", Feat, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plan.Name, "AC-1") {
+		t.Fatalf("a criterion id became the story key: %s", plan.Name)
+	}
+	keyed, err := Derive("SAL-3 Add a Median function. AC-1 it works", "", Feat, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(keyed.Name, "SAL-3") {
+		t.Fatalf("a real key was lost: %s", keyed.Name)
+	}
+}
