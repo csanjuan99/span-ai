@@ -110,3 +110,19 @@ func TestAHostileBaseOrBranchNeverReachesGit(t *testing.T) {
 		t.Fatal("git ran the injected command")
 	}
 }
+
+func TestBaseExistsIsFalseOnceOriginDeletedTheBranch(t *testing.T) {
+	clone := originAndClone(t)
+	git := Git{Dir: clone}
+	origin, err := git.Git(context.Background(), clone, "remote", "get-url", "origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.Git(context.Background(), origin, "branch", "-D", "feat/SAL-3"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := git.BaseExists(context.Background(), "feat/SAL-3")
+	if err != nil || got {
+		t.Fatalf("BaseExists = %v, %v; want false", got, err)
+	}
+}

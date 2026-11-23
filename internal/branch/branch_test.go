@@ -117,7 +117,7 @@ func TestValidRefFollowsCheckRefFormat(t *testing.T) {
 			t.Errorf("%q was rejected", ok)
 		}
 	}
-	for _, bad := range []string{"", "@", "a b", "a..b", "-a", "/a", "a/", "a.lock", "a@{b", "a~", "a^", "a:", "a?", "a*", "a[", `a\b`, "a//b", ".a", "a/.b", "a.", "a\x7f"} {
+	for _, bad := range []string{"", "@", "HEAD", "a b", "a..b", "-a", "/a", "a/", "a.lock", "a@{b", "a~", "a^", "a:", "a?", "a*", "a[", `a\b`, "a//b", ".a", "a/.b", "a.", "a\x7f"} {
 		if ValidRef(bad) {
 			t.Errorf("%q was accepted", bad)
 		}

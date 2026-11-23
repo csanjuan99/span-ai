@@ -213,7 +213,8 @@ SAL-4's pull request to SAL-3's own base.
 
 **What a base may be.** A branch name, as `git check-ref-format --branch` accepts it, that
 is not `HEAD`, does not start with `-`, has no spaces around it, and does not look like a
-commit (7 to 40 hex digits). Tags and commits are not bases. Anything else is refused
+commit (7 to 40 hex digits; a branch named like a sha, such as `deadbeef`, cannot be a base).
+Tags and commits are not bases. Anything else is refused
 before git or gh sees it, wherever it came from (flag, desk, form, `span.yaml`):
 
 ```text
@@ -229,8 +230,11 @@ branch does not track its base.
 
 **The base must be on origin.** Before the first stage, and again just before the push at
 open, the base must exist on `origin` (a repository without an `origin` remote has no forge,
-so a local branch is enough there). A base that is only local, a tag, or missing holds the
-run, before any build work and before any push:
+so a local branch is enough there). Span asks origin itself (`git ls-remote --exit-code origin
+-- refs/heads/<base>`), so a branch deleted on origin mid-run counts as gone even though the
+checkout still has its `origin/<base>` ref; that stale ref is dropped, your local branch is
+not touched. Offline, the refs already known decide. A base that is only local, a tag, or
+missing holds the run, before any build work and before any push:
 
 ```text
 base branch feat/SAL-3-wallet does not exist on origin; push it or choose another base
@@ -251,8 +255,11 @@ With several, each is named and the command retargets the first. Retarget or clo
 resume the run.
 
 **`span run` now has a base too.** It used to open into whatever GitHub called the default
-branch. Now it uses `--base`, else `base:` in `span.yaml`, else `dev` (`master` for a
-`--branch hotfix/...`). This is a deliberate change: on a repository without that base, or
+branch. Now it uses `--base`, else `base:` in `span.yaml` for feat and fix, else `dev`, or
+`master` for a hotfix. The kind comes from `--branch`, or, without it, from the branch that is
+checked out: a run on `hotfix/h` opens into `master`, not `dev`. `--branch` is the branch the
+run works on with or without `--worktree`: it must be `feat/`, `fix/` or `hotfix/`, and a new
+one is cut from the base. Before, `--branch` without `--worktree` was ignored. This is a deliberate change: on a repository without that base, or
 on a checkout that is on the base itself, the run holds before the first stage. The base is
 also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
 diffs against it.

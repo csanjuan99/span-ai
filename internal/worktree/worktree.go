@@ -14,7 +14,9 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -59,9 +61,13 @@ func StartPoint(ctx context.Context, run Runner, repo, base string) (string, err
 	return "", branchpkg.MissingBase{Name: base, Cause: fetchErr}
 }
 
-// OnOrigin reports whether base is a branch the forge can target: origin has it after a
-// best-effort fetch. A repository without an origin remote has no forge, so its local
-// branch is enough. An invalid base is an error, not a false.
+// OnOrigin reports whether base is a branch the forge can target: origin has it now. It
+// asks origin directly (git ls-remote), because a branch deleted there mid-run still has a
+// remote-tracking ref here, and opening a change into it would fail after the push. When
+// origin says the branch is gone, that stale remote-tracking ref is dropped; it is only a
+// cache of origin, and the local branch is never touched. When origin cannot answer
+// (offline), the remote-tracking ref already known decides. A repository without an origin
+// remote has no forge, so its local branch is enough. An invalid base is an error.
 func OnOrigin(ctx context.Context, run Runner, repo, base string) (bool, error) {
 	if err := branchpkg.CheckBase(base); err != nil {
 		return false, err
@@ -70,11 +76,21 @@ func OnOrigin(ctx context.Context, run Runner, repo, base string) (bool, error) 
 		return hasRef(ctx, run, repo, "refs/heads/"+base), nil
 	}
 	remote := "refs/remotes/origin/" + base
-	// A failed fetch (offline) leaves the remote-tracking ref already known to decide.
-	if err := fetchBase(ctx, run, repo, base); err != nil && !hasRef(ctx, run, repo, remote) {
-		return false, nil
+	_, err := run.Git(ctx, repo, "ls-remote", "--exit-code", "origin", "--", "refs/heads/"+base)
+	if err == nil {
+		return true, nil
 	}
-	return hasRef(ctx, run, repo, remote), nil
+	var exit *exec.ExitError
+	// ls-remote --exit-code exits 2 when origin answered and has no such ref.
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+		return hasRef(ctx, run, repo, remote), nil
+	}
+	if hasRef(ctx, run, repo, remote) {
+		if _, err := run.Git(ctx, repo, "update-ref", "-d", "--", remote); err != nil {
+			return false, fmt.Errorf("base branch %s is gone from origin and its stale ref could not be dropped: %w", base, err)
+		}
+	}
+	return false, nil
 }
 
 // fetchBase refreshes origin's copy of base into its remote-tracking ref only. It never

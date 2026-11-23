@@ -164,11 +164,11 @@ func DefaultBase(kind string) string {
 }
 
 // ValidRef reports whether name is a branch name git accepts, by the rules of
-// git check-ref-format --branch: no control characters, spaces or any of ~^:?*[\, no "..",
+// git check-ref-format --branch, and never the bare name HEAD: no control characters, spaces or any of ~^:?*[\, no "..",
 // no "@{", not "@", no leading "-", no empty, leading-dot or ".lock" component, and no
 // leading or trailing "/" or trailing ".".
 func ValidRef(name string) bool {
-	if name == "" || name == "@" || strings.HasPrefix(name, "-") {
+	if name == "" || name == "@" || name == "HEAD" || strings.HasPrefix(name, "-") {
 		return false
 	}
 	if strings.Contains(name, "..") || strings.Contains(name, "@{") || strings.HasSuffix(name, ".") {

@@ -53,36 +53,26 @@ func main() {
 	}
 }
 
+// runFlags are the flags of span run.
+type runFlags struct {
+	workspace, brief, spans, policy, branch, base string
+	isolate                                       bool
+}
+
 func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	workspace := fs.String("workspace", ".", "project to change")
-	brief := fs.String("brief", "", "path to the brief")
-	spans := fs.String("spans", "", "state directory (default <workspace>/.span/runs)")
-	policyPath := fs.String("policy", "", "policy file (default <workspace>/span.yaml)")
-	branch := fs.String("branch", "", "branch to work on; with --worktree it gets its own tree")
-	base := fs.String("base", "", "branch to start from and open the change into (default: base in span.yaml, else dev; master for hotfix/)")
-	isolate := fs.Bool("worktree", false, "isolate the run in its own git worktree")
+	var f runFlags
+	fs.StringVar(&f.workspace, "workspace", ".", "project to change")
+	fs.StringVar(&f.brief, "brief", "", "path to the brief")
+	fs.StringVar(&f.spans, "spans", "", "state directory (default <workspace>/.span/runs)")
+	fs.StringVar(&f.policy, "policy", "", "policy file (default <workspace>/span.yaml)")
+	fs.StringVar(&f.branch, "branch", "", "feat/, fix/ or hotfix/ branch to work on, cut from the base when new; with --worktree it gets its own tree")
+	fs.StringVar(&f.base, "base", "", "branch to start from and open the change into (default: base in span.yaml for feat/fix, else dev; master for hotfix/)")
+	fs.BoolVar(&f.isolate, "worktree", false, "isolate the run in its own git worktree")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	code, err := prepare(*workspace, *spans, *policyPath, *branch, *base, *isolate)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	raw, err := os.ReadFile(*brief)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	opt.Brief = string(raw)
-	// The change goes to this base, never to whatever the host calls its default branch.
-	opt.Base, err = runBase(*base, code.Project, *branch)
+	opt, err := runOptions(f)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -91,6 +81,40 @@ func run(args []string) int {
 	defer stop()
 	result, err := engine.Start(ctx, opt)
 	return printResult(result, err)
+}
+
+// runOptions turns span run's flags into the run. --branch is the branch the run works on,
+// with or without --worktree: the engine checks it out, cut from the base when it is new.
+// Without --branch the run works on the checked-out branch, and that branch's prefix
+// decides the default base, so a hotfix/ checkout opens into master. The change always goes
+// to the base, never to whatever the host calls its default branch.
+func runOptions(f runFlags) (engine.Options, error) {
+	code, err := prepare(f.workspace, f.spans, f.policy, f.branch, f.base, f.isolate)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	raw, err := os.ReadFile(f.brief)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt.Brief = string(raw)
+	name := f.branch
+	if name == "" {
+		name, err = adapt.Git{Dir: code.Workspace}.Branch(context.Background())
+		if err != nil {
+			return engine.Options{}, fmt.Errorf("the checked-out branch could not be read: %w", err)
+		}
+	}
+	opt.Base, err = runBase(f.base, code.Project, name)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt.Branch = f.branch
+	return opt, nil
 }
 
 func resume(args []string) int {

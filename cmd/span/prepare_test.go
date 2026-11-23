@@ -195,3 +195,50 @@ func TestQuickstartRefusesAnInjectedBase(t *testing.T) {
 		t.Fatal("git ran the injected command")
 	}
 }
+
+func runRepo(t *testing.T) (string, string) {
+	t.Helper()
+	dir := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	brief := filepath.Join(t.TempDir(), "b.md")
+	if err := os.WriteFile(brief, []byte("Refund the double charge\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, brief
+}
+
+// Without --branch the run works on the checked-out branch, so its prefix decides the
+// default base: a hotfix opens into master, never into dev.
+func TestRunTakesTheDefaultBaseFromTheCheckedOutBranch(t *testing.T) {
+	dir, brief := runRepo(t)
+	gitOut(t, dir, "checkout", "-q", "-b", "hotfix/h")
+	opt, err := runOptions(runFlags{workspace: dir, brief: brief})
+	if err != nil || opt.Base != "master" || opt.Branch != "" {
+		t.Fatalf("base %q branch %q, %v", opt.Base, opt.Branch, err)
+	}
+	opt, err = runOptions(runFlags{workspace: dir, brief: brief, base: "release/2.1"})
+	if err != nil || opt.Base != "release/2.1" {
+		t.Fatalf("an explicit base must win: %q, %v", opt.Base, err)
+	}
+	gitOut(t, dir, "checkout", "-q", "dev")
+	opt, err = runOptions(runFlags{workspace: dir, brief: brief})
+	if err != nil || opt.Base != "dev" {
+		t.Fatalf("on dev: base %q, %v", opt.Base, err)
+	}
+}
+
+// --branch without --worktree is the branch the run works on: the engine checks it out
+// from the base instead of the flag being dropped.
+func TestRunBranchWithoutAWorktreeIsTheRunsBranch(t *testing.T) {
+	dir, brief := runRepo(t)
+	opt, err := runOptions(runFlags{workspace: dir, brief: brief, branch: "feat/x"})
+	if err != nil || opt.Branch != "feat/x" || opt.Base != "dev" {
+		t.Fatalf("branch %q base %q, %v", opt.Branch, opt.Base, err)
+	}
+	opt, err = runOptions(runFlags{workspace: dir, brief: brief, branch: "hotfix/h"})
+	if err != nil || opt.Branch != "hotfix/h" || opt.Base != "master" {
+		t.Fatalf("branch %q base %q, %v", opt.Branch, opt.Base, err)
+	}
+}

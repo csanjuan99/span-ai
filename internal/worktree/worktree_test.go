@@ -19,7 +19,7 @@ func (s shell) Git(ctx context.Context, dir string, args ...string) (string, err
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, out)
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -299,5 +299,34 @@ func TestANewBranchStartsFromTheOriginOnlyBase(t *testing.T) {
 	// Cut without tracking: the new branch pushes to its own name, not into its base.
 	if _, err := r.s.Git(context.Background(), r.clone, "config", "--get", "branch.feat/SAL-4.merge"); err == nil {
 		t.Fatal("the new branch tracks its base")
+	}
+}
+
+// A branch deleted on origin mid-run is gone, even though the clone still has its
+// remote-tracking ref: opening a change into it would fail after the push.
+func TestOnOriginForgetsABranchDeletedOnOrigin(t *testing.T) {
+	r := cloneWithRemoteOnly(t)
+	r.s.must(r.origin, "branch", "-D", "feat/SAL-3")
+	got, err := OnOrigin(context.Background(), r.s, r.clone, "feat/SAL-3")
+	if err != nil || got {
+		t.Fatalf("OnOrigin = %v, %v; want false", got, err)
+	}
+	if hasRef(context.Background(), r.s, r.clone, "refs/remotes/origin/feat/SAL-3") {
+		t.Fatal("the stale remote-tracking ref was kept")
+	}
+}
+
+// Offline, origin cannot answer: the remote-tracking refs already known decide.
+func TestOnOriginOfflineKeepsTheKnownRefs(t *testing.T) {
+	r := cloneWithRemoteOnly(t)
+	r.s.must(r.clone, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+	for base, want := range map[string]bool{"feat/SAL-3": true, "feat/nowhere": false} {
+		got, err := OnOrigin(context.Background(), r.s, r.clone, base)
+		if err != nil || got != want {
+			t.Errorf("offline OnOrigin(%q) = %v, %v; want %v", base, got, err, want)
+		}
+	}
+	if !hasRef(context.Background(), r.s, r.clone, "refs/remotes/origin/feat/SAL-3") {
+		t.Fatal("offline, a known remote-tracking ref was dropped")
 	}
 }

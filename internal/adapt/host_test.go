@@ -117,3 +117,29 @@ func TestFindWithNoChangeIsNotFound(t *testing.T) {
 		t.Fatalf("changes %+v err %v", changes, err)
 	}
 }
+
+func TestMergedAndMergeRefuseAURLGhWouldReadAsAFlag(t *testing.T) {
+	log := fakeGH(t, "MERGED\n")
+	host := Host{Workspace: t.TempDir()}
+	for _, url := range []string{"-R=evil/x", "--repo=evil/x", "feat/x"} {
+		if _, err := host.Merged(context.Background(), url); err == nil {
+			t.Errorf("Merged(%q) was accepted", url)
+		}
+		if err := host.Merge(context.Background(), url); err == nil {
+			t.Errorf("Merge(%q) was accepted", url)
+		}
+	}
+	if _, err := os.Stat(log); err == nil {
+		t.Fatalf("gh was called: %v", ghArgs(t, log))
+	}
+}
+
+func TestMergeEndsTheFlagsBeforeTheURL(t *testing.T) {
+	log := fakeGH(t, "")
+	if err := (Host{Workspace: t.TempDir()}).Merge(context.Background(), "https://github.com/o/r/pull/11"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(ghArgs(t, log), " "); got != "[pr] [merge] [--merge] [--] [https://github.com/o/r/pull/11]" {
+		t.Fatalf("gh %s", got)
+	}
+}

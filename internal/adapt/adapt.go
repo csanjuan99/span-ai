@@ -369,23 +369,43 @@ func (h Host) Open(ctx context.Context, spanID, branch, base, title, body string
 	return strings.TrimSpace(out), nil
 }
 
+// Merged reports whether the pull request at url was merged.
 func (h Host) Merged(ctx context.Context, url string) (bool, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merged(ctx, url)
 	}
-	out, err := h.gh(ctx, "pr", "view", strings.TrimSpace(url), "--json", "state", "--jq", ".state")
+	clean, err := changeURL(url)
+	if err != nil {
+		return false, err
+	}
+	out, err := h.gh(ctx, "pr", "view", "--json", "state", "--jq", ".state", "--", clean)
 	if err != nil {
 		return false, err
 	}
 	return strings.TrimSpace(out) == "MERGED", nil
 }
 
+// Merge merges the pull request at url.
 func (h Host) Merge(ctx context.Context, url string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merge(ctx, url)
 	}
-	_, err := h.gh(ctx, "pr", "merge", strings.TrimSpace(url), "--merge")
+	clean, err := changeURL(url)
+	if err != nil {
+		return err
+	}
+	_, err = h.gh(ctx, "pr", "merge", "--merge", "--", clean)
 	return err
+}
+
+// changeURL is url without the whitespace a stored one may carry, and only when it is an
+// http(s) URL: anything else would reach gh as a branch name or a flag.
+func changeURL(url string) (string, error) {
+	clean := strings.TrimSpace(url)
+	if !strings.HasPrefix(clean, "https://") && !strings.HasPrefix(clean, "http://") {
+		return "", fmt.Errorf("change %q is not an http(s) url", clean)
+	}
+	return clean, nil
 }
 
 func (h Host) gh(ctx context.Context, args ...string) (string, error) {
