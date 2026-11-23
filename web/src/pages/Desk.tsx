@@ -1,12 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { Link, useNavigate } from "react-router"
 
-import { agentList, basePlaceholder, branchChoice, getJSON, postForm, rememberServeToken, serveToken, startRun, type Started } from "@/lib/api"
+import { agentList, basePlaceholder, branchChoice, getJSON, postForm, rememberServeToken, serveToken, startRun, UnauthorizedError, type Started } from "@/lib/api"
 import { agentReviewMs, deskAgentLine, timelineLines, withAgent, type TimelineAction } from "@/lib/timeline"
-import type { AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
+import type { AgentChoice, AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
+import { setupSteps, type StepId } from "@/lib/setup"
 import { spanHeadsOf } from "@/lib/api"
 import { Shell } from "@/components/shell/Shell"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
+import { Setup } from "@/components/setup/Setup"
+import { Settings } from "@/components/settings/Settings"
 import { StartedRuns } from "@/components/started-runs/StartedRuns"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -110,6 +113,9 @@ export function Desk() {
   }
   const [listNote, setListNote] = useState("")
   const [serve, setServe] = useState(serveToken)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [needsToken, setNeedsToken] = useState(false)
+  const [pick, setPick] = useState<AgentChoice | null>(null)
 
   useEffect(() => {
     let closed = false
@@ -120,9 +126,14 @@ export function Desk() {
         }
       })
       .catch((err: unknown) => {
-        if (!closed) {
-          setListNote(err instanceof Error ? err.message : "the desk could not load")
+        if (closed) {
+          return
         }
+        if (err instanceof UnauthorizedError) {
+          setNeedsToken(true)
+          setSettingsOpen(true)
+        }
+        setListNote(err instanceof Error ? err.message : "the desk could not load")
       })
     return () => {
       closed = true
@@ -297,35 +308,65 @@ export function Desk() {
     }
   }
 
+  const chosenAgent = pick?.agents.find((row) => row.id === pick.chosen)
+  const chosenModel = pick !== null && chosenAgent !== undefined ? (pick.models[chosenAgent.id] ?? "") : ""
+  const steps = setupSteps({
+    folderReady: repos.length > 0 || branches.branches.length > 0,
+    folderDetail: repos.length > 0 ? `${repos.length} ${repos.length === 1 ? "repository" : "repositories"} found in ${workspace}` : workspace === "." ? "the current folder" : workspace,
+    agentReady: chosenAgent?.ready === true,
+    agentDetail: chosenAgent === undefined ? "" : `${chosenAgent.label} · ${chosenModel === "" ? "model set by Gentle AI" : chosenModel}`,
+    jiraConfigured: session.configured,
+    jiraDetail: `${session.email} at ${session.baseUrl}`,
+    jiraProblem: jiraNote,
+    runs: spans.length,
+  })
+
+  function go(id: StepId) {
+    const target = { folder: "workspace", agent: "agent", jira: "jira-url", story: "issue" }[id]
+    const element = document.getElementById(target)
+    element?.scrollIntoView({ block: "center" })
+    element?.focus()
+  }
+
+  const jiraBody = session.configured ? (
+    <p className="text-pretty text-sm">Connected as {session.email}. You can close the session under settings.</p>
+  ) : (
+    <form className="flex max-w-md flex-col gap-3" onSubmit={(event) => void saveSession(event)}>
+      <p className="text-pretty text-sm text-muted-foreground">
+        Span reads your stories with an Atlassian API token.{" "}
+        <a className="text-primary underline-offset-4 hover:underline" href="https://id.atlassian.com/manage-profile/security/api-tokens">
+          Create one
+        </a>
+        , then paste it here. It is stored for this folder only.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="jira-url">Jira URL</Label>
+        <Input id="jira-url" placeholder="https://example.atlassian.net" value={url} onChange={(event) => setUrl(event.target.value)} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="jira-email">Email</Label>
+        <Input id="jira-email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="jira-token">Token</Label>
+        <Input id="jira-token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} />
+      </div>
+      <Button type="submit" className="self-start">
+        Connect Jira
+      </Button>
+      {jiraNote !== "" ? <p className="text-pretty text-sm">{jiraNote}</p> : null}
+    </form>
+  )
+
   return (
     <Shell path="~/span" status="desk" lines={lines}>
       <header>
         <h1 className="text-balance text-xl">
           <span className="text-primary">$ </span>span desk
         </h1>
-        <p className="text-pretty text-muted-foreground">Load a story, then run it.</p>
-        <form
-          className="mt-4 flex flex-wrap items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            rememberServeToken(serve)
-          }}
-        >
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="serve-token">Serve token</Label>
-            <Input
-              id="serve-token"
-              type="password"
-              className="w-64"
-              value={serve}
-              onChange={(event) => setServe(event.target.value)}
-            />
-          </div>
-          <Button type="submit" variant="secondary">
-            Use token
-          </Button>
-        </form>
+        <p className="text-pretty text-muted-foreground">Turn a Jira story into a reviewed pull request.</p>
       </header>
+      <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
       <form className="flex flex-col gap-4" onSubmit={(event) => void run(event)}>
         <div className="flex flex-col gap-2">
           <Label htmlFor="workspace">Folder</Label>
@@ -343,7 +384,9 @@ export function Desk() {
             }}
           />
         </div>
-        <AgentPicker project={workspace} />
+        <div id="agent-field">
+          <AgentPicker project={workspace} onLoaded={setPick} />
+        </div>
         <div className="flex flex-col gap-2">
           <Button type="button" variant="secondary" className="self-start" onClick={() => void findRepos()}>
             Find repos
@@ -451,47 +494,13 @@ export function Desk() {
           ) : null}
         </div>
       </form>
-      <section className="flex flex-col gap-3 border-t border-border pt-6">
-        <h2 className="text-balance text-sm">
-          <span className="text-primary">$ </span>jira session
-        </h2>
-        <p className="text-pretty text-sm">
-          <a
-            className="text-primary underline-offset-4 hover:underline"
-            href="https://id.atlassian.com/manage-profile/security/api-tokens"
-          >
-            Create an API token
-          </a>
-        </p>
-        {session.configured ? (
-          <p className="text-pretty text-sm">Logged in to Jira as {session.email} for this folder. {session.baseUrl}</p>
-        ) : (
-          <form className="flex flex-col gap-3" onSubmit={(event) => void saveSession(event)}>
-            <p className="text-pretty text-sm text-muted-foreground">No session for this folder.</p>
-            <Input aria-label="Jira URL" placeholder="https://example.atlassian.net" value={url} onChange={(event) => setUrl(event.target.value)} />
-            <Input aria-label="Email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
-            <Input aria-label="Token" type="password" value={token} onChange={(event) => setToken(event.target.value)} />
-            <Button type="submit" variant="secondary" className="self-start">
-              Save session
-            </Button>
-          </form>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          {session.configured ? (
-            <Button type="button" variant="secondary" onClick={() => void closeSession()}>
-              Close session
-            </Button>
-          ) : null}
-          {jiraNote !== "" ? <p className="text-pretty text-sm">{jiraNote}</p> : null}
-        </div>
-      </section>
       <section>
         <h2 className="text-balance text-sm">
           <span className="text-primary">$ </span>spans
         </h2>
         {listNote !== "" ? <p className="text-pretty text-sm text-destructive">{listNote}</p> : null}
         {spans.length === 0 ? (
-          <p className="mt-2 text-pretty text-muted-foreground">Load a story, then run it.</p>
+          <p className="mt-2 text-pretty text-muted-foreground">No runs yet. Load a story above, then run it; it will appear here.</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-1">
             {spans.map((span) => (
@@ -509,6 +518,20 @@ export function Desk() {
           </ul>
         )}
       </section>
+      <Settings
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        token={serve}
+        needsToken={needsToken}
+        onSaveToken={(value) => {
+          setServe(value)
+          rememberServeToken(value)
+          setNeedsToken(false)
+          note(value === "" ? "access token cleared" : "access token saved")
+        }}
+        jira={session.configured ? `Logged in as ${session.email}. ${session.baseUrl}` : ""}
+        onCloseJira={() => void closeSession()}
+      />
     </Shell>
   )
 }

@@ -1095,7 +1095,7 @@ Localhost does not need a token. Any other address without `SPAN_TOKEN` refuses 
 SPAN_TOKEN=a-long-secret ./span serve --addr 0.0.0.0:8787 --spans /path/to/project/.span/runs
 ```
 
-Every HTTP request sends `Authorization: Bearer a-long-secret`. A browser cannot set that header on a WebSocket, so the page sends the same secret as the subprotocol `span.` plus the raw URL-safe base64 of the token. On localhost, leave **Serve token** empty. A value left in the tab used to make the browser drop the live socket: the page offered a subprotocol and the server did not name one back. With no `SPAN_TOKEN`, the server accepts that offered protocol and the socket opens. When `SPAN_TOKEN` is set, type it there and choose **Use token** before **Configure and run**. The token stays in this browser tab.
+Every HTTP request sends `Authorization: Bearer a-long-secret`. A browser cannot set that header on a WebSocket, so the page sends the same secret as the subprotocol `span.` plus the raw URL-safe base64 of the token. On localhost, leave the **Access token** in **Settings** empty. When a server answers 401, the desk opens Settings by itself and asks for it. A value left in the tab used to make the browser drop the live socket: the page offered a subprotocol and the server did not name one back. With no `SPAN_TOKEN`, the server accepts that offered protocol and the socket opens. When `SPAN_TOKEN` is set, type it under **Settings** and choose **Save token** before **Configure and run**. The token stays in this browser tab.
 
 ### The page
 

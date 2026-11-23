@@ -12,6 +12,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     getJSON: (url: string) => getJSON(url),
     postForm: (url: string, body: unknown) => postForm(url, body),
     rememberServeToken: () => undefined,
+    UnauthorizedError: actual.UnauthorizedError,
     serveToken: () => "",
     startRun: (form: FormData) => startRun(form),
     agentList: () => [],
@@ -77,6 +78,9 @@ describe("Desk", () => {
       expect(screen.queryByLabelText("Token")).toBeNull()
     })
     expect(screen.getByText(/me@example\.test/)).toBeTruthy()
+    // The session is closed from settings, which stay out of the way until asked for.
+    expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Show" }))
     expect(screen.getByRole("button", { name: "Close session" })).toBeTruthy()
   })
 
@@ -98,10 +102,10 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>,
     )
+    fireEvent.click(await screen.findByRole("button", { name: /Connect Jira/ }))
     await waitFor(() => {
       expect(screen.getByLabelText("Token")).toBeTruthy()
     })
-    expect(screen.getByText("No session for this folder.")).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
   })
 
