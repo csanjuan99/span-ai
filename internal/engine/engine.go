@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,12 +64,27 @@ type Source interface {
 	EnsureBranch(ctx context.Context, base, branch string) error
 }
 
+// Change is one open change request and the branch it targets. An empty Base means the
+// host cannot tell.
+type Change struct {
+	URL  string
+	Base string
+}
+
 // Review opens and merges a change request.
 type Review interface {
-	Find(ctx context.Context, spanID, branch string) (url string, found bool, err error)
-	Open(ctx context.Context, spanID, branch, title, body string) (string, error)
+	// Find returns every open change for branch.
+	Find(ctx context.Context, spanID, branch string) ([]Change, error)
+	// Open creates the change from branch into base.
+	Open(ctx context.Context, spanID, branch, base, title, body string) (string, error)
 	Merged(ctx context.Context, url string) (bool, error)
 	Merge(ctx context.Context, url string) error
+}
+
+// baseFinder is a Source that can tell whether a base branch exists. adapt.Git is one; a
+// source without it is trusted to have the base.
+type baseFinder interface {
+	BaseExists(ctx context.Context, base string) (bool, error)
 }
 
 // Releaser runs one environment command. A returned error means the command
@@ -438,7 +454,9 @@ func load(opt Options, id string) (*runner, error) {
 	}
 	if opt.Branch == "" {
 		opt.Branch = cur.Branch
-		opt.Base = cur.Base
+		if cur.Base != "" {
+			opt.Base = cur.Base
+		}
 	}
 	if strings.TrimSpace(opt.Issue) == "" {
 		opt.Issue = cur.Issue
@@ -565,7 +583,11 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 	if binder, ok := r.opt.Agents.(interface{ Bind(io.Writer) }); ok {
 		binder.Bind(log)
 	}
-	if err := r.ensureBranch(ctx); err != nil {
+	err = r.startBase(ctx)
+	if err == nil {
+		err = r.ensureBranch(ctx)
+	}
+	if err != nil {
 		_, reason, recErr := r.record(r.cur.Stage, statement.Hold, err.Error(), nil)
 		if recErr != nil {
 			return Result{}, recErr
@@ -1046,19 +1068,35 @@ func (r *runner) doOpen(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(open, statement.Hold, err.Error(), nil)
 	}
+	base := r.runBase()
+	// Without a base the host picks the repository's default branch, which is how a change
+	// meant for a feature branch lands on main.
+	if strings.TrimSpace(base) == "" {
+		return r.record(open, statement.Hold, noBase, nil)
+	}
+	// Checked again here, before the push: the base may have gone since the run started.
+	if err := r.checkBase(ctx, branch); err != nil {
+		return r.record(open, statement.Hold, err.Error(), nil)
+	}
 	r.cur.Pending = &Pending{Kind: open, Branch: branch, SHA: r.cur.GitSHA}
 	if err := r.save(); err != nil {
 		return "", "", err
 	}
-	url, found, err := r.opt.Review.Find(ctx, r.cur.ID, branch)
+	changes, err := r.opt.Review.Find(ctx, r.cur.ID, branch)
 	if err != nil {
 		return r.record(open, statement.Hold, "change lookup failed: "+err.Error(), nil)
 	}
-	if !found {
+	url, reuse := onBase(changes, base)
+	if !reuse && len(changes) > 0 {
+		// The changes are someone's decision now; retargeting or closing them is theirs too.
+		r.cur.Pending = nil
+		return r.record(open, statement.Hold, wrongBase(changes, base), nil)
+	}
+	if !reuse {
 		if err := r.opt.Source.Push(ctx); err != nil {
 			return r.record(open, statement.Hold, err.Error(), nil)
 		}
-		url, err = r.opt.Review.Open(ctx, r.cur.ID, branch, r.opt.Policy.Feature, r.opt.Brief)
+		url, err = r.opt.Review.Open(ctx, r.cur.ID, branch, base, r.opt.Policy.Feature, r.opt.Brief)
 		if err != nil {
 			return r.record(open, statement.Hold, "open outcome unknown: "+err.Error(), nil)
 		}
@@ -1207,11 +1245,106 @@ func (r *runner) ensureBranch(ctx context.Context) error {
 		return nil
 	}
 	if !branch.Valid(r.opt.Branch, r.opt.Base) {
-		return fmt.Errorf("branch %q on %q is not feat or fix from dev, or hotfix from master", r.opt.Branch, r.opt.Base)
+		return fmt.Errorf("branch %q on %q is not a feat, fix or hotfix branch on a valid base", r.opt.Branch, r.opt.Base)
 	}
 	r.cur.Branch = r.opt.Branch
 	r.cur.Base = r.opt.Base
 	return r.opt.Source.EnsureBranch(ctx, r.opt.Base, r.opt.Branch)
+}
+
+// baseExists fails with branch.MissingBase when the source can tell the base is gone.
+func (r *runner) baseExists(ctx context.Context, base string) error {
+	finder, ok := r.opt.Source.(baseFinder)
+	if !ok {
+		return nil
+	}
+	found, err := finder.BaseExists(ctx, base)
+	if err != nil {
+		return fmt.Errorf("base branch %s could not be checked: %w", base, err)
+	}
+	if !found {
+		return branch.MissingBase{Name: base}
+	}
+	return nil
+}
+
+// noBase is the hold for a run that has no base to open its change into.
+const noBase = "this run has no base branch, so its change would target the repository's default branch; start it again with a base"
+
+// runBase is the base this run opens its change into: the cursor's, else the options'.
+func (r *runner) runBase() string {
+	if r.cur.Base != "" {
+		return r.cur.Base
+	}
+	return r.opt.Base
+}
+
+// checkBase is every check a base must pass before work starts and again before the change
+// is opened: a valid branch name (never an option, HEAD or a commit, so it is safe to hand
+// to git), not the branch the run works on, and present where the change will be opened.
+// The error is the hold reason.
+func (r *runner) checkBase(ctx context.Context, head string) error {
+	base := r.runBase()
+	if err := branch.CheckBase(base); err != nil {
+		return err
+	}
+	if head != "" && base == head {
+		return fmt.Errorf("the base branch %s is the branch itself; a change cannot target its own head", base)
+	}
+	return r.baseExists(ctx, base)
+}
+
+// startBase checks the base before the first stage, so a missing base or a run started on
+// its own base fails fast instead of after the build. A run with no base at all still
+// works and holds at open; a run whose change is already open is past this question.
+func (r *runner) startBase(ctx context.Context) error {
+	if r.cur.Done || r.cur.ChangeURL != "" || strings.TrimSpace(r.runBase()) == "" {
+		return nil
+	}
+	head := r.opt.Branch
+	if head == "" {
+		current, err := r.opt.Source.Branch(ctx)
+		if err != nil {
+			return err
+		}
+		head = current
+	}
+	return r.checkBase(ctx, head)
+}
+
+// onBase picks the open change to reuse: one that targets base, or one whose base the host
+// cannot tell (a local record).
+func onBase(changes []Change, base string) (string, bool) {
+	for _, change := range changes {
+		if change.Base == base || change.Base == "" {
+			return change.URL, true
+		}
+	}
+	return "", false
+}
+
+var pullNumber = regexp.MustCompile(`/pull/(\d+)`)
+
+// prRef is what gh pr edit takes for url: the pull request number when the url has one.
+func prRef(url string) string {
+	if match := pullNumber.FindStringSubmatch(url); match != nil {
+		return match[1]
+	}
+	return url
+}
+
+// wrongBase is the hold for changes that already exist but target other branches. It names
+// each one and the command that retargets the first.
+func wrongBase(changes []Change, expected string) string {
+	first := changes[0]
+	if len(changes) == 1 {
+		return fmt.Sprintf("the open change %s targets %s but this run's base is %s; retarget it (gh pr edit %s --base %s) or close it, then resume", first.URL, first.Base, expected, prRef(first.URL), expected)
+	}
+	named := make([]string, 0, len(changes))
+	for _, change := range changes {
+		named = append(named, fmt.Sprintf("%s (targets %s)", change.URL, change.Base))
+	}
+	return fmt.Sprintf("the open changes %s do not target this run's base %s; retarget one (gh pr edit %s --base %s) and close the others, then resume", strings.Join(named, ", "), expected, prRef(first.URL), expected)
 }
 
 // failurePacket is what build needs to fix the check that failed. It is built from

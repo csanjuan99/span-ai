@@ -4,6 +4,7 @@ package adapt
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,9 +15,11 @@ import (
 	"strings"
 
 	"span/internal/agent"
+	branchpkg "span/internal/branch"
 	"span/internal/engine"
 	"span/internal/proc"
 	"span/internal/prove"
+	"span/internal/worktree"
 )
 
 // Exec runs a declared command as argv, without a shell.
@@ -142,8 +145,23 @@ func (g Git) Branch(ctx context.Context) (string, error) {
 	return g.output(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 }
 
-// EnsureBranch checks out branch. An existing branch is not reset to base.
+// BaseExists reports whether base is a branch the change can be opened into: origin has
+// it, after a best-effort fetch, or the repository has no origin and a local branch does.
+// Tags and commits are not bases. A base git could read as an option is an error.
+func (g Git) BaseExists(ctx context.Context, base string) (bool, error) {
+	return worktree.OnOrigin(ctx, g, g.Dir, base)
+}
+
+// EnsureBranch checks out branch. An existing branch is not reset to base. A new branch is
+// cut, without tracking, from origin's copy of base, or from the local base when origin
+// has none (see worktree.StartPoint).
 func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
+	if !branchpkg.ValidRef(branch) {
+		return fmt.Errorf("branch %q is not a valid branch name", branch)
+	}
+	if err := branchpkg.CheckBase(base); err != nil {
+		return err
+	}
 	current, err := g.Branch(ctx)
 	if err != nil {
 		return err
@@ -151,14 +169,15 @@ func (g Git) EnsureBranch(ctx context.Context, base, branch string) error {
 	if current == branch {
 		return nil
 	}
-	if _, err := g.output(ctx, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
-		_, err = g.output(ctx, "checkout", branch)
+	if _, err := g.output(ctx, "show-ref", "--verify", "--quiet", "--", "refs/heads/"+branch); err == nil {
+		_, err = g.output(ctx, "checkout", branch, "--")
 		return err
 	}
-	if _, err := g.output(ctx, "rev-parse", "--verify", "--quiet", base); err != nil {
-		return fmt.Errorf("base branch %s is missing", base)
+	start, err := worktree.StartPoint(ctx, g, g.Dir, base)
+	if err != nil {
+		return err
 	}
-	_, err = g.output(ctx, "checkout", "-b", branch, base)
+	_, err = g.output(ctx, "checkout", "--no-track", "-b", branch, start, "--")
 	return err
 }
 
@@ -190,12 +209,16 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
 		return Diff{}, nil
 	}
+	// Any commit may be compared here, but never text git could read as an option.
+	if strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
+		return Diff{}, fmt.Errorf("diff %q...%q: not a commit", base, head)
+	}
 	spec := base + "..." + head
-	stat, err := g.output(ctx, "diff", "--stat", spec)
+	stat, err := g.output(ctx, "diff", "--stat", spec, "--")
 	if err != nil {
 		return Diff{}, err
 	}
-	patch, truncated, err := g.bounded(ctx, patchLimit, "diff", spec)
+	patch, truncated, err := g.bounded(ctx, patchLimit, "diff", spec, "--")
 	if err != nil {
 		return Diff{}, err
 	}
@@ -208,16 +231,19 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 var ErrBroadChange = errors.New("the change deletes, renames, copies or retypes a path")
 
 // Changed lists the files this branch added or modified since it left base, as git diff
-// base...HEAD prints them, sorted. base is tried as given, then as origin/<base>; neither
-// resolving is an error. Any other kind of change returns ErrBroadChange.
+// base...HEAD prints them, sorted. base is the local branch, else origin/<base>; neither
+// existing, or a base that is not a branch name, is an error. Any other kind of change returns ErrBroadChange.
 func (g Git) Changed(ctx context.Context, base string) ([]string, error) {
 	base = strings.TrimSpace(base)
 	if base == "" {
 		return nil, errors.New("no base branch")
 	}
+	if err := branchpkg.CheckBase(base); err != nil {
+		return nil, err
+	}
 	ref := ""
-	for _, candidate := range []string{base, "origin/" + base} {
-		if _, err := g.output(ctx, "rev-parse", "--verify", "--quiet", candidate+"^{commit}"); err == nil {
+	for _, candidate := range []string{"refs/heads/" + base, "refs/remotes/origin/" + base} {
+		if _, err := g.output(ctx, "show-ref", "--verify", "--quiet", "--", candidate); err == nil {
 			ref = candidate
 			break
 		}
@@ -226,7 +252,7 @@ func (g Git) Changed(ctx context.Context, base string) ([]string, error) {
 		return nil, fmt.Errorf("base branch %s is missing", base)
 	}
 	// -z keeps every path byte for byte: no quoting of unusual names to undo.
-	out, err := g.output(ctx, "diff", "--name-status", "-z", "-M", ref+"...HEAD")
+	out, err := g.output(ctx, "diff", "--name-status", "-z", "-M", ref+"...HEAD", "--")
 	if err != nil {
 		return nil, err
 	}
@@ -288,26 +314,53 @@ type Host struct {
 	State     string
 }
 
-func (h Host) Find(ctx context.Context, spanID, branch string) (string, bool, error) {
+// Find lists the open pull requests for branch and the branch each targets. Without gh
+// the local record answers, and its base is unknown ("").
+func (h Host) Find(ctx context.Context, spanID, branch string) ([]engine.Change, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
-		return LocalReview{Dir: h.State}.Find(ctx, spanID, branch)
+		url, found, err := LocalReview{Dir: h.State}.Find(ctx, spanID, branch)
+		if err != nil || !found {
+			return nil, err
+		}
+		return []engine.Change{{URL: url}}, nil
 	}
-	out, err := h.gh(ctx, "pr", "list", "--head", branch, "--json", "url", "--jq", ".[0].url")
+	out, err := h.gh(ctx, "pr", "list", "--head="+branch, "--json", "url,baseRefName")
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
-	out = strings.TrimSpace(out)
-	if out == "" || out == "null" {
-		return "", false, nil
+	var listed []struct {
+		URL         string `json:"url"`
+		BaseRefName string `json:"baseRefName"`
 	}
-	return out, true, nil
+	if trimmed := strings.TrimSpace(out); trimmed != "" && trimmed != "null" {
+		if err := json.Unmarshal([]byte(trimmed), &listed); err != nil {
+			return nil, fmt.Errorf("gh pr list printed %q: %w", trimmed, err)
+		}
+	}
+	changes := []engine.Change{}
+	for _, item := range listed {
+		if url := strings.TrimSpace(item.URL); url != "" {
+			changes = append(changes, engine.Change{URL: url, Base: strings.TrimSpace(item.BaseRefName)})
+		}
+	}
+	return changes, nil
 }
 
-func (h Host) Open(ctx context.Context, spanID, branch, title, body string) (string, error) {
+// Open creates the pull request from branch into base. The base is always passed: without
+// it gh targets the repository's default branch, whatever the run started from. Each value
+// travels as one --flag=value element, and the base is validated first, so neither can be
+// read as a flag of its own.
+func (h Host) Open(ctx context.Context, spanID, branch, base, title, body string) (string, error) {
+	if err := branchpkg.CheckBase(base); err != nil {
+		return "", err
+	}
+	if base == branch || !branchpkg.ValidRef(branch) {
+		return "", fmt.Errorf("refusing to open %q into base %q", branch, base)
+	}
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Open(ctx, spanID, branch, title, body)
 	}
-	out, err := h.gh(ctx, "pr", "create", "--head", branch, "--title", title, "--body", body)
+	out, err := h.gh(ctx, "pr", "create", "--base="+base, "--head="+branch, "--title", title, "--body", body)
 	if err != nil {
 		return "", err
 	}
@@ -316,23 +369,43 @@ func (h Host) Open(ctx context.Context, spanID, branch, title, body string) (str
 	return strings.TrimSpace(out), nil
 }
 
+// Merged reports whether the pull request at url was merged.
 func (h Host) Merged(ctx context.Context, url string) (bool, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merged(ctx, url)
 	}
-	out, err := h.gh(ctx, "pr", "view", strings.TrimSpace(url), "--json", "state", "--jq", ".state")
+	clean, err := changeURL(url)
+	if err != nil {
+		return false, err
+	}
+	out, err := h.gh(ctx, "pr", "view", "--json", "state", "--jq", ".state", "--", clean)
 	if err != nil {
 		return false, err
 	}
 	return strings.TrimSpace(out) == "MERGED", nil
 }
 
+// Merge merges the pull request at url.
 func (h Host) Merge(ctx context.Context, url string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Merge(ctx, url)
 	}
-	_, err := h.gh(ctx, "pr", "merge", strings.TrimSpace(url), "--merge")
+	clean, err := changeURL(url)
+	if err != nil {
+		return err
+	}
+	_, err = h.gh(ctx, "pr", "merge", "--merge", "--", clean)
 	return err
+}
+
+// changeURL is url without the whitespace a stored one may carry, and only when it is an
+// http(s) URL: anything else would reach gh as a branch name or a flag.
+func changeURL(url string) (string, error) {
+	clean := strings.TrimSpace(url)
+	if !strings.HasPrefix(clean, "https://") && !strings.HasPrefix(clean, "http://") {
+		return "", fmt.Errorf("change %q is not an http(s) url", clean)
+	}
+	return clean, nil
 }
 
 func (h Host) gh(ctx context.Context, args ...string) (string, error) {

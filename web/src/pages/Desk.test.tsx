@@ -4,22 +4,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const getJSON = vi.fn()
 const postForm = vi.fn()
+const startRun = vi.fn()
 
-vi.mock("@/lib/api", () => ({
-  getJSON: (url: string) => getJSON(url),
-  postForm: (url: string, body: unknown) => postForm(url, body),
-  rememberServeToken: () => undefined,
-  serveToken: () => "",
-  startRun: () =>
-    Promise.resolve({
-      id: "s",
-      stage: "intake",
-      runs: [{ id: "s", stage: "intake", repo: "" }],
-      partial: false,
-      notes: "",
-    }),
-  agentList: () => [],
-}))
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>()
+  return {
+    getJSON: (url: string) => getJSON(url),
+    postForm: (url: string, body: unknown) => postForm(url, body),
+    rememberServeToken: () => undefined,
+    serveToken: () => "",
+    startRun: (form: FormData) => startRun(form),
+    agentList: () => [],
+    branchChoice: actual.branchChoice,
+    basePlaceholder: actual.basePlaceholder,
+    spanHeadsOf: actual.spanHeadsOf,
+  }
+})
 
 import { Desk } from "@/pages/Desk"
 
@@ -36,7 +36,20 @@ vi.stubGlobal("ResizeObserver", NoResize)
 beforeEach(() => {
   getJSON.mockReset()
   postForm.mockReset()
+  startRun.mockReset()
+  startRun.mockImplementation(() =>
+    Promise.resolve({
+      id: "s",
+      stage: "intake",
+      runs: [{ id: "s", stage: "intake", repo: "" }],
+      partial: false,
+      notes: "",
+    }),
+  )
   getJSON.mockImplementation((url: string) => {
+    if (url.startsWith("/branches?path=")) {
+      return Promise.resolve({ branches: ["dev", "feat/SAL-3"], default: "dev" })
+    }
     if (url.startsWith("/spans")) {
       return Promise.resolve({ spans: [] })
     }
@@ -148,5 +161,42 @@ describe("Desk", () => {
     await waitFor(() => {
       expect(screen.getByText(/later@example\.test/)).toBeTruthy()
     })
+  })
+
+  it("offers the repository's branches as the base and posts the one chosen", async () => {
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>,
+    )
+    const field = screen.getByLabelText("Base branch")
+    await waitFor(() => {
+      expect(field.getAttribute("placeholder")).toBe("dev")
+    })
+    await waitFor(() => {
+      expect(document.querySelectorAll("#base-branches option").length).toBe(2)
+    })
+    expect(getJSON.mock.calls.some(([url]) => String(url) === "/branches?path=.")).toBe(true)
+    fireEvent.change(field, { target: { value: "  feat/SAL-3 " } })
+    fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
+    await waitFor(() => {
+      expect(startRun).toHaveBeenCalled()
+    })
+    const form: unknown = startRun.mock.calls[0]?.[0]
+    expect(form instanceof FormData ? form.get("base") : null).toBe("feat/SAL-3")
+  })
+
+  it("posts no base when the field is left empty, so the default applies", async () => {
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
+    await waitFor(() => {
+      expect(startRun).toHaveBeenCalled()
+    })
+    const form: unknown = startRun.mock.calls[0]?.[0]
+    expect(form instanceof FormData ? form.has("base") : true).toBe(false)
   })
 })

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"span/internal/adapt"
+	"span/internal/branch"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
@@ -52,38 +53,68 @@ func main() {
 	}
 }
 
+// runFlags are the flags of span run.
+type runFlags struct {
+	workspace, brief, spans, policy, branch, base string
+	isolate                                       bool
+}
+
 func run(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	workspace := fs.String("workspace", ".", "project to change")
-	brief := fs.String("brief", "", "path to the brief")
-	spans := fs.String("spans", "", "state directory (default <workspace>/.span/runs)")
-	policyPath := fs.String("policy", "", "policy file (default <workspace>/span.yaml)")
-	branch := fs.String("branch", "", "branch to work on; with --worktree it gets its own tree")
-	base := fs.String("base", "", "base branch for a new branch (default dev)")
-	isolate := fs.Bool("worktree", false, "isolate the run in its own git worktree")
+	var f runFlags
+	fs.StringVar(&f.workspace, "workspace", ".", "project to change")
+	fs.StringVar(&f.brief, "brief", "", "path to the brief")
+	fs.StringVar(&f.spans, "spans", "", "state directory (default <workspace>/.span/runs)")
+	fs.StringVar(&f.policy, "policy", "", "policy file (default <workspace>/span.yaml)")
+	fs.StringVar(&f.branch, "branch", "", "feat/, fix/ or hotfix/ branch to work on, cut from the base when new; with --worktree it gets its own tree")
+	fs.StringVar(&f.base, "base", "", "branch to start from and open the change into (default: base in span.yaml for feat/fix, else dev; master for hotfix/)")
+	fs.BoolVar(&f.isolate, "worktree", false, "isolate the run in its own git worktree")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	code, err := prepare(*workspace, *spans, *policyPath, *branch, *base, *isolate)
+	opt, err := runOptions(f)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	raw, err := os.ReadFile(*brief)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	opt.Brief = string(raw)
 	ctx, stop := interruptContext()
 	defer stop()
 	result, err := engine.Start(ctx, opt)
 	return printResult(result, err)
+}
+
+// runOptions turns span run's flags into the run. --branch is the branch the run works on,
+// with or without --worktree: the engine checks it out, cut from the base when it is new.
+// Without --branch the run works on the checked-out branch, and that branch's prefix
+// decides the default base, so a hotfix/ checkout opens into master. The change always goes
+// to the base, never to whatever the host calls its default branch.
+func runOptions(f runFlags) (engine.Options, error) {
+	code, err := prepare(f.workspace, f.spans, f.policy, f.branch, f.base, f.isolate)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	raw, err := os.ReadFile(f.brief)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt.Brief = string(raw)
+	name := f.branch
+	if name == "" {
+		name, err = adapt.Git{Dir: code.Workspace}.Branch(context.Background())
+		if err != nil {
+			return engine.Options{}, fmt.Errorf("the checked-out branch could not be read: %w", err)
+		}
+	}
+	opt.Base, err = runBase(f.base, code.Project, name)
+	if err != nil {
+		return engine.Options{}, err
+	}
+	opt.Branch = f.branch
+	return opt, nil
 }
 
 func resume(args []string) int {
@@ -252,7 +283,7 @@ func quickstartCmd(args []string) int {
 	storyFile := fs.String("story-file", "", "file that holds the user story")
 	kind := fs.String("kind", "", "feat, fix, or hotfix")
 	issue := fs.String("issue", "", "linked story key, such as AET-1234")
-	base := fs.String("base", "", "dev or master")
+	base := fs.String("base", "", "branch to start from and open the change into (default: base in span.yaml, else dev for feat/fix, master for hotfix)")
 	force := fs.Bool("force", false, "rewrite span.yaml")
 	var repos repeated
 	fs.Var(&repos, "repo", "checkout to include; repeat to include more than one")
@@ -314,6 +345,12 @@ func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
 		one.Workspace = target.Path
 		one.Story = target.Story
 		one.Issue = target.Issue
+		one, err := withBase(one)
+		if err != nil {
+			fmt.Fprintf(&b, "repo %s\n%s\n", target.Name, err)
+			code = 1
+			continue
+		}
 		text, item := runOne(ctx, one)
 		fmt.Fprintf(&b, "repo %s\n%s", target.Name, text)
 		if item != 0 {
@@ -345,6 +382,10 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 		one.Workspace = target.Path
 		one.Story = target.Story
 		one.Issue = target.Issue
+		one, err := withBase(one)
+		if err != nil {
+			return serve.Outcome{}, fmt.Errorf("repo %s: %w", target.Name, err)
+		}
 		if strings.TrimSpace(one.Story) == "" {
 			res, claim, err := claimAndConfigure(one, "configuring")
 			if err != nil {
@@ -723,8 +764,8 @@ func usage() {
 ./span jira logout [--project .]
 ./span jira issue [--project .] AET-1234
 ./span jira search [--project .] [--jql "project = AET"]
-./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base dev|master]
-./span run --brief brief.md [--workspace .]
+./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
+./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
 ./span resume <id> [--workspace .]
 ./span serve [--addr 127.0.0.1:8787] [--spans .span/runs]`)
 }
@@ -741,7 +782,7 @@ type prepared struct {
 // prepare isolates a run in its own git worktree when asked. The state directory and the
 // policy stay in the checkout the person pointed at, so the desk keeps one list of runs
 // and the policy is not copied into every tree.
-func prepare(workspace, spans, policyPath, branch, base string, isolate bool) (prepared, error) {
+func prepare(workspace, spans, policyPath, name, base string, isolate bool) (prepared, error) {
 	project, err := filepath.Abs(workspace)
 	if err != nil {
 		return prepared{}, err
@@ -760,17 +801,63 @@ func prepare(workspace, spans, policyPath, branch, base string, isolate bool) (p
 	if !isolate {
 		return out, nil
 	}
-	if strings.TrimSpace(branch) == "" {
+	if strings.TrimSpace(name) == "" {
 		return prepared{}, errors.New("--worktree needs --branch: the tree is the branch")
 	}
-	dir := worktree.Path(project, branch)
-	start := base
-	if start == "" {
-		start = "dev"
+	dir := worktree.Path(project, name)
+	start, err := runBase(base, project, name)
+	if err != nil {
+		return prepared{}, err
 	}
-	if err := worktree.Add(context.Background(), adapt.Git{Dir: project}, project, dir, branch, start); err != nil {
+	// Add cuts a new branch from the local base, or from origin/<base> after a fetch, and
+	// refuses a base that is nowhere.
+	if err := worktree.Add(context.Background(), adapt.Git{Dir: project}, project, dir, name, start); err != nil {
 		return prepared{}, err
 	}
 	out.Workspace = dir
 	return out, nil
+}
+
+// runBase is the base a run starts from and opens its change into: the one it names, else
+// the base: line of span.yaml in project for feat and fix, else the kind's default (master
+// for a hotfix/ branch, dev otherwise). The kind is the branch name's prefix.
+func runBase(explicit, project, name string) (string, error) {
+	kind, _, _ := strings.Cut(name, "/")
+	if kind != branch.Hotfix {
+		kind = branch.Feat
+	}
+	chosen, err := projectBase(project)
+	if err != nil {
+		return "", err
+	}
+	_, base, err := branch.Choose("", kind, explicit, chosen)
+	if err != nil || base != "" {
+		return base, err
+	}
+	return branch.DefaultBase(kind), nil
+}
+
+// withBase settles a launch's kind and base before its branch is derived (branch.Choose):
+// the base the run names wins; otherwise span.yaml's base applies to feat and fix only,
+// and the kind is fixed so that base cannot make the story a hotfix. Still empty, the
+// kind's default applies when the branch is derived.
+func withBase(req setup.Request) (setup.Request, error) {
+	chosen, err := projectBase(req.Workspace)
+	if err != nil {
+		return req, err
+	}
+	kind, base, err := branch.Choose(req.Story, req.Kind, req.Base, chosen)
+	if err != nil {
+		return req, err
+	}
+	req.Kind, req.Base = kind, base
+	return req, nil
+}
+
+// projectBase is the base: line of span.yaml in project, or "" when there is none.
+func projectBase(project string) (string, error) {
+	if project == "" {
+		return "", nil
+	}
+	return policy.ProjectBase(project)
 }

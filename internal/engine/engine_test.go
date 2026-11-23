@@ -119,19 +119,29 @@ type fakeReview struct {
 	merges int
 	found  bool
 	url    string
+	base   string
 	merged bool
 	lookup error
+	// openedBase is the base the last Open was given.
+	openedBase string
+	// extra are more open changes for the same head, after the one url names.
+	extra []Change
 }
 
-func (r *fakeReview) Find(context.Context, string, string) (string, bool, error) {
+func (r *fakeReview) Find(context.Context, string, string) ([]Change, error) {
 	if r.lookup != nil {
-		return "", false, r.lookup
+		return nil, r.lookup
 	}
-	return r.url, r.found, nil
+	if !r.found {
+		return r.extra, nil
+	}
+	return append([]Change{{URL: r.url, Base: r.base}}, r.extra...), nil
 }
-func (r *fakeReview) Open(context.Context, string, string, string, string) (string, error) {
+func (r *fakeReview) Open(_ context.Context, _, _, base, _, _ string) (string, error) {
 	r.opens++
+	r.openedBase = base
 	r.url = "https://example.test/pull/1"
+	r.base = base
 	r.found = true
 	return r.url, nil
 }
@@ -208,6 +218,7 @@ func baseOpt(t *testing.T) (Options, *fakeAgents, *fakeSource, *fakeReview, *fak
 			Promote: policy.Ladder{Environments: []policy.Environment{{Name: "preview", Command: "echo preview"}}},
 		},
 		Brief:   "Charge the card.",
+		Base:    "dev",
 		Agents:  agents,
 		Check:   check,
 		Source:  source,

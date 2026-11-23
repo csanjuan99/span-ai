@@ -3,6 +3,7 @@
 package policy
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"span/internal/agent"
+	"span/internal/branch"
 )
 
 // Name is the file Span reads at the workspace root.
@@ -18,10 +20,13 @@ const Name = "span.yaml"
 
 // File is span.yaml. Empty modes mean auto.
 type File struct {
-	Feature  string              `yaml:"feature"`
-	Rules    string              `yaml:"rules"`
-	Harness  string              `yaml:"harness"`
-	Agent    string              `yaml:"agent"`
+	Feature string `yaml:"feature"`
+	Rules   string `yaml:"rules"`
+	Harness string `yaml:"harness"`
+	Agent   string `yaml:"agent"`
+	// Base is the branch new runs start from and open their change into when the run does
+	// not name one. Empty keeps the defaults: dev for feat and fix, master for hotfix.
+	Base     string              `yaml:"base"`
 	Stages   Modes               `yaml:"stages"`
 	Prove    Bands               `yaml:"prove"`
 	Promote  Ladder              `yaml:"promote"`
@@ -125,6 +130,20 @@ func Load(path string) (File, error) {
 	return f, nil
 }
 
+// ProjectBase is the base: line of the span.yaml in dir. A missing file or line is "", which
+// means the defaults apply.
+func ProjectBase(dir string) (string, error) {
+	path := filepath.Join(dir, Name)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	f, err := Load(path)
+	if err != nil {
+		return "", err
+	}
+	return f.Base, nil
+}
+
 // Validate checks modes and the feature name.
 func (f File) Validate() error {
 	if !validFeature(f.Feature) {
@@ -136,6 +155,11 @@ func (f File) Validate() error {
 	for _, mode := range []string{f.OpenMode(), f.MergeMode()} {
 		if mode != "auto" && mode != "hold" {
 			return fmt.Errorf("stage mode %q is not auto or hold", mode)
+		}
+	}
+	if f.Base != "" {
+		if err := branch.CheckBase(f.Base); err != nil {
+			return err
 		}
 	}
 	if !ValidWeight(f.Run.Weight) {
