@@ -284,7 +284,7 @@ review used without `gh`, is not checked.
 
 `harness/skills` is the writing standard, copied from the skill set so two people produce one author's code. The build prompt lists each skill name, its trigger, and the path of `SKILL.md`. The agent reads that file only when the trigger matches the change. Reference files stay unloaded until the skill itself names one. Bodies are not pasted into the prompt.
 
-A sealed `hold` or `stop` in frame, build, or inspect is stored in `<workspace>/.span/lessons.json`. The next prompt for that same stage includes at most five of those lines. A lesson that fails to prevent the same mistake twice is dropped. The file is local, the lookup does not call a model, and the skill files are not rewritten.
+A sealed `hold` or `stop` in frame, build, or inspect is stored in `<project>/.span/lessons.json`, the project checkout and not the run's own worktree, so parallel runs share what was learned. Each write re-reads the file under a short lock, so two runs finishing together keep each other's lessons. The next prompt for that same stage includes at most five of those lines. A lesson that fails to prevent the same mistake twice is dropped. The file is local, the lookup does not call a model, and the skill files are not rewritten.
 
 ## Quick path
 

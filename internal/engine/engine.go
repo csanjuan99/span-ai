@@ -1631,7 +1631,7 @@ func (r *runner) lessonBook() *learn.Book {
 	if r.book != nil {
 		return r.book
 	}
-	r.bookPath = filepath.Join(r.opt.Workspace, ".span", "lessons.json")
+	r.bookPath = r.lessonPath()
 	book, err := learn.Load(r.bookPath)
 	if err != nil {
 		r.book = &learn.Book{}
@@ -1640,6 +1640,16 @@ func (r *runner) lessonBook() *learn.Book {
 	}
 	r.book = book
 	return r.book
+}
+
+// lessonPath is the project's book. Runs in their own worktrees share it, so it lives in
+// the project and not in a tree that goes away with its run.
+func (r *runner) lessonPath() string {
+	home := r.opt.Project
+	if home == "" {
+		home = r.opt.Workspace
+	}
+	return filepath.Join(home, ".span", "lessons.json")
 }
 
 // noteLesson updates the ledger after the statement is sealed.
@@ -1654,9 +1664,40 @@ func (r *runner) noteLesson(stage, verdict, reason string) {
 		shown = r.shown[stage]
 		delete(r.shown, stage)
 	}
-	if book.Observe(stage, verdict, reason, shown) && r.bookPath != "" {
-		_ = learn.Save(r.bookPath, book)
+	if r.bookPath == "" {
+		book.Observe(stage, verdict, reason, shown)
+		return
 	}
+	r.saveLesson(book, stage, verdict, reason, shown)
+}
+
+// saveLesson applies one observation to the book on disk, not to the copy this run read when
+// it started. Other runs of the project write the same file; replaying the observation on a
+// fresh read under a short lock keeps what they added. When the lock or the read fails the
+// lesson is dropped: it is a hint, and a verdict never waits on it.
+func (r *runner) saveLesson(own *learn.Book, stage, verdict, reason string, shown []string) {
+	lock, err := runlock.Acquire(runlock.Lessons, r.bookPath+".lock", "lessons "+r.cur.ID)
+	for attempt := 0; err != nil && attempt < 200; attempt++ {
+		var busy *runlock.BusyError
+		if !errors.As(err, &busy) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+		lock, err = runlock.Acquire(runlock.Lessons, r.bookPath+".lock", "lessons "+r.cur.ID)
+	}
+	if err != nil {
+		own.Observe(stage, verdict, reason, shown)
+		return
+	}
+	defer lock.Release()
+	fresh, err := learn.Load(r.bookPath)
+	if err != nil {
+		return
+	}
+	if fresh.Observe(stage, verdict, reason, shown) {
+		_ = learn.Save(r.bookPath, fresh)
+	}
+	r.book = fresh
 }
 
 func (r *runner) browserQA() bool {

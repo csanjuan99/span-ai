@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -328,5 +329,37 @@ func TestOnOriginOfflineKeepsTheKnownRefs(t *testing.T) {
 	}
 	if !hasRef(context.Background(), r.s, r.clone, "refs/remotes/origin/feat/SAL-3") {
 		t.Fatal("offline, a known remote-tracking ref was dropped")
+	}
+}
+
+// Stories launched together from the page create their trees at the same moment. Git
+// serialises its own metadata with lock files and fails the loser instead of waiting, so
+// the runs only stay parallel if Add absorbs that.
+func TestManyRunsCanCreateTheirTreesAtTheSameTime(t *testing.T) {
+	repo, s := repoWithDev(t)
+	const runs = 12
+	errs := make(chan error, runs)
+	var wg sync.WaitGroup
+	for i := 0; i < runs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			branch := fmt.Sprintf("feat/story-%d", i)
+			errs <- Add(context.Background(), s, repo, Path(repo, branch), branch, "dev")
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("a parallel run could not get its tree: %v", err)
+		}
+	}
+	entries, err := List(context.Background(), s, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != runs+1 {
+		t.Fatalf("%d trees, want %d", len(entries), runs+1)
 	}
 }
