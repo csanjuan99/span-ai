@@ -1002,11 +1002,14 @@ reaches the merge commit unless a card showed it.
 
 When the conflict starts, span pins the repository: where `.git` and the git directories are,
 and their shape (`.git` as a directory or gitfile, `commondir`, `gitdir`, `HEAD`, the index,
-`objects/info/alternates`, `packed-refs`, `modules/`, `worktrees/`). Before it runs git again
+`objects/info/alternates`, `modules/`, and the value of every local branch no worktree has
+checked out). A repository shared with other parallel runs is not "changed" when git repacks
+its refs or another run adds a branch or a worktree; moving a quiet branch, or losing this
+run's own worktree, still is. Before it runs git again
 it checks that shape with plain file operations. What plain file operations can put back is put
 back first (`commondir`, `gitdir`, `alternates`, a `HEAD` replaced by a symlink). Anything else
 (`.git` replaced by a symlink or a gitfile, the git directories moved, the index replaced, a
-changed `packed-refs`, new modules or worktrees) fails closed: the conflict moves to `failed`
+a quiet branch that moved, new modules) fails closed: the conflict moves to `failed`
 with `the agent changed the repository structure; span did not run git. Inspect <path> by
 hand`, and abort does nothing until the repository is fixed by hand. Every git command span
 runs names the pinned repository explicitly (`GIT_DIR`, `GIT_COMMON_DIR`, `GIT_WORK_TREE`) and
