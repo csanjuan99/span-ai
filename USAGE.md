@@ -780,6 +780,50 @@ A refresh replays the run from disk. The socket's first message is the span obje
 
 `GET /spans/<id>/live` is that socket. Dev (`npm run dev` in `web/`) proxies HTTP and the socket to `127.0.0.1:8787`. The built page is served by `./span serve` from the same origin.
 
+#### When the connection drops
+
+- **It reconnects.** A closed socket (server restart, laptop sleep, flaky wifi) is retried
+  after 0.5 s, then 1 s, 2 s, and so on up to 10 s, with a little jitter. The backoff only
+  starts over after a connection stayed up and in order for 5 s. The timeline notes
+  `socket closed` and when the next try starts; a long outage is noted once.
+- **It resyncs from the replay.** Every connection starts with a replay, so a reconnect is
+  a full resync, not a patch on a stale page. When the server cannot read the run, the
+  replay still comes, without a span but with the transcript tail: the page takes the
+  tail, keeps the rest of what it shows, reloads the run with `GET /spans/<id>`, and only
+  lowers its numbering when the replay's `seq` is below the last one it saw (a server
+  restart).
+- **Frames are numbered.** Each live frame carries `seq`, one counter per run, and the
+  replay names the `seq` the stream resumes after. A frame at or below the last one seen is
+  dropped; a jump means frames were lost, so the page closes the socket and resyncs. The
+  first gap resyncs at once; another gap within 5 s waits for the backoff.
+- **Transcript lines are not repeated.** Transcript frames carry `start` and `offset`,
+  the size of `transcript.log` before and after their lines, and the replay carries the
+  size its tail was read up to. Flushes are published in the order they were taken. A
+  flush can straddle a connect (one line before the replay, one after): the server cuts,
+  per connection, the lines its replay tail already holds and still sends the frame, so
+  the numbering has no hole. The page also drops a flush whose offset is not past the
+  replay's.
+- **A failed write stays out of the live view.** When the disk refuses part of a write,
+  only the lines written whole are sent live; the agent keeps running and the log
+  reports the error when it closes.
+- **A slow client is cut, not starved.** When a page falls 32 frames behind, the server
+  closes its socket instead of silently dropping frames (the final `done` cursor
+  included), and a write that a client does not read within 10 s ends the socket too. The
+  page reconnects and replays.
+- **The serve token stays out of the socket.** The replay and every live frame have the
+  token replaced inside their string values, never in the encoded bytes, so JSON keys stay
+  intact and a token with a quote, a backslash, `<` or `&` is still found. The protocol
+  fields `type`, `stage` and `verdict` are never rewritten. A token shorter
+  than 8 characters still guards the socket but is not redacted, because it is too likely
+  to be an ordinary word. `SPAN_TOKEN` is also one of the secrets the transcript redacts.
+- **One broken component does not blank the app.** A render fault shows the error with
+  **Try again** (render once more) and **Reload page**; moving to another route clears it.
+- **One failing endpoint does not blank the page.** The span page reads the run, the
+  implementation and the acceptance on their own: a missing diff before the first commit
+  leaves that tab empty, and only an unreadable run is an error. An older acceptance reply
+  never overwrites a newer one. **Find repos** shows the repositories even when Jira
+  fails, and the Jira session even when the folder fails.
+
 ### Routes
 
 | Method | Path | Effect |

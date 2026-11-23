@@ -9,6 +9,35 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 - **Fixed**: a stage held by its mode (`merge: hold`, `open: hold`, a promote environment in `hold`) could never be released: the page offered "Fix and retry", which reached the same hold again. The page now offers an approval (`POST /spans/{id}/approve`), bound to the commit it showed and spent when the stage advances.
 - **Fixed**: `span.yaml` was staged into the story's branch by the commit, so a checkout of another branch lost it and a run recorded without a project could not be resumed (`open .../span.yaml: no such file`).
 
+### The desk survives a dropped socket, lost frames, a render crash and a failing endpoint
+
+- **Reconnect with backoff.** The span page reopens a closed socket after 0.5 s, doubling to
+  a 10 s cap with jitter, and resyncs from the replay that starts every connection. The
+  backoff resets only after 5 s of a healthy connection, so a failing server is not hammered.
+- **Numbered frames.** The hub stamps every live frame with `seq`, one counter per run, and
+  the replay carries the `seq` it covers. The page drops frames at or below it and resyncs
+  on a gap (at once for the first gap, with the backoff for the next ones within 5 s). The
+  replay is sent even when the run cannot be loaded, without a span but with the
+  transcript tail: the page takes the tail, keeps its baseline unless the server
+  restarted, and reloads the run.
+- **No repeated transcript lines.** Transcript frames carry `start` and `offset`, their
+  byte range in `transcript.log`, and the replay carries the size its tail ends at.
+  Flushes publish in take order. The server cuts, per connection, the lines of a flush
+  the replay tail already holds and still sends the frame, so seq has no hole.
+- **Write failures.** A short or failed transcript write sends only the lines written
+  whole; the agent is not stopped, and `Close` reports the error.
+- **No silent drops.** A subscriber whose 32-frame buffer is full is cut, and a socket
+  write has a 10 s deadline: the socket ends, the page reconnects and replays, instead of
+  missing frames for good.
+- **Token redaction.** The replay and the live frames have `SPAN_TOKEN` replaced inside
+  their string values (keys and the `type`, `stage` and `verdict` fields untouched,
+  JSON-escaped tokens found); a token under 8 characters is not redacted. `SPAN_TOKEN` joins the secrets the transcript redacts.
+- **Error boundary.** A render fault shows the error with **Try again** and **Reload page**
+  instead of a blank app; each page has its own boundary, reset when the route changes.
+- **Partial loads.** The span page loads the run, the implementation and the acceptance
+  independently (`Promise.allSettled`); only an unreadable run is an error, and an older
+  acceptance reply never overwrites a newer one. **Find repos** keeps the repositories
+  when Jira fails and the reverse. A malformed live frame is ignored.
 
 ### Repairs prove only what the change can affect
 
