@@ -289,6 +289,23 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stage in flight was cancelled; the run holds with the error"})
 	})
+	mux.HandleFunc("POST /spans/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if !safe(id) {
+			writeErr(w, errors.New("invalid span id"))
+			return
+		}
+		// A run flying in this process holds no file lock between stages, so the hub is asked too.
+		if _, flying := hub.Flight(id); flying {
+			writeErr(w, &runlock.BusyError{Scope: runlock.Run, Holder: "this server"})
+			return
+		}
+		if err := engine.Delete(root, id); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": id})
+	})
 	mux.HandleFunc("POST /spans/{id}/rewind", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if err := r.ParseForm(); err != nil {

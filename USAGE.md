@@ -741,6 +741,13 @@ which `span.yaml` speaks:
 The run remembers the folder it was launched from, so `resume` and a resume from the page apply
 the same policy. A folder with no `span.yaml` changes nothing.
 
+### Deleting a run
+
+Each run in the desk's `spans` list has a **Delete** button. It asks once more, then removes that
+run's record (its journal, evidence and brief) from the spans folder. The branch, the pull request
+and any worktree the run made stay, because they may hold work you still want. A run that is being
+driven, by this server or by `span resume`, is refused: stop it first.
+
 ### Metrics
 
 `/metrics` (linked from the desk) summarises every run under the server's state directory: runs

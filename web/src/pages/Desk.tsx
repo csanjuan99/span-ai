@@ -1,3 +1,6 @@
+"use client"
+
+import { DeleteRun } from "@/components/run-list/DeleteRun"
 import { useEffect, useState, type FormEvent } from "react"
 import { Link, useNavigate } from "react-router"
 
@@ -150,7 +153,12 @@ export function Desk() {
             setAgentAt(new Date().toISOString())
           }
         })
-        .catch(() => undefined)
+        .catch((err: unknown) => {
+          // The list on screen is the last good one. Only a refused token changes what to show.
+          if (!gone && err instanceof UnauthorizedError) {
+            setNeedsToken(true)
+          }
+        })
     }
     pull()
     const timer = window.setInterval(pull, agentReviewMs)
@@ -171,8 +179,10 @@ export function Desk() {
     try {
       const body = await getJSON(`/jira?path=${encodeURIComponent(project)}`)
       setSession(sessionOf(body))
-    } catch {
-      // A folder that cannot be read is reported by the action that needed it, not here.
+    } catch (err: unknown) {
+      // The action that needs the session reports its own failure; this says why the band
+      // still shows Jira as not connected.
+      setListNote(err instanceof Error ? `Jira session not read: ${err.message}` : "Jira session not read")
     }
   }
 
@@ -518,7 +528,12 @@ export function Desk() {
                 >
                   {span.label === "" ? span.id : span.label}
                 </Link>
-                <span className="text-muted-foreground">{"  "}{span.stage} · {span.verdict}</span>
+                <span className="text-muted-foreground">{"  "}{span.stage} · {span.verdict}{"  "}</span>
+                <DeleteRun
+                  id={span.id}
+                  label={span.label === "" ? span.id : span.label}
+                  onDeleted={(gone) => setSpans((current) => current.filter((item) => item.id !== gone))}
+                />
               </li>
             ))}
           </ul>

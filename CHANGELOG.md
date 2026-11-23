@@ -6,6 +6,7 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: a run can be deleted from the desk's list, one at a time, after a second click. Only its record goes (`POST /spans/{id}/delete`); the branch, the pull request and any worktree stay. A run being driven, here or by another process, is refused.
 - **Fixed**: the model selector showed only part of a CLI's models. It was a text field with a native suggestion list, which the browser filters by the text already in the field, so a saved model hid all the others. Each CLI now has a **Browse N models** list that always opens on the whole list, with a search and a count.
 
 - **Added**: a **metrics** page (`/metrics`, linked from the desk) that reads the runs of the server: how many finished, stopped or are held, how many finished on the first try, per stage the advances, holds, stops and the median and p90 time, which CLI and model ran how many stages and how they ended, and the recent runs. Times run from the previous seal, so they include waiting on a person. Cost and tokens are not shown because runs do not record them.
