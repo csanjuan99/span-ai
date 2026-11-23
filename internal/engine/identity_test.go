@@ -16,8 +16,8 @@ import (
 func TestRunsOnDifferentBranchesKeepTheirOwnIdentity(t *testing.T) {
 	opt, _, source, review, _, _ := baseOpt(t)
 	runs := []struct{ branch, brief, feature, title string }{
-		{"feat/SAL-1-cards", "# Add saved cards\n\nCharge the card.", "sal-1-cards", "Add saved cards"},
-		{"feat/SAL-2-wallet", "\n## Pay with the wallet\n\nCharge the wallet.", "sal-2-wallet", "Pay with the wallet"},
+		{"feat/sal-1-cards", "# Add saved cards\n\nCharge the card.", "sal-1-cards", "Add saved cards"},
+		{"fix/sal-2-wallet", "\n## Pay with the wallet\n\nCharge the wallet.", "fix-sal-2-wallet", "Pay with the wallet"},
 	}
 	for i, run := range runs {
 		opt.Branch, opt.Brief = run.branch, run.brief
@@ -86,7 +86,7 @@ func TestAnOldCursorTakesItsFeatureFromItsBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	delete(fields, "feature")
-	fields["branch"] = "fix/SAL-9-Refund"
+	fields["branch"] = "fix/sal-9-refund"
 	fields["base"] = "dev"
 	raw, err = json.Marshal(fields)
 	if err != nil {
@@ -99,14 +99,14 @@ func TestAnOldCursorTakesItsFeatureFromItsBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.cur.Feature != "sal-9-refund" {
-		t.Fatalf("feature %q, want sal-9-refund", r.cur.Feature)
+	if r.cur.Feature != "fix-sal-9-refund" {
+		t.Fatalf("feature %q, want fix-sal-9-refund", r.cur.Feature)
 	}
 }
 
 func TestAStoredFeatureThatIsAPathIsNotUsed(t *testing.T) {
 	opt, _, _, _, _, _ := baseOpt(t)
-	opt.Branch = "feat/SAL-5-safe"
+	opt.Branch = "feat/sal-5-safe"
 	id, err := Open(opt)
 	if err != nil {
 		t.Fatal(err)
@@ -143,14 +143,40 @@ func TestAStoredFeatureThatIsAPathIsNotUsed(t *testing.T) {
 func TestStoryTitleIsTheFirstLineOfTheBrief(t *testing.T) {
 	long := strings.Repeat("a", 130)
 	for brief, want := range map[string]string{
-		"# Add saved cards\n\nbody": "Add saved cards",
-		"\n\n  ##   Pay  \nmore":    "Pay",
-		"#\n\nReal title":           "Real title",
-		long:                        strings.Repeat("a", 100),
-		"  \n#  \n":                 "fallback",
+		"# Add saved cards\n\nbody":             "Add saved cards",
+		"\n\n  ##   Pay  \nmore":                "Pay",
+		"#\n\nReal title":                       "Real title",
+		long:                                    strings.Repeat("a", 100),
+		"  \n#  \n":                             "fallback",
+		"Pay\x1b[31m now\tok":                   "Pay[31m now ok",
+		"SAL-12\n\n# Pay with the wallet\nmore": "SAL-12 Pay with the wallet",
+		"SAL-12":                                "SAL-12",
 	} {
 		if got := storyTitle(brief, "fallback"); got != want {
 			t.Fatalf("storyTitle(%q) = %q, want %q", brief, got, want)
+		}
+	}
+}
+
+// A run without --branch works on whatever is checked out. dev, main, or a detached HEAD is
+// shared by every such run, so it cannot name one: the run id does.
+func TestARunOnASharedBranchIsNamedByItsID(t *testing.T) {
+	for _, current := range []string{"main", "HEAD"} {
+		opt, agents, source, _, _, _ := baseOpt(t)
+		source.branch = current
+		got, err := Start(context.Background(), opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snap, err := Load(opt.Root, got.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.Cursor.Feature != got.ID {
+			t.Fatalf("%s: feature %q, want the run id %q", current, snap.Cursor.Feature, got.ID)
+		}
+		if !contains(agents.prompts, filepath.Join("odd", "tasks", got.ID+".md")) {
+			t.Fatalf("%s: the build prompt does not name the run's own document", current)
 		}
 	}
 }

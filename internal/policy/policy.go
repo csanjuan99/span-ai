@@ -233,9 +233,17 @@ func SetAgent(path, value string) error {
 	if !agent.Known(value) {
 		return fmt.Errorf("agent %q is not one of auto, any, or %s", value, agent.IDs())
 	}
+	// A new file is 0644 like the one quickstart writes; a rewrite keeps the file's mode.
+	mode := os.FileMode(0o644)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		raw, err = nil, nil
+	} else if err == nil {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return statErr
+		}
+		mode = info.Mode().Perm()
 	}
 	if err != nil {
 		return err
@@ -260,6 +268,9 @@ func SetAgent(path, value string) error {
 		return err
 	}
 	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, mode); err != nil {
 		return err
 	}
 	return os.Rename(name, path)

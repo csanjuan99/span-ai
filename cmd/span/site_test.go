@@ -142,7 +142,9 @@ func TestParallelRunsEachGetADistinctWorktree(t *testing.T) {
 	}
 }
 
-func TestABusyCheckoutThatWasNeverConfiguredStillRefuses(t *testing.T) {
+// span.yaml is optional, so a busy checkout that was never configured still sends the next
+// story to its own worktree, and writes nothing into the checkout another run holds.
+func TestABusyCheckoutThatWasNeverConfiguredGetsItsOwnWorktree(t *testing.T) {
 	dir := gitRepo(t)
 	held, err := engine.ClaimWorkspace(dir, "another run")
 	if err != nil {
@@ -151,10 +153,13 @@ func TestABusyCheckoutThatWasNeverConfiguredStillRefuses(t *testing.T) {
 	defer held.Release()
 	req := story("AET-1 Charge once")
 	req.Workspace = dir
-	_, err = claimSite(req, "", "starting a run")
-	var busy *runlock.BusyError
-	if !errors.As(err, &busy) {
-		t.Fatalf("want a busy error when there is no policy to isolate with, got %v", err)
+	st, err := claimSite(req, "", "starting a run")
+	if err != nil {
+		t.Fatalf("a missing span.yaml stopped an isolated run: %v", err)
+	}
+	defer st.discard()
+	if st.Code.Workspace == st.Code.Project || st.Claim != nil {
+		t.Fatalf("the run was not isolated: %+v", st.Code)
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "span.yaml")); statErr == nil {
 		t.Fatal("configuration was written into a checkout another run holds")

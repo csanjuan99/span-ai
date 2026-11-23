@@ -110,6 +110,9 @@ func TestChoosingAnUnknownAgentIsRefused(t *testing.T) {
 // to the server.
 func TestChoosingAnAgentWithoutAPolicyCreatesIt(t *testing.T) {
 	project := t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	rec := postAgent(t, project, "pi")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
@@ -125,6 +128,36 @@ func TestChoosingAnAgentWithoutAPolicyCreatesIt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(project, "missing")); !os.IsNotExist(err) {
 		t.Fatalf("a missing project was created: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(project, "span.yaml"))
+	if err != nil || info.Mode().Perm() != 0o644 {
+		t.Fatalf("span.yaml mode %v %v, want 0644", info.Mode().Perm(), err)
+	}
+}
+
+// A folder that is neither a git repository nor a Span project (a home directory, say)
+// never gets a span.yaml from the agent picker.
+func TestChoosingAnAgentOutsideAProjectIsRefused(t *testing.T) {
+	folder := t.TempDir()
+	rec := postAgent(t, folder, "pi")
+	if rec.Code < 400 || !strings.Contains(rec.Body.String(), "not a git repository") {
+		t.Fatalf("status %d %s, want a refusal", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(folder, "span.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("span.yaml was written outside a project: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(folder, ".span"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if rec := postAgent(t, folder, "pi"); rec.Code != http.StatusOK {
+		t.Fatalf("a folder with .span/ was refused: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAProjectWithoutPolicySaysTheDefaultsApply(t *testing.T) {
+	body := getAgent(t, t.TempDir())
+	if !strings.Contains(body.Reason, "defaults") || !strings.Contains(body.Reason, "creates") {
+		t.Fatalf("reason = %q", body.Reason)
 	}
 }
 

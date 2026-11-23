@@ -360,7 +360,7 @@ func (h Host) Open(ctx context.Context, spanID, branch, base, title, body string
 	if _, err := exec.LookPath("gh"); err != nil {
 		return LocalReview{Dir: h.State}.Open(ctx, spanID, branch, title, body)
 	}
-	out, err := h.gh(ctx, "pr", "create", "--base="+base, "--head="+branch, "--title", title, "--body", body)
+	out, err := h.gh(ctx, "pr", "create", "--base="+base, "--head="+branch, "--title="+title, "--body="+body)
 	if err != nil {
 		return "", err
 	}

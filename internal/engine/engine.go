@@ -1638,19 +1638,50 @@ func (r *runner) settleFeature(ctx context.Context) error {
 const maxTitle = 100
 
 // storyTitle is the pull request title: the first non-empty line of the brief without its
-// Markdown heading marks, cut to maxTitle runes. A brief with no such line uses fallback.
+// Markdown heading marks or control characters, cut to maxTitle runes. A first line that is
+// only a story key (SAL-12) is joined with the next one, so the title says what the story is.
+// A brief with no such line uses fallback.
 func storyTitle(brief, fallback string) string {
+	title := ""
 	for _, line := range strings.Split(brief, "\n") {
-		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
+		line = titleLine(line)
 		if line == "" {
 			continue
 		}
-		if runes := []rune(line); len(runes) > maxTitle {
-			line = strings.TrimSpace(string(runes[:maxTitle]))
+		if title != "" {
+			title += " " + line
+			break
 		}
-		return line
+		title = line
+		if !storyKey.MatchString(line) {
+			break
+		}
 	}
-	return fallback
+	if title == "" {
+		return fallback
+	}
+	if runes := []rune(title); len(runes) > maxTitle {
+		title = strings.TrimSpace(string(runes[:maxTitle]))
+	}
+	return title
+}
+
+// storyKey is a line that is only a story key.
+var storyKey = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+
+// titleLine is one brief line as a title: a tab is a space, other control characters go,
+// and the Markdown heading marks are trimmed.
+func titleLine(line string) string {
+	line = strings.Map(func(r rune) rune {
+		switch {
+		case r == '\t':
+			return ' '
+		case unicode.IsControl(r):
+			return -1
+		}
+		return r
+	}, line)
+	return strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
 }
 
 func featurePath(workspace, feature string) string {

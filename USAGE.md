@@ -336,20 +336,35 @@ go test ./...
 
 `span.yaml` is project policy only: the agent, the checks, the stage modes, the base, the
 environments, the manifest. It never names a run. Every run takes its identity from its
-own branch: `feat/SAL-4-saved-cards` is the feature `sal-4-saved-cards` (the part after
-`feat/`, `fix/` or `hotfix/`, lowercased; anything that is not a letter, digit, `.`, `-` or
-`_` becomes `-`; the run id when nothing is left). That feature names the run's document
-`odd/tasks/<feature>.md` and its commit scope `feat(<feature>): span <id>`. The pull
-request title is the story's first line (without `#`, at most 100 characters). Two runs on
-two branches therefore never write the same file or open two pull requests with one title,
-so they can run in parallel without conflicting. The feature is recorded in the run, so a
-resume keeps it; a run recorded before this reads it from its branch.
+own branch, one feature per branch name:
 
-Without `span.yaml` a run still starts, resumes, and wakes: it gets the policy
+| Branch | Feature |
+| --- | --- |
+| `feat/sal-4-cards` | `sal-4-cards` |
+| `fix/sal-4-cards` | `fix-sal-4-cards` |
+| `hotfix/sal-4-cards` | `hotfix-sal-4-cards` |
+| `feat/SAL-4-cards`, `feat/x/y`, `feat/fix-a` | lowercased or slugged, plus `-` and six hex digits of the branch name's SHA-1 |
+| `dev`, `main`, a detached `HEAD` | the run id |
+
+A name that had to change (case, `/`, a character other than a letter, digit, `.`, `-` or
+`_`, more than 80 characters, or a `feat/` suffix that reads as another kind) carries the
+hash, so two branches never share a feature. A Windows device name (`con`, `nul`, `com1`)
+gets a `-` after it. A branch that is not `feat/`, `fix/` or `hotfix/` is shared by every
+run started on it, so the run id names the run instead. That feature names the run's
+document `odd/tasks/<feature>.md` and its commit scope `feat(<feature>): span <id>`. The
+pull request title is the story's first line (without `#` or control characters, at most
+100 characters); a first line that is only a story key (`SAL-4`) is joined with the next
+one. Two runs on two branches therefore never write the same file, so they can run in
+parallel without conflicting. The feature is recorded in the run, so a resume keeps it; a
+run recorded before this reads it from its branch.
+
+Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree when the
+checkout is busy: it gets the policy
 `./span quickstart` would write (`agent: any`, `rules: harness`, open `auto`, merge
 `hold`, the detected check such as `go test ./...` for a `go.mod`, the harness skills).
 Nothing is written to disk for that. A `span.yaml` that exists but does not load is still
-an error. `feature:` in an older file is read and ignored; you can delete it.
+an error, and so is a `--policy <path>` that does not exist: only the implicit
+`<workspace>/span.yaml` may be missing. `feature:` in an older file is read and ignored; you can delete it.
 
 ```yaml
 agent: any
@@ -686,7 +701,8 @@ name is accepted too, so an older `agent: cursor-agent` keeps working.
 Choose it on the page: the desk has an **Agent** picker under the folder. It lists all
 four with the reason each one cannot run, and saving rewrites the one `agent:` line in
 `span.yaml` without touching a comment. A folder without `span.yaml` gets one holding just
-that `agent:` line; the folder itself must exist.
+that `agent:` line, but only when the folder is a git repository or already has `.span/`;
+anything else is refused, so the picker never leaves a file in a home directory.
 
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
