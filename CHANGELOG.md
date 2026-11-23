@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: when `qa` reused the passing result of `prove` and the criteria were still unverified, the hold said only "go test ./... already passed on this commit ... it was not run again" and hid the real cause. It now keeps the gate's own reason, for example "3 of 3 criteria have no test declaration".
+
 - **Fixed**: with parallel runs on one repository, a run could be held with "the agent changed the repository structure ... packed-refs" just because git repacked refs or another run added a branch or worktree. The pin now compares the values of the branches nobody has checked out, so those are tolerated, while an agent moving a branch or editing `packed-refs` is still caught.
 
 - **Fixed**: the conflict phase could not fetch the base from a private origin on macOS, because it switched off the system git config that holds the keychain credential helper. Only the fetch keeps it now.
