@@ -38,14 +38,31 @@ func TestLoadRejectsUnknownMode(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsPathFeature(t *testing.T) {
+// feature: used to name every run of the project. Runs take their identity from their
+// branch now, so the line is ignored: an old file keeps loading, and a file without it is fine.
+func TestLoadIgnoresTheFeatureLine(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "span.yaml")
-	if err := os.WriteFile(path, []byte("feature: ../payments\n"), 0o644); err != nil {
+	for _, body := range []string{"feature: hermes\n", "feature: ../payments\n", "agent: any\n", ""} {
+		path := filepath.Join(dir, "span.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+	}
+}
+
+func TestLoadStillRejectsAFileThatIsNotYAML(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "span.yaml")
+	if err := os.WriteFile(path, []byte("agent: [any\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected invalid feature")
+		t.Fatal("expected a parse error")
+	}
+	if _, err := Parse([]byte("stages: [")); err == nil {
+		t.Fatal("Parse accepted broken YAML")
 	}
 }
 
@@ -142,5 +159,26 @@ func TestABaseThatGitWouldReadAsAnOptionOrACommitIsRefused(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "invalid base branch") {
 			t.Errorf("base %s: err = %v", bad, err)
 		}
+	}
+}
+
+func TestSetAgentCreatesAMissingFileWithOnlyThatLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "span.yaml")
+	if err := SetAgent(path, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || string(raw) != "agent: claude\n" {
+		t.Fatalf("span.yaml %q %v", raw, err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "span.yaml")
+	if err := SetAgent(missing, "gpt"); err == nil {
+		t.Fatal("an unknown agent was written")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("a refused agent created the file: %v", err)
 	}
 }

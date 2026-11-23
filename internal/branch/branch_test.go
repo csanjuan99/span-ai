@@ -250,3 +250,23 @@ func TestChooseKindAndBase(t *testing.T) {
 		t.Fatal("HEAD was accepted as a project base")
 	}
 }
+
+func TestFeatureOfIsTheBranchSuffix(t *testing.T) {
+	for name, want := range map[string]string{
+		"feat/SAL-4-cards":      "sal-4-cards",
+		"fix/refund.v2_now":     "refund.v2_now",
+		"hotfix/a/b":            "a-b",
+		"main":                  "main",
+		"feat/Añadir tarjeta":   "anadir-tarjeta",
+		"feat/..":               "",
+		"":                      "",
+		"  feat/SAL-9-refund  ": "sal-9-refund",
+	} {
+		if got := FeatureOf(name); got != want {
+			t.Fatalf("FeatureOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+	if !ValidFeature("sal-4.cards_x") || ValidFeature("../x") || ValidFeature("") || ValidFeature("..") {
+		t.Fatal("ValidFeature does not follow the feature rule")
+	}
+}

@@ -105,13 +105,26 @@ func TestChoosingAnUnknownAgentIsRefused(t *testing.T) {
 	}
 }
 
-func TestChoosingAnAgentWithoutAPolicyExplainsTheOrder(t *testing.T) {
-	rec := postAgent(t, t.TempDir(), "pi")
-	if rec.Code < 400 {
-		t.Fatalf("status %d, want a refusal", rec.Code)
+// span.yaml is optional, so choosing an agent in a project without one creates it with
+// that one line. A project path that is not a folder is refused, so nothing is written next
+// to the server.
+func TestChoosingAnAgentWithoutAPolicyCreatesIt(t *testing.T) {
+	project := t.TempDir()
+	rec := postAgent(t, project, "pi")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "quickstart") || !strings.Contains(rec.Body.String(), "span.yaml") {
-		t.Fatalf("body = %s", rec.Body.String())
+	raw, err := os.ReadFile(filepath.Join(project, "span.yaml"))
+	if err != nil || string(raw) != "agent: pi\n" {
+		t.Fatalf("span.yaml %q %v", raw, err)
+	}
+	for _, bad := range []string{"", filepath.Join(project, "missing")} {
+		if rec := postAgent(t, bad, "pi"); rec.Code < 400 {
+			t.Fatalf("project %q: status %d, want a refusal", bad, rec.Code)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(project, "missing")); !os.IsNotExist(err) {
+		t.Fatalf("a missing project was created: %v", err)
 	}
 }
 

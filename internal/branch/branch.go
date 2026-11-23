@@ -106,6 +106,40 @@ func Derive(story, issue, kind, base string) (Plan, error) {
 	return Plan{Kind: kind, Base: base, Name: name, Feature: strings.ToLower(suffix)}, nil
 }
 
+// FeatureOf is the run identity a branch gives: the part after "<kind>/" (the whole name
+// when there is no slash), lowercased. A suffix that breaks the feature rule is slugged, so
+// "a/b" becomes "a-b". It is "" when nothing usable is left; the caller picks a fallback.
+func FeatureOf(name string) string {
+	name = strings.TrimSpace(name)
+	if _, suffix, ok := strings.Cut(name, "/"); ok {
+		name = suffix
+	}
+	name = strings.ToLower(name)
+	if ValidFeature(name) {
+		return name
+	}
+	return slug(name)
+}
+
+// ValidFeature reports whether name may name a feature document: letters, digits, dots,
+// dashes, or underscores, and never "." or "..".
+func ValidFeature(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Valid reports whether name is one of the three prefixes on a base that is a valid branch
 // name other than name itself.
 func Valid(name, base string) bool {

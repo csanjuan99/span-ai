@@ -196,6 +196,10 @@ type Cursor struct {
 	Project         string      `json:"project,omitempty"`
 	Weight          string      `json:"weight,omitempty"`
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
+	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
+	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
+	// project never write the same document.
+	Feature string `json:"feature,omitempty"`
 }
 
 // AgentBlock is an agent CLI that cannot work until a person acts. It is a hold,
@@ -291,6 +295,7 @@ func Open(opt Options) (string, error) {
 		ID: id, Iteration: 1, Stage: intake, StartedAt: now,
 		Branch: opt.Branch, Base: opt.Base, Workspace: opt.Workspace,
 		Issue: strings.TrimSpace(opt.Issue), Worktree: opt.Worktree, Project: opt.Project,
+		Feature: branch.FeatureOf(opt.Branch),
 	}
 	r := &runner{opt: opt, cur: cur}
 	if err := os.MkdirAll(r.spanDir(), 0o755); err != nil {
@@ -464,6 +469,11 @@ func load(opt Options, id string) (*runner, error) {
 	if cur.Issue == "" {
 		cur.Issue = IssueKey(opt.Brief)
 	}
+	// A cursor written before runs carried their feature, or one edited into a path, takes
+	// it from its branch. A run with no recorded branch settles it when it runs.
+	if !branch.ValidFeature(cur.Feature) {
+		cur.Feature = branch.FeatureOf(cur.Branch)
+	}
 	return &runner{opt: opt, cur: cur}, nil
 }
 
@@ -586,6 +596,9 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 	err = r.startBase(ctx)
 	if err == nil {
 		err = r.ensureBranch(ctx)
+	}
+	if err == nil {
+		err = r.settleFeature(ctx)
 	}
 	if err != nil {
 		_, reason, recErr := r.record(r.cur.Stage, statement.Hold, err.Error(), nil)
@@ -762,7 +775,7 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	if err := r.opt.Agents.Build(ctx, target, r.opt.Workspace, prompt.Build(in)); err != nil {
 		return r.agentBlocked(build, err)
 	}
-	path := featurePath(r.opt.Workspace, r.opt.Policy.Feature)
+	path := featurePath(r.opt.Workspace, r.cur.Feature)
 	if err := feature.Valid(path); err != nil {
 		return r.record(build, statement.Stop, err.Error(), func(s *statement.Statement) {
 			s.FeatureDoc = path
@@ -1096,7 +1109,7 @@ func (r *runner) doOpen(ctx context.Context) (string, string, error) {
 		if err := r.opt.Source.Push(ctx); err != nil {
 			return r.record(open, statement.Hold, err.Error(), nil)
 		}
-		url, err = r.opt.Review.Open(ctx, r.cur.ID, branch, base, r.opt.Policy.Feature, r.opt.Brief)
+		url, err = r.opt.Review.Open(ctx, r.cur.ID, branch, base, storyTitle(r.opt.Brief, r.cur.Feature), r.opt.Brief)
 		if err != nil {
 			return r.record(open, statement.Hold, "open outcome unknown: "+err.Error(), nil)
 		}
@@ -1204,7 +1217,7 @@ func (r *runner) commit(ctx context.Context) (string, error) {
 	if !dirty {
 		return r.opt.Source.Head(ctx)
 	}
-	return r.opt.Source.Commit(ctx, fmt.Sprintf("feat(%s): span %s", r.opt.Policy.Feature, r.cur.ID))
+	return r.opt.Source.Commit(ctx, fmt.Sprintf("feat(%s): span %s", r.cur.Feature, r.cur.ID))
 }
 
 func (r *runner) record(stage, verdict, reason string, fill func(*statement.Statement)) (string, string, error) {
@@ -1418,7 +1431,7 @@ func (r *runner) promptInput(stage, failure string) prompt.Input {
 		r.shown[stage] = sigs
 	}
 	return prompt.Input{
-		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.opt.Policy.Feature),
+		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
 		Handoffs: handoff.Paths(r.cur.ID, names),
 		Failure:  failure, Manifest: manifest,
@@ -1597,6 +1610,47 @@ func newID(now time.Time) (string, error) {
 		return "", err
 	}
 	return now.UTC().Format("2006-01-02-1504") + "-" + hex.EncodeToString(b[:]), nil
+}
+
+// settleFeature gives a run that has no feature yet the one its branch names: the recorded
+// branch, else the checked-out one. A branch that names nothing usable falls back to the run
+// id, which is unique too. It is saved, so the run keeps it on every resume.
+func (r *runner) settleFeature(ctx context.Context) error {
+	if branch.ValidFeature(r.cur.Feature) {
+		return nil
+	}
+	name := r.cur.Branch
+	if name == "" {
+		current, err := r.opt.Source.Branch(ctx)
+		if err != nil {
+			return fmt.Errorf("the run's branch could not be read to name its feature document: %w", err)
+		}
+		name = current
+	}
+	r.cur.Feature = branch.FeatureOf(name)
+	if r.cur.Feature == "" {
+		r.cur.Feature = r.cur.ID
+	}
+	return r.save()
+}
+
+// maxTitle is how long a pull request title may be.
+const maxTitle = 100
+
+// storyTitle is the pull request title: the first non-empty line of the brief without its
+// Markdown heading marks, cut to maxTitle runes. A brief with no such line uses fallback.
+func storyTitle(brief, fallback string) string {
+	for _, line := range strings.Split(brief, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))
+		if line == "" {
+			continue
+		}
+		if runes := []rune(line); len(runes) > maxTitle {
+			line = strings.TrimSpace(string(runes[:maxTitle]))
+		}
+		return line
+	}
+	return fallback
 }
 
 func featurePath(workspace, feature string) string {

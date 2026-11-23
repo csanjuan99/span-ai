@@ -315,7 +315,7 @@ The agent is a CLI already on `PATH` with Gentle AI detectable:
 
 With With `agent: any`, the order is cursor, claude, codex, pi. The first enabled CLI writes. If a second one is enabled, inspect runs on that other CLI. If none qualify, frame holds and no product code is written. The CLI is headless: `cursor-agent` gets `--trust --force`, `claude` gets `--dangerously-skip-permissions`, and `codex exec` gets `--sandbox workspace-write --approve-for-me`. A prompt for permission would have no one to answer it.
 
-Build requires Organic Driven Development. `odd/tasks/<feature>.md` must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
+Build requires Organic Driven Development. `odd/tasks/<feature>.md` (the run's feature, from its branch; see [What span.yaml is for](#what-spanyaml-is-for)) must contain a title (`# ...`), `## Specs`, `## Tasks`, and `## Log`. If that document is missing, the span stops and does not open a change.
 
 ## Basic use
 
@@ -330,10 +330,28 @@ go test ./...
 
 ### Project policy
 
-`span.yaml` lives at the workspace root unless you pass `--policy`. `feature` allows letters, digits, `.`, `-`, and `_`. An empty mode means `auto`.
+`span.yaml` lives at the workspace root unless you pass `--policy`. It is optional. An empty mode means `auto`.
+
+#### What span.yaml is for
+
+`span.yaml` is project policy only: the agent, the checks, the stage modes, the base, the
+environments, the manifest. It never names a run. Every run takes its identity from its
+own branch: `feat/SAL-4-saved-cards` is the feature `sal-4-saved-cards` (the part after
+`feat/`, `fix/` or `hotfix/`, lowercased; anything that is not a letter, digit, `.`, `-` or
+`_` becomes `-`; the run id when nothing is left). That feature names the run's document
+`odd/tasks/<feature>.md` and its commit scope `feat(<feature>): span <id>`. The pull
+request title is the story's first line (without `#`, at most 100 characters). Two runs on
+two branches therefore never write the same file or open two pull requests with one title,
+so they can run in parallel without conflicting. The feature is recorded in the run, so a
+resume keeps it; a run recorded before this reads it from its branch.
+
+Without `span.yaml` a run still starts, resumes, and wakes: it gets the policy
+`./span quickstart` would write (`agent: any`, `rules: harness`, open `auto`, merge
+`hold`, the detected check such as `go test ./...` for a `go.mod`, the harness skills).
+Nothing is written to disk for that. A `span.yaml` that exists but does not load is still
+an error. `feature:` in an older file is read and ignored; you can delete it.
 
 ```yaml
-feature: payments
 agent: any
 stages:
   open: auto
@@ -432,7 +450,7 @@ QA does not run the fast command a second time. When prove already ran that exac
 
 A browser repo also tells the agent to test user-visible behavior with `getByRole` and web-first `expect`, and to record a trace on the first retry. `@playwright/mcp --caps=testing` is named as an authoring aid. The gate is the command, not an MCP session.
 
-Span commits. The agent does not. The message is `feat(<feature>): span <id>`, which names the session. The author and committer are **whoever that checkout is configured with**: Span sets no identity, adds no co-author trailer, and never overwrites your `user.name` or `user.email`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
+Span commits. The agent does not. The message is `feat(<feature>): span <id>`, which names the session; `<feature>` comes from the run's branch. The author and committer are **whoever that checkout is configured with**: Span sets no identity, adds no co-author trailer, and never overwrites your `user.name` or `user.email`. `git add` excludes `.span`, so run state stays out of the commit. The default branch is not recreated. The agent is not allowed to push, merge, or deploy.
 
 ### Statements
 
@@ -667,8 +685,8 @@ name is accepted too, so an older `agent: cursor-agent` keeps working.
 
 Choose it on the page: the desk has an **Agent** picker under the folder. It lists all
 four with the reason each one cannot run, and saving rewrites the one `agent:` line in
-`span.yaml` without touching a comment. The picker needs the file to exist; a folder
-without one is told to run `./span quickstart` once.
+`span.yaml` without touching a comment. A folder without `span.yaml` gets one holding just
+that `agent:` line; the folder itself must exist.
 
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
@@ -985,7 +1003,7 @@ The binary and the agents live on the same machine. `serve` reads and writes fil
 
 ## Run checklist
 
-- [ ] `span.yaml` has a valid `feature`, prove commands, and environments.
+- [ ] `span.yaml`, when present, has prove commands and environments. Without it the quickstart defaults apply.
 - [ ] The workspace is a git repo with `origin` when open is `auto`.
 - [ ] When the story comes from Jira, that same folder has its own `.span/jira.json`.
 - [ ] The chosen CLI is on `PATH` and Gentle AI is detected in its file.

@@ -3,6 +3,7 @@
 package setup
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -72,13 +73,7 @@ func Configure(req Request) (Result, error) {
 	if _, err := os.Stat(out.PolicyPath); err == nil && !req.Force {
 		return out, nil
 	}
-	feature := "app"
-	if plan.Feature != "" {
-		feature = plan.Feature
-	}
-	out.Feature = feature
-	skills, _ := harness.Skills(root)
-	body := render(feature, root, checks, skills)
+	body := Defaults(root, checks)
 	if err := os.WriteFile(out.PolicyPath, []byte(body), 0o644); err != nil {
 		return Result{}, err
 	}
@@ -87,6 +82,29 @@ func Configure(req Request) (Result, error) {
 	}
 	out.Wrote = true
 	return out, nil
+}
+
+// LoadOrDefault reads the policy at path. A missing file is not an error: span.yaml is
+// optional, and the run gets the same policy quickstart would write for workspace. Nothing is
+// written. A file that exists but does not load is still an error.
+func LoadOrDefault(path, workspace string) (policy.File, error) {
+	file, err := policy.Load(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return file, err
+	}
+	return policy.Parse([]byte(Defaults(harness.Root(), Detect(workspace))))
+}
+
+// Defaults is the span.yaml quickstart writes: any agent, harness rules, open auto, merge
+// hold, the detected checks, and every harness skill for build and inspect. It names no
+// feature: a run's identity comes from its branch.
+func Defaults(root string, checks []string) string {
+	skills, err := harness.Skills(root)
+	if err != nil {
+		// Without a readable catalog the policy simply names no skills, as before.
+		skills = nil
+	}
+	return render(root, checks, skills)
 }
 
 // Detect returns one argv check from the files at the workspace root.
@@ -110,9 +128,9 @@ func exists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func render(feature, root string, checks []string, skills []harness.Skill) string {
+func render(root string, checks []string, skills []harness.Skill) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "feature: %s\nagent: any\nrules: harness\n", feature)
+	b.WriteString("agent: any\nrules: harness\n")
 	if root != "" {
 		fmt.Fprintf(&b, "harness: %q\n", root)
 	}

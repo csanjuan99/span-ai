@@ -1,6 +1,7 @@
 # Hand-written policy. ./span quickstart writes span.yaml only when that file is missing.
 # The Jira token is not in this file. Each folder keeps its own .span/jira.json.
-feature: payments
+# span.yaml is optional and is project policy only. A run's feature document, pull request
+# title, and commit scope come from its branch; an old feature: line is read and ignored.
 # The branch every feat and fix starts from and opens its pull request into, unless the run
 # names one (--base, or the desk's Base branch field). A hotfix keeps master, and this line
 # never decides the kind. It must exist on origin. Empty: dev for feat/ and fix/.

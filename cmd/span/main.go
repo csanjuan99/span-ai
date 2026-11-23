@@ -695,7 +695,8 @@ func options(workspace, spans, policyPath, project string) (engine.Options, erro
 	if policyPath == "" {
 		policyPath = filepath.Join(workspace, "span.yaml")
 	}
-	file, err := policy.Load(policyPath)
+	// span.yaml is optional: without one the run gets the policy quickstart would write.
+	file, err := setup.LoadOrDefault(policyPath, workspace)
 	if err != nil {
 		return engine.Options{}, err
 	}

@@ -343,11 +343,13 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			return
 		}
 		project := r.PostForm.Get("project")
-		path := filepath.Join(project, policy.Name)
-		if _, err := os.Stat(path); err != nil {
-			writeErr(w, errors.New("span.yaml is not there yet. Start one run, or run ./span quickstart, then choose the agent."))
+		// span.yaml is optional, so choosing an agent may create it, but only inside a
+		// project folder that exists: an empty path would write next to the server.
+		if info, err := os.Stat(project); project == "" || err != nil || !info.IsDir() {
+			writeErr(w, fmt.Errorf("project %q is not a folder", project))
 			return
 		}
+		path := filepath.Join(project, policy.Name)
 		if err := policy.SetAgent(path, r.PostForm.Get("agent")); err != nil {
 			writeErr(w, err)
 			return
