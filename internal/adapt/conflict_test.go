@@ -1481,10 +1481,32 @@ func TestRestoreRemovesAlternatesTheAgentAdded(t *testing.T) {
 }
 
 func TestRestoreFailsClosedOnAnEditedPackedRefs(t *testing.T) {
-	script := `echo "$(git rev-parse HEAD) refs/heads/evil" >> .git/packed-refs`
+	// Packing moves refs into the file without changing them. Retargeting a branch nobody has
+	// checked out is what the agent must not do.
+	script := `git pack-refs --all && sed -i.bak "s|^[0-9a-f]* refs/heads/dev\$|$(git rev-parse feat/x) refs/heads/dev|" .git/packed-refs && rm .git/packed-refs.bak`
 	_, restoreErr, abortErr, _, _ := tamperCase(t, script, nil)
-	assertTampered(t, restoreErr, "packed-refs")
-	assertTampered(t, abortErr, "packed-refs")
+	assertTampered(t, restoreErr, "refs/heads/dev")
+	assertTampered(t, abortErr, "refs/heads/dev")
+}
+
+func TestRestoreFailsClosedWhenABranchNobodyHasCheckedOutMoves(t *testing.T) {
+	script := `git update-ref refs/heads/dev "$(git rev-parse feat/x)"`
+	_, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	assertTampered(t, restoreErr, "dev")
+}
+
+// Git packs refs by itself after a fetch, and other runs of the same repository make
+// branches and worktrees of their own. None of that is the agent touching what this run
+// depends on, so none of it may stop the run.
+func TestRestoreToleratesGitPackingRefsOnItsOwn(t *testing.T) {
+	_, restoreErr, _, _, _ := tamperCase(t, `git pack-refs --all`, nil)
+	must(t, restoreErr)
+}
+
+func TestRestoreToleratesAnotherRunsBranchAndWorktree(t *testing.T) {
+	script := `git branch other-run && git worktree add -q "$OUT/wt" -b other-run-2 && git pack-refs --all`
+	_, restoreErr, _, _, _ := tamperCase(t, script, nil)
+	must(t, restoreErr)
 }
 
 func TestAPinnedPushStillReachesABareOrigin(t *testing.T) {

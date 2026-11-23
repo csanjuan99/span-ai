@@ -158,14 +158,22 @@ type RepoPin struct {
 	DotGit  uint32 `json:"dotGit"`
 	GitFile string `json:"gitFile,omitempty"`
 	// RealGitDir and RealCommonDir are the directories with every symlink resolved.
-	RealGitDir    string   `json:"realGitDir"`
-	RealCommonDir string   `json:"realCommonDir"`
-	Commondir     *string  `json:"commondir,omitempty"`
-	Gitdir        *string  `json:"gitdirFile,omitempty"`
-	Alternates    *string  `json:"alternates,omitempty"`
-	PackedRefs    string   `json:"packedRefs,omitempty"`
-	Modules       []string `json:"modules,omitempty"`
-	Worktrees     []string `json:"worktrees,omitempty"`
+	RealGitDir    string  `json:"realGitDir"`
+	RealCommonDir string  `json:"realCommonDir"`
+	Commondir     *string `json:"commondir,omitempty"`
+	Gitdir        *string `json:"gitdirFile,omitempty"`
+	Alternates    *string `json:"alternates,omitempty"`
+	// PackedRefs is the digest of the whole packed-refs file. Only a pin taken before Heads
+	// existed carries it; such a pin is still checked by it.
+	PackedRefs string `json:"packedRefs,omitempty"`
+	// Heads is the value of every local branch that no worktree had checked out when the
+	// pin was taken. The agent has no reason to move any of them, and the run reads them.
+	// Branches other runs work on are checked out in their own worktrees, so they are not
+	// here, and neither is a branch made after the pin. An empty map is a new pin with no
+	// quiet branch; a missing one is a pin from before Heads existed, so it is never omitted.
+	Heads     map[string]string `json:"heads"`
+	Modules   []string          `json:"modules,omitempty"`
+	Worktrees []string          `json:"worktrees,omitempty"`
 }
 
 // TamperedError is a repository whose structure changed in a way span will not put back by

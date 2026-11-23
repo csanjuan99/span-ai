@@ -1378,7 +1378,97 @@ func (g Git) PinRepo(ctx context.Context) (engine.RepoPin, error) {
 	if err != nil {
 		return engine.RepoPin{}, err
 	}
+	// git repacks refs on its own, and other runs of this repository add and move branches
+	// and worktrees, so the bytes of packed-refs and the list of worktrees are not what this
+	// run depends on. The values of the branches nobody has checked out are.
+	shape.PackedRefs = ""
+	if shape.Heads, err = quietHeads(shape); err != nil {
+		return engine.RepoPin{}, err
+	}
 	return shape, nil
+}
+
+// refValue is a ref's value as the pin reads it: the hex of a loose file, or the packed
+// line. A loose file wins over the packed one, as in git.
+func headValues(commonDir string) (map[string]string, error) {
+	values := map[string]string{}
+	if raw, err := os.ReadFile(filepath.Join(commonDir, "packed-refs")); err == nil {
+		for _, line := range strings.Split(string(raw), "\n") {
+			sum, name, ok := strings.Cut(strings.TrimSpace(line), " ")
+			if !ok || strings.HasPrefix(sum, "#") || strings.HasPrefix(sum, "^") || !strings.HasPrefix(name, "refs/heads/") {
+				continue
+			}
+			values[name] = sum
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	root := filepath.Join(commonDir, "refs", "heads")
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		if entry.IsDir() || !entry.Type().IsRegular() {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(commonDir, path)
+		if err != nil {
+			return err
+		}
+		values[filepath.ToSlash(rel)] = strings.TrimSpace(string(raw))
+		return nil
+	})
+	return values, err
+}
+
+// checkedOut is every branch some worktree of the repository has checked out: the main
+// one and each linked one.
+func checkedOut(pin engine.RepoPin) (map[string]bool, error) {
+	heads := []string{filepath.Join(pin.CommonDir, "HEAD"), filepath.Join(pin.GitDir, "HEAD")}
+	linked, err := os.ReadDir(filepath.Join(pin.CommonDir, "worktrees"))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	for _, entry := range linked {
+		heads = append(heads, filepath.Join(pin.CommonDir, "worktrees", entry.Name(), "HEAD"))
+	}
+	out := map[string]bool{}
+	for _, path := range heads {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if name, ok := strings.CutPrefix(strings.TrimSpace(string(raw)), "ref: "); ok {
+			out[name] = true
+		}
+	}
+	return out, nil
+}
+
+// quietHeads is the value of every local branch no worktree has checked out.
+func quietHeads(pin engine.RepoPin) (map[string]string, error) {
+	values, err := headValues(pin.CommonDir)
+	if err != nil {
+		return nil, err
+	}
+	busy, err := checkedOut(pin)
+	if err != nil {
+		return nil, err
+	}
+	for name := range busy {
+		delete(values, name)
+	}
+	if values == nil {
+		values = map[string]string{}
+	}
+	return values, nil
 }
 
 // readShape fills the parts of a pin that are read with plain file operations.
@@ -1498,12 +1588,44 @@ func (g Git) Verify(pin engine.RepoPin) error {
 		return &engine.TamperedError{Path: filepath.Join(pin.GitDir, "gitdir")}
 	case !same(now.Alternates, pin.Alternates):
 		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "objects", "info", "alternates")}
-	case now.PackedRefs != pin.PackedRefs:
-		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "packed-refs")}
 	case strings.Join(now.Modules, "\n") != strings.Join(pin.Modules, "\n"):
 		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "modules")}
-	case strings.Join(now.Worktrees, "\n") != strings.Join(pin.Worktrees, "\n"):
-		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "worktrees")}
+	}
+	if pin.Heads == nil {
+		// A pin from before Heads existed: the whole file and the whole list, as it was.
+		if now.PackedRefs != pin.PackedRefs {
+			return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "packed-refs")}
+		}
+		if strings.Join(now.Worktrees, "\n") != strings.Join(pin.Worktrees, "\n") {
+			return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "worktrees")}
+		}
+		return nil
+	}
+	return verifyHeads(pin, now)
+}
+
+// verifyHeads is the part of Verify that tolerates what other runs and git itself do to a
+// shared repository: this run's own linked worktree must still be there, and no branch that
+// was quiet at the pin may have moved or gone. Packing refs, new branches and other runs'
+// worktrees change none of that.
+func verifyHeads(pin, now engine.RepoPin) error {
+	if rel, err := filepath.Rel(filepath.Join(pin.CommonDir, "worktrees"), pin.GitDir); err == nil && !strings.HasPrefix(rel, "..") && !strings.Contains(rel, string(filepath.Separator)) {
+		found := false
+		for _, name := range now.Worktrees {
+			found = found || name == rel
+		}
+		if !found {
+			return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "worktrees")}
+		}
+	}
+	values, err := headValues(pin.CommonDir)
+	if err != nil {
+		return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, "packed-refs")}
+	}
+	for name, want := range pin.Heads {
+		if values[name] != want {
+			return &engine.TamperedError{Path: filepath.Join(pin.CommonDir, filepath.FromSlash(name))}
+		}
 	}
 	return nil
 }
