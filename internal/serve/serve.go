@@ -318,6 +318,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("POST /spans/{id}/approve", func(w http.ResponseWriter, r *http.Request) {
 		approveStage(wake, root, r.PathValue("id"), w, r)
 	})
+	conflictRoutes(mux, root, wake)
 	mux.HandleFunc("POST /spans/{id}/relaunch", func(w http.ResponseWriter, r *http.Request) {
 		relaunch(wake, hub, root, r.PathValue("id"), w, r)
 	})

@@ -68,6 +68,10 @@ type Modes struct {
 	Open    string `yaml:"open"`
 	Merge   string `yaml:"merge"`
 	Promote string `yaml:"promote"`
+	// Conflict decides what happens when the base cannot be merged cleanly into the branch.
+	// hold (the default) waits for a person to choose; auto applies the first option only
+	// when every group of the conflict is low risk.
+	Conflict string `yaml:"conflict"`
 }
 
 // Bands are the declared checks. They are argv words, not a shell line.
@@ -138,6 +142,9 @@ func (f File) Validate() error {
 			return fmt.Errorf("stage mode %q is not auto or hold", mode)
 		}
 	}
+	if mode := f.ConflictMode(); mode != "auto" && mode != "hold" {
+		return fmt.Errorf("stages.conflict %q is not auto or hold", mode)
+	}
 	if !ValidWeight(f.Run.Weight) {
 		return WeightError(f.Run.Weight)
 	}
@@ -164,6 +171,15 @@ func (f File) OpenMode() string { return orAuto(f.Stages.Open) }
 
 // MergeMode returns the merge stage mode.
 func (f File) MergeMode() string { return orAuto(f.Stages.Merge) }
+
+// ConflictMode returns how a merge conflict is resolved. Unlike the other stages it
+// defaults to hold: nothing is written to the branch until a person chooses.
+func (f File) ConflictMode() string {
+	if mode := strings.TrimSpace(f.Stages.Conflict); mode != "" {
+		return mode
+	}
+	return "hold"
+}
 
 // BlockStatus is the Jira status for a story that is missing information.
 func (f File) BlockStatus() string {

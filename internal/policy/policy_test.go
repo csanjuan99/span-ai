@@ -3,6 +3,7 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,5 +88,41 @@ func TestDiffScopeIsOnUnlessTurnedOff(t *testing.T) {
 		if got.DiffScopeOn() != want {
 			t.Fatalf("%q: diff scope on = %v, want %v", body, got.DiffScopeOn(), want)
 		}
+	}
+}
+
+func TestConflictModeDefaultsToHold(t *testing.T) {
+	for body, want := range map[string]string{
+		"feature: payments\n":                                 "hold",
+		"feature: payments\nstages:\n  conflict: auto\n":      "auto",
+		"feature: payments\nstages:\n  conflict: hold\n":      "hold",
+		"feature: payments\nstages:\n  merge: hold\n":         "hold",
+		"feature: payments\nstages:\n  conflict: \" auto\"\n": "auto",
+	} {
+		path := filepath.Join(t.TempDir(), "span.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := Load(path)
+		if err != nil {
+			t.Fatalf("%q: %v", body, err)
+		}
+		if got.ConflictMode() != want {
+			t.Fatalf("%q: conflict mode %q, want %q", body, got.ConflictMode(), want)
+		}
+		if got.MergeMode() == "" {
+			t.Fatalf("%q: merge mode empty", body)
+		}
+	}
+}
+
+func TestConflictModeRejectsUnknownValue(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "span.yaml")
+	if err := os.WriteFile(path, []byte("feature: payments\nstages:\n  conflict: sometimes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), "stages.conflict") {
+		t.Fatalf("err = %v", err)
 	}
 }

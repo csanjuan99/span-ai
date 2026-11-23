@@ -2,6 +2,7 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,6 +34,10 @@ func Rewind(root, id, stage string) error {
 	cur, err := readCursorFile(dir)
 	if err != nil {
 		return err
+	}
+	if cur.Conflict != nil {
+		// The checkout is in the middle of a merge; another stage would commit it half done.
+		return errors.New("this run is resolving a merge conflict; abort the conflict before restarting from a stage")
 	}
 	cur.Stage = stage
 	cur.Iteration++

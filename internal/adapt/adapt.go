@@ -326,6 +326,11 @@ func (h Host) Merge(ctx context.Context, url string) error {
 		return LocalReview{Dir: h.State}.Merge(ctx, url)
 	}
 	_, err := h.gh(ctx, "pr", "merge", url, "--merge")
+	if err != nil && IsConflictMessage(err.Error()) {
+		// A conflict is a known outcome: nothing was merged, so the run can resolve it
+		// instead of holding on an unknown one.
+		return fmt.Errorf("%w: %s", ErrConflict, err.Error())
+	}
 	return err
 }
 
@@ -466,4 +471,18 @@ func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (e
 		return engine.InspectDoc{}, err
 	}
 	return doc, nil
+}
+
+// Propose asks the agent for conflict options. Its stdout is not copied to the run
+// transcript: the reply carries file contents, which belong in the plan, not the log.
+func (c CLIAgents) Propose(ctx context.Context, name, workspace, text string) (engine.ConflictReply, error) {
+	out, err := agent.RunWriter(ctx, name, workspace, text, nil)
+	if err != nil {
+		return engine.ConflictReply{}, err
+	}
+	var reply engine.ConflictReply
+	if err := agent.ParseJSON(out, &reply); err != nil {
+		return engine.ConflictReply{}, err
+	}
+	return reply, nil
 }

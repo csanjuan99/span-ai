@@ -180,6 +180,8 @@ type Cursor struct {
 	Project         string      `json:"project,omitempty"`
 	Weight          string      `json:"weight,omitempty"`
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
+	// Conflict is a merge of the base into the branch waiting on a person or in progress.
+	Conflict *Conflict `json:"conflict,omitempty"`
 }
 
 // AgentBlock is an agent CLI that cannot work until a person acts. It is a hold,
@@ -226,6 +228,7 @@ type Event struct {
 	Lines      []string             `json:"lines,omitempty"`
 	Transcript []string             `json:"transcript,omitempty"`
 	Span       *Snapshot            `json:"span,omitempty"`
+	Conflict   *Conflict            `json:"conflict,omitempty"`
 }
 
 // Snapshot is the durable reading of one run.
@@ -623,6 +626,13 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 		case "rebuild":
 			r.cur.Stage = build
 			r.cur.Reason = reason
+		case "reprove":
+			// The merge changed the head. A new iteration keeps the old statements as history
+			// and proves the bytes that will be merged.
+			r.cur.Iteration++
+			r.cur.Stage = proveSt
+			r.cur.InspectBlocks = 0
+			r.cur.Reason = reason
 		default:
 			return Result{}, fmt.Errorf("unknown verdict %s", verdict)
 		}
@@ -637,7 +647,7 @@ func (r *runner) loop(ctx context.Context) (Result, error) {
 }
 
 func (r *runner) finish(verdict string) Result {
-	if verdict == "iterate" || verdict == "rebuild" {
+	if verdict == "iterate" || verdict == "rebuild" || verdict == "reprove" {
 		verdict = statement.Hold
 	}
 	return Result{ID: r.cur.ID, Stage: r.cur.Stage, Verdict: verdict, Reason: r.cur.Reason, ChangeURL: r.cur.ChangeURL}
@@ -1067,6 +1077,12 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if r.cur.ChangeURL == "" {
 		return r.record(merge, statement.Hold, "no change url", nil)
 	}
+	if r.cur.Conflict != nil {
+		return r.continueConflict(ctx)
+	}
+	if p := r.cur.Pending; p != nil && p.Kind == pushKind {
+		return r.pushAndReprove(ctx, p.SHA, "pushed the merge commit")
+	}
 	if r.gated(r.opt.Policy.MergeMode(), merge, "") {
 		return r.record(merge, statement.Hold, "merge is hold", nil)
 	}
@@ -1079,7 +1095,17 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 		return r.record(merge, statement.Hold, "merge lookup failed: "+err.Error(), nil)
 	}
 	if !merged {
+		// The base is merged into the branch first, so a conflict is found and resolved here
+		// instead of being a refusal from the host.
+		if verdict, reason, handled, err := r.integrate(ctx, nil); err != nil || handled {
+			return verdict, reason, err
+		}
 		if err := r.opt.Review.Merge(ctx, r.cur.ChangeURL); err != nil {
+			if errors.Is(err, ErrConflict) {
+				// The base moved after the check above. Nothing was merged, so this is known.
+				verdict, reason, _, err := r.integrate(ctx, err)
+				return verdict, reason, err
+			}
 			return r.record(merge, statement.Hold, "merge outcome unknown: "+err.Error(), nil)
 		}
 	}
