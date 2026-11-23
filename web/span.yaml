@@ -1,0 +1,31 @@
+feature: vamos-a-realizar-un-experimento-y-es-mejorar-la
+agent: any
+rules: harness
+harness: "/Volumes/External/dev/span/harness"
+stages:
+  open: auto
+  merge: hold
+prove:
+  fast:
+    - npm test
+manifest:
+  build:
+    skills:
+      - api-first
+      - bounded-contexts
+      - change-impact
+      - clean-code
+      - code-quality
+      - cost-sentinel
+      - software-design-patterns
+      - solid-principles
+  inspect:
+    skills:
+      - api-first
+      - bounded-contexts
+      - change-impact
+      - clean-code
+      - code-quality
+      - cost-sentinel
+      - software-design-patterns
+      - solid-principles
