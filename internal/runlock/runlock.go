@@ -19,6 +19,8 @@ const (
 	Run Scope = "run"
 	// Workspace protects one checkout: one run edits it at a time.
 	Workspace Scope = "workspace"
+	// Lessons protects the project's lesson book while one run reads it and writes it back.
+	Lessons Scope = "lessons"
 	// Journal protects one run's event journal while a line is appended to it.
 	Journal Scope = "journal"
 )
