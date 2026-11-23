@@ -81,6 +81,12 @@ type Review interface {
 	Merge(ctx context.Context, url string) error
 }
 
+// baseReporter is a Review that can tell which branch a change targets. A review without it
+// is trusted: the merge stage cannot compare what it cannot read.
+type baseReporter interface {
+	ChangeBase(ctx context.Context, url string) (string, error)
+}
+
 // baseFinder is a Source that can tell whether a base branch exists. adapt.Git is one; a
 // source without it is trusted to have the base.
 type baseFinder interface {
@@ -1156,6 +1162,10 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(merge, statement.Hold, "merge lookup failed: "+err.Error(), nil)
 	}
+	if reason := r.otherBase(ctx, merged); reason != "" && !r.approved(merge, "") {
+		r.cur.Pending = nil
+		return r.record(merge, statement.Hold, reason, nil)
+	}
 	note := ""
 	if !merged {
 		// A conflict with the base is found here, without touching the checkout, instead of
@@ -1198,6 +1208,26 @@ func (r *runner) doMerge(ctx context.Context) (string, string, error) {
 	return r.record(merge, statement.Advance, reason, func(s *statement.Statement) {
 		s.ChangeURL = r.cur.ChangeURL
 	})
+}
+
+// otherBase is the hold reason when the change targets a branch other than this run's base,
+// or "" when it matches or the host cannot tell. A merged change cannot be retargeted, so
+// the person is asked to look at the branch it landed on and approve the stage to go on.
+func (r *runner) otherBase(ctx context.Context, merged bool) string {
+	reporter, ok := r.opt.Review.(baseReporter)
+	expected := r.runBase()
+	if !ok || strings.TrimSpace(expected) == "" {
+		return ""
+	}
+	got, err := reporter.ChangeBase(ctx, r.cur.ChangeURL)
+	got = strings.TrimSpace(got)
+	if err != nil || got == "" || got == expected {
+		return ""
+	}
+	if merged {
+		return fmt.Sprintf("the change %s was merged into %s, not into this run's base %s. Check %s for changes it should not have, then approve this stage to close the run", strings.TrimSpace(r.cur.ChangeURL), got, expected, got)
+	}
+	return fmt.Sprintf("the change %s targets %s but this run's base is %s. Retarget it (gh pr edit %s --base %s), or approve this stage to merge it into %s", strings.TrimSpace(r.cur.ChangeURL), got, expected, prRef(r.cur.ChangeURL), expected, got)
 }
 
 func (r *runner) doPromote(ctx context.Context) (string, string, error) {

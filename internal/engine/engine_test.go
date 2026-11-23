@@ -156,6 +156,14 @@ func (r *fakeReview) Open(_ context.Context, _, _, base, title, _ string) (strin
 	return r.url, nil
 }
 func (r *fakeReview) Merged(context.Context, string) (bool, error) { return r.merged, nil }
+func (r *fakeReview) ChangeBase(_ context.Context, url string) (string, error) {
+	for _, change := range r.extra {
+		if change.URL == url {
+			return change.Base, nil
+		}
+	}
+	return r.base, nil
+}
 func (r *fakeReview) Merge(context.Context, string) error {
 	r.merges++
 	r.merged = true

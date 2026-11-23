@@ -387,6 +387,22 @@ func (h Host) Merged(ctx context.Context, url string) (bool, error) {
 	return strings.TrimSpace(out) == "MERGED", nil
 }
 
+// ChangeBase is the branch the pull request at url targets. A local review has none.
+func (h Host) ChangeBase(ctx context.Context, url string) (string, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return "", nil
+	}
+	clean, err := changeURL(url)
+	if err != nil {
+		return "", err
+	}
+	out, err := h.gh(ctx, "pr", "view", "--json", "baseRefName", "--jq", ".baseRefName", "--", clean)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // Merge merges the pull request at url.
 func (h Host) Merge(ctx context.Context, url string) error {
 	if _, err := exec.LookPath("gh"); err != nil {
