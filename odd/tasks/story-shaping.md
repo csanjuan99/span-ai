@@ -187,3 +187,11 @@ files outside the repo are not compared (documented in USAGE); another session s
 non-ignored `.span/` during a turn can read as a change; a board id from another project is
 accepted; if Jira creates the issue and saving the key fails, the error carries no key; locks are
 per process. Pre-existing flake: internal/worktree TestManyRunsCanCreateTheirTreesAtTheSameTime.
+
+L12. RDD: assess over 3d7d1f1..HEAD with item 2 escalated gave high / review_due. The user
+granted the review (lenses risk, resilience, reliability), but START stopped with
+`lens_context_budget_exceeded` (47 files, 6104 lines): no authority was created. The review
+needs smaller candidates. Plan: at publish time, slice the branch into chained PRs (strategy
+`ask-on-risk` asks for the chain strategy) with the shape package and its guard fix as their
+own slice, and review each slice. Per-commit assessment was not run after each work unit; it
+should have been, and that is why the open slice became the whole branch.
