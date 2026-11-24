@@ -3,7 +3,6 @@ package jira
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +21,7 @@ func TestIssueBuildsTheBriefAndKeepsTheTokenOutOfTheRepo(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
+		reply(t, w, `{
 			"key":"AET-1478",
 			"names":{"customfield_10034":"Acceptance Criteria"},
 			"fields":{
@@ -32,7 +31,7 @@ func TestIssueBuildsTheBriefAndKeepsTheTokenOutOfTheRepo(t *testing.T) {
 				"description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Show the channel list."}]}]},
 				"customfield_10034":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Includes archived channels."}]}]}
 			}
-		}`))
+		}`)
 	}))
 	defer server.Close()
 	client := Client{Account: Account{BaseURL: server.URL, Email: "dev@example.com", Token: "secret-token"}, HTTP: server.Client()}
@@ -94,7 +93,10 @@ func TestSaveIsPerProjectAndViewOmitsTheToken(t *testing.T) {
 		t.Fatalf("%v %+v", err, other)
 	}
 	view := View(loaded, true)
-	raw, _ := os.ReadFile(path)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if strings.Contains(view.Email, "secret") || view.BaseURL == "" {
 		t.Fatalf("%+v", view)
 	}
@@ -123,7 +125,7 @@ func TestSearchUsesTheJQLEndpoint(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = w.Write([]byte(`{"issues":[{"key":"AET-2","fields":{"summary":"Refund","status":{"name":"Open"},"issuetype":{"name":"Bug"}}}]}`))
+		reply(t, w, `{"issues":[{"key":"AET-2","fields":{"summary":"Refund","status":{"name":"Open"},"issuetype":{"name":"Bug"}}}]}`)
 	}))
 	defer server.Close()
 	client := Client{Account: Account{BaseURL: server.URL, Token: "pat"}, HTTP: server.Client()}
@@ -139,18 +141,22 @@ func TestCommentPostsADFAndTransitionUsesTheStatusName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/issue/AET-12/comment":
-			commentBody, _ = io.ReadAll(r.Body)
-			w.WriteHeader(http.StatusCreated)
-			_, _ = w.Write([]byte(`{"id":"10001"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/AET-12/transitions":
-			_, _ = w.Write([]byte(`{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress"}},{"id":"31","name":"Block","to":{"name":"Block"}}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/issue/AET-12/transitions":
-			var payload struct {
-				Transition struct {
-					ID string `json:"id"`
-				} `json:"transition"`
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read comment: %v", err)
+				http.Error(w, "bad body", http.StatusBadRequest)
+				return
 			}
-			_ = json.NewDecoder(r.Body).Decode(&payload)
+			commentBody = body
+			w.WriteHeader(http.StatusCreated)
+			reply(t, w, `{"id":"10001"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/AET-12/transitions":
+			reply(t, w, `{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress"}},{"id":"31","name":"Block","to":{"name":"Block"}}]}`)
+		case r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/issue/AET-12/transitions":
+			var payload transitionPayload
+			if !readJSON(t, w, r, &payload) {
+				return
+			}
 			transitionID = payload.Transition.ID
 			w.WriteHeader(http.StatusNoContent)
 		default:
@@ -188,7 +194,7 @@ func TestCommentErrorOmitsTheToken(t *testing.T) {
 func TestTransitionErrorOmitsTheToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
-			_, _ = w.Write([]byte(`{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress"}}]}`))
+			reply(t, w, `{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress"}}]}`)
 			return
 		}
 		http.Error(w, "secret-token rejected", http.StatusBadRequest)
