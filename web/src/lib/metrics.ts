@@ -1,3 +1,5 @@
+import { isRecord, rows, text } from "@/lib/guards"
+
 /** What the metrics page reads. The reply is untrusted input, so each field is checked. */
 export interface MetricRuns {
   total: number
@@ -44,20 +46,8 @@ export interface Metrics {
   recent: RunRow[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0
-}
-
-function str(value: unknown): string {
-  return typeof value === "string" ? value : ""
-}
-
-function rows(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter(isRecord) : []
 }
 
 /** Reads a /metrics reply. Anything that is not the expected shape reads as no runs. */
@@ -74,7 +64,7 @@ export function metricsOf(body: unknown): Metrics {
       firstTry: num(runs.firstTry),
     },
     stages: rows(root.stages).map((row) => ({
-      stage: str(row.stage),
+      stage: text(row.stage),
       runs: num(row.runs),
       advance: num(row.advance),
       hold: num(row.hold),
@@ -83,18 +73,18 @@ export function metricsOf(body: unknown): Metrics {
       p90: num(row.p90Seconds),
     })),
     agents: rows(root.agents).map((row) => ({
-      agent: str(row.agent),
-      model: str(row.model),
+      agent: text(row.agent),
+      model: text(row.model),
       stages: num(row.stages),
       advance: num(row.advance),
       hold: num(row.hold),
       stop: num(row.stop),
     })),
     recent: rows(root.recent).map((row) => ({
-      id: str(row.id),
-      label: str(row.label),
-      stage: str(row.stage),
-      verdict: str(row.verdict),
+      id: text(row.id),
+      label: text(row.label),
+      stage: text(row.stage),
+      verdict: text(row.verdict),
       iterations: num(row.iterations),
       seconds: num(row.seconds),
       agents: Array.isArray(row.agents) ? row.agents.filter((item): item is string => typeof item === "string") : [],

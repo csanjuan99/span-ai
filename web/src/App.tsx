@@ -1,9 +1,13 @@
+"use client"
+
 import type { ReactNode } from "react"
 import { BrowserRouter, Route, Routes, useLocation } from "react-router"
 
 import { ErrorBoundary } from "@/components/error-boundary/ErrorBoundary"
 import { Desk } from "@/pages/Desk"
 import { Metrics } from "@/pages/Metrics"
+import { ShapeSession } from "@/pages/ShapeSession"
+import { Shaping } from "@/pages/Shaping"
 import { SpanPage } from "@/pages/SpanPage"
 
 /** One page behind its own boundary; moving to another route clears a caught fault. */
@@ -30,6 +34,22 @@ export function App() {
           element={
             <Guarded>
               <Metrics />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping"
+          element={
+            <Guarded>
+              <Shaping />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/:id"
+          element={
+            <Guarded>
+              <ShapeSession />
             </Guarded>
           }
         />
