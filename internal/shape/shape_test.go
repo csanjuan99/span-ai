@@ -690,3 +690,74 @@ func TestGuardAllowsUntouchedDirtyFile(t *testing.T) {
 		t.Fatalf("untouched dirty file must pass: %v", err)
 	}
 }
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=a@b", "-c", "user.name=a"}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v %s", args, err, out)
+	}
+}
+
+func committedEngine(t *testing.T) (*Engine, *fake, string) {
+	t.Helper()
+	f := &fake{replies: []string{reply(t, turn(nil, "s"))}}
+	e, ws := engine(t, f)
+	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ws, "add", "-A")
+	runGit(t, ws, "commit", "-qm", "init")
+	return e, f, ws
+}
+
+func TestGitGuardSeesHistoryAndRefsMovesOnACleanTree(t *testing.T) {
+	cases := map[string][]string{
+		"empty commit": {"commit", "-q", "--allow-empty", "-m", "x"},
+		"new branch":   {"branch", "other"},
+		"new tag":      {"tag", "v1"},
+		"checkout":     {"checkout", "-q", "-b", "elsewhere"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, f, ws := committedEngine(t)
+			f.effect = func(dir string) { runGit(t, dir, args...) }
+			_, err := e.Start(context.Background(), StartInput{Workspace: ws, Idea: "x"})
+			if codeOf(err) != "shape_repo_changed" {
+				t.Fatalf("want shape_repo_changed, got %v", err)
+			}
+		})
+	}
+}
+
+func TestGitGuardAcceptsATurnThatMovesNothing(t *testing.T) {
+	e, _, ws := committedEngine(t)
+	if _, err := e.Start(context.Background(), StartInput{Workspace: ws, Idea: "x"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepoMustStayInsideTheWorkspace(t *testing.T) {
+	ws := gitRepo(t)
+	other := gitRepo(t)
+	rel, err := filepath.Rel(ws, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{rel, other, "../x"} {
+		f := &fake{replies: []string{reply(t, turn(nil, "s"))}}
+		_, err := newEngine(f).Start(context.Background(), StartInput{Workspace: ws, Repo: repo, Idea: "x"})
+		if codeOf(err) != "shape_repo_outside" || len(f.prompts) != 0 {
+			t.Fatalf("repo %q: want shape_repo_outside and no agent run, got %v", repo, err)
+		}
+	}
+	inner := filepath.Join(ws, "inner")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGit(t, inner)
+	f := &fake{replies: []string{reply(t, turn(nil, "s"))}}
+	if _, err := newEngine(f).Start(context.Background(), StartInput{Workspace: ws, Repo: "inner", Idea: "x"}); err != nil {
+		t.Fatalf("a repo inside the workspace must be accepted: %v", err)
+	}
+}

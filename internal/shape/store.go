@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -55,6 +56,9 @@ func newID(now time.Time) (string, error) {
 }
 
 func newSession(in StartInput, now time.Time) (*Session, error) {
+	if err := checkRepo(in.Workspace, in.Repo); err != nil {
+		return nil, err
+	}
 	id, err := newID(now)
 	if err != nil {
 		return nil, err
@@ -173,4 +177,31 @@ func writeAtomic(path string, data []byte) (err error) {
 		return fmt.Errorf("replace %s: %w", path, err)
 	}
 	return nil
+}
+
+// checkRepo refuses a repo that is not the workspace or a folder inside it, so the
+// interview never runs in, or reads, another project. Links are followed first, so a
+// link inside the workspace that points outside is refused too.
+func checkRepo(workspace, repo string) error {
+	if repo == "" {
+		return nil
+	}
+	root := resolved(workspace)
+	target := repo
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, target)
+	}
+	rel, err := filepath.Rel(root, resolved(target))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fail("shape_repo_outside", "repo %q is not inside the workspace %s", repo, workspace)
+	}
+	return nil
+}
+
+// resolved is the path with its links followed, or the cleaned path when it does not exist.
+func resolved(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return filepath.Clean(path)
 }

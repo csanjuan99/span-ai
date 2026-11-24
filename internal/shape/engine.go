@@ -358,7 +358,10 @@ func gitState(ctx context.Context, dir string) (map[string]string, error) {
 		return nil, err
 	}
 	root := strings.TrimSpace(top)
-	state := map[string]string{}
+	state, err := refState(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
 	for _, l := range strings.Split(out, "\n") {
 		if strings.TrimSpace(l) == "" {
 			continue
@@ -367,6 +370,32 @@ func gitState(ctx context.Context, dir string) (map[string]string, error) {
 		state[path] = l[:2] + " " + fingerprint(filepath.Join(root, path))
 	}
 	return state, nil
+}
+
+// refState is what git status cannot show: where HEAD points and every ref with its
+// commit. A commit, a checkout, a reset, a new branch or a new tag changes it even when
+// the tree is clean afterwards. Keys are in angle brackets so no file path can collide.
+func refState(ctx context.Context, dir string) (map[string]string, error) {
+	refs, err := gitOutput(ctx, dir, "for-each-ref", "--format=%(refname) %(objectname)")
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"<HEAD>":   optionalGit(ctx, dir, "rev-parse", "-q", "--verify", "HEAD"),
+		"<branch>": optionalGit(ctx, dir, "symbolic-ref", "-q", "HEAD"),
+		"<refs>":   refs,
+	}, nil
+}
+
+// optionalGit is the output of a git query that has no answer in some states, such as
+// HEAD in a repository with no commit or the branch of a detached HEAD. No answer reads
+// as "none", which is itself a state to compare.
+func optionalGit(ctx context.Context, dir string, args ...string) string {
+	out, err := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		return "none"
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
