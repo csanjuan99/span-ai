@@ -246,10 +246,13 @@ func TestNoTransitionIntoTheBacklogReportsTheCreatedKey(t *testing.T) {
 		transitions: `{"transitions":[{"id":"21","name":"Start","to":{"id":"3","name":"In Progress"}}]}`,
 	}
 	client := newFake(t, fake)
-	_, err := client.CreateInBacklog(context.Background(), Draft{Project: "AET", Summary: "S", Description: "D"})
+	created, err := client.CreateInBacklog(context.Background(), Draft{Project: "AET", Summary: "S", Description: "D"})
 	coded := asCode(t, err)
 	if coded.Code != "jira_not_in_backlog" || !strings.Contains(coded.Msg, "AET-99") || strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("%v", err)
+	}
+	if created.Key != "AET-99" || !strings.HasSuffix(created.URL, "/browse/AET-99") {
+		t.Fatalf("the created issue must be returned with the error: %+v", created)
 	}
 	if fake.transitionID != "" || fake.creates != 1 {
 		t.Fatalf("transition %q creates %d", fake.transitionID, fake.creates)

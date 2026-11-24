@@ -49,7 +49,11 @@ type backlogStatus struct {
 
 // Preview resolves the board and its backlog statuses without writing anything.
 func (c Client) Preview(ctx context.Context, project string, board int) (Preview, error) {
-	resolved, statuses, err := c.backlog(ctx, project, board)
+	key, err := ProjectKey(project)
+	if err != nil {
+		return Preview{}, err
+	}
+	resolved, statuses, err := c.backlog(ctx, key, board)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -67,7 +71,10 @@ func (c Client) Preview(ctx context.Context, project string, board int) (Preview
 // none exists the error is jira_not_in_backlog and names the created key.
 // Storing the key so a session never creates twice is the caller's job.
 func (c Client) CreateInBacklog(ctx context.Context, draft Draft) (Created, error) {
-	project := strings.ToUpper(strings.TrimSpace(draft.Project))
+	project, err := ProjectKey(draft.Project)
+	if err != nil {
+		return Created{}, err
+	}
 	summary := strings.TrimSpace(draft.Summary)
 	if summary == "" {
 		return Created{}, &Error{Code: "invalid", Msg: "summary is missing"}
@@ -100,7 +107,7 @@ func (c Client) CreateInBacklog(ctx context.Context, draft Draft) (Created, erro
 
 	current, err := c.currentStatus(ctx, made.Key)
 	if err != nil {
-		return Created{}, c.notInBacklog(made.Key, "its status could not be read: "+err.Error())
+		return created, c.notInBacklog(made.Key, "its status could not be read: "+err.Error())
 	}
 	if target, ok := findStatus(statuses, current.ID); ok {
 		created.Status = target.Name
@@ -108,7 +115,7 @@ func (c Client) CreateInBacklog(ctx context.Context, draft Draft) (Created, erro
 	}
 	moves, err := c.transitions(ctx, made.Key)
 	if err != nil {
-		return Created{}, c.notInBacklog(made.Key, "its transitions could not be read: "+err.Error())
+		return created, c.notInBacklog(made.Key, "its transitions could not be read: "+err.Error())
 	}
 	for _, move := range moves {
 		target, ok := findStatus(statuses, move.To.ID)
@@ -116,12 +123,12 @@ func (c Client) CreateInBacklog(ctx context.Context, draft Draft) (Created, erro
 			continue
 		}
 		if err := c.applyTransition(ctx, made.Key, move.ID); err != nil {
-			return Created{}, c.notInBacklog(made.Key, "the move to "+target.Name+" failed: "+err.Error())
+			return created, c.notInBacklog(made.Key, "the move to "+target.Name+" failed: "+err.Error())
 		}
 		created.Status = target.Name
 		return created, nil
 	}
-	return Created{}, c.notInBacklog(made.Key, "it is in "+current.Name+" and no transition reaches the backlog")
+	return created, c.notInBacklog(made.Key, "it is in "+current.Name+" and no transition reaches the backlog")
 }
 
 // notInBacklog reports an issue that exists but is not in the backlog.
@@ -168,12 +175,19 @@ func (s *backlogStatus) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// backlog resolves the board and the statuses of its Backlog column.
-func (c Client) backlog(ctx context.Context, project string, boardID int) (Board, []backlogStatus, error) {
-	project = strings.ToUpper(strings.TrimSpace(project))
-	if project == "" || strings.ContainsAny(project, " /?&#") {
-		return Board{}, nil, &Error{Code: "invalid", Msg: "project key is missing"}
+// ProjectKey is the project key as Jira expects it: trimmed and upper case. A key that is
+// empty or carries URL syntax is refused, so it is safe to put in a request path.
+func ProjectKey(raw string) (string, error) {
+	key := strings.ToUpper(strings.TrimSpace(raw))
+	if key == "" || strings.ContainsAny(key, " /?&#") {
+		return "", &Error{Code: "invalid", Msg: "project key is missing"}
 	}
+	return key, nil
+}
+
+// backlog resolves the board and the statuses of its Backlog column for a key that
+// ProjectKey already accepted.
+func (c Client) backlog(ctx context.Context, project string, boardID int) (Board, []backlogStatus, error) {
 	board, err := c.board(ctx, project, boardID)
 	if err != nil {
 		return Board{}, nil, err
