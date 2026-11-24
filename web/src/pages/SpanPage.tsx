@@ -9,6 +9,7 @@ import { conflictHold, proposalKey } from "@/lib/conflict"
 import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
 import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
+import { doneOf } from "@/lib/done"
 import { proofOf } from "@/lib/proof"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
@@ -27,6 +28,7 @@ import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
+import { DoneCard } from "@/components/done-card/DoneCard"
 import { RunningCard } from "@/components/running-card/RunningCard"
 import { RunControls } from "@/components/run-controls/RunControls"
 import { SafeAndKept } from "@/components/safe-and-kept/SafeAndKept"
@@ -133,6 +135,18 @@ export function SpanPage() {
           branch: cursor.branch,
           workspace: cursor.workspace,
           transcript: state.transcript,
+        })
+      : null
+  const done =
+    cursor?.done === true
+      ? doneOf({
+          sealed: new Set(sealed).size,
+          merged: sealed.includes("merge"),
+          sha: cursor.gitSHA,
+          base: cursor.base,
+          branch: cursor.branch,
+          issue: cursor.issue,
+          changeURL: cursor.changeURL,
         })
       : null
   const attempt = failure === null ? "" : attemptLine(failure)
@@ -309,8 +323,9 @@ export function SpanPage() {
                 {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
               </NeedsYou>
             ) : null}
-            {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
-          {proof !== null ? <ProofSummary proof={proof} /> : null}
+              {done !== null ? <DoneCard done={done} /> : null}
+              {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
+              {proof !== null ? <ProofSummary proof={proof} /> : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList>

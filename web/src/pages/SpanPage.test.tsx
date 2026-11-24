@@ -41,6 +41,9 @@ function cursor(over: Partial<Cursor>): Cursor {
   }
 }
 
+/** A sealed stage, for the ledger. */
+const advance = (stage: string): Statement => ({ stage, iteration: 1, verdict: "advance", reason: "", commands: [] })
+
 function held(over: Partial<Cursor>, statements: Statement[] = []): SpanState {
   const span: Snapshot = { cursor: cursor(over), statements, acceptance: [], gate: null }
   return {
@@ -145,13 +148,6 @@ describe("the block that holds what the run waits on", () => {
 })
 
 describe("the side of the page", () => {
-  const advance = (stage: string): Statement => ({
-    stage,
-    iteration: 1,
-    verdict: "advance",
-    reason: "",
-    commands: [],
-  })
 
   it("keeps what is safe next to the controls, never inside a tab", () => {
     state = held({ stage: "build" }, [advance("intake"), advance("frame")])
@@ -202,7 +198,7 @@ describe("the proof at the top of the page", () => {
 
 describe("the order on a narrow screen", () => {
   it("puts what is safe before the tabs and the controls after them, as the design draws it", () => {
-    state = held({ stage: "build" }, [{ stage: "intake", iteration: 1, verdict: "advance", reason: "", commands: [] }])
+    state = held({ stage: "build" }, [advance("intake")])
     page()
     const classes = (name: string) => screen.getByRole("region", { name }).className
     expect(classes("Safe and kept")).toContain("order-2")
@@ -251,5 +247,31 @@ describe("the card while the run goes on by itself", () => {
     state = { ...working({ done: true }) }
     page()
     expect(screen.queryByRole("region", { name: "Running" })).toBeNull()
+  })
+})
+
+describe("the card once the run is over", () => {
+  const all = ["intake", "frame", "build", "prove", "qa", "inspect", "open", "merge", "promote", "note"].map(advance)
+
+  it("says where the work went and offers the change", () => {
+    state = held({ done: true, hold: false, reason: "", gitSHA: "c91f3abdeadbeef", base: "main", issue: "SPAN-482", changeURL: "https://github.com/o/r/pull/8" }, all)
+    page()
+    const card = screen.getByRole("region", { name: "Done" })
+    expect(card.textContent).toContain("all 10 stages sealed")
+    expect(card.textContent).toContain("Merged into main as c91f3ab")
+    expect(card.textContent).toContain("SPAN-482")
+    expect(screen.getByRole("link", { name: /Open PR #8/ }).getAttribute("href")).toBe("https://github.com/o/r/pull/8")
+  })
+
+  it("does not claim a merge when the merge stage never sealed", () => {
+    state = held({ done: true, hold: false, reason: "", gitSHA: "c91f3abdeadbeef" }, all.slice(0, 3))
+    page()
+    expect(screen.getByRole("region", { name: "Done" }).textContent).toContain("Finished at c91f3ab")
+  })
+
+  it("is not drawn while the run is still going", () => {
+    state = held({ done: false })
+    page()
+    expect(screen.queryByRole("region", { name: "Done" })).toBeNull()
   })
 })
