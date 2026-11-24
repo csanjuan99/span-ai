@@ -27,7 +27,32 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T3 | S4 | inline | Run controls and "Safe and kept" aside | done, see git log |
 | T4 | S5 | inline | Proof summary from `buildReport` | done, see git log |
 | T5 | S5 | deferred | Backend: test counts from the prove gate (own feature) | |
+| T7 | S8 | inline | Running card while the run goes on by itself | |
+| T8 | S8 | inline | Done state block with Jira and merge links | |
+| T9 | S8 | inline | Relative times beside held and waiting | |
+| T10 | S8 | inline | Transcript and command log as code-view entries | |
+| T11 | S8 | inline | Required marker on open questions | |
+| T12 | S8 | deferred | Backend: commit count | |
+| T13 | S8 | deferred | Backend: expose the run holding the checkout | |
+| T14 | S8 | deferred | Backend: note and resume in one call | |
 | T6 | S7 | inline | Mobile layout, in the order the design draws it | done, see git log |
+
+S8. The page matches the design's desktop artboards S1 to S9. What the code already supports is drawn as is; what it does not is built, in this order: frontend-only first, backend after.
+
+## Design against code (checked 2026-11-24)
+
+| Design element | In code today | Needs | Task |
+| --- | --- | --- | --- |
+| Running card, "Nothing needed from you", Pause after this stage (S1) | no block while the run goes on | frontend | T7 |
+| Done state: Open story in Jira, Open merge commit, Files changed, Risks, Run details (S6) | `changeURL` exists in the cursor; no done block | frontend | T8 |
+| Relative times: "held 14:36 · 16 min ago", "waiting since 14:19" | statements carry `time`; no relative text | frontend | T9 |
+| Agent transcript and Command log as entries that open a code view (S2 to S9) | transcript is a collapsed list in Implementation; commands are in the ledger | frontend | T10 |
+| Question fields marked "Needs an answer / Required" (S3) | `Waiting` has no required marker | frontend | T11 |
+| "Held at prove: 41 passed · 2 failed" test counts (S2) | none; the gate records checks, not tests | backend | T5 |
+| "3 commits on <branch>" in Safe and kept | no commit count recorded | backend | T12 |
+| "Open the other run" on a busy checkout (S9) | the holder run id is not exposed | backend | T13 |
+| "Leave a note" and resume as one action | two calls today | backend | T14 |
+| "If you fix and retry, it touches N files" prediction | cannot be known | dropped | none |
 
 ## Log
 
