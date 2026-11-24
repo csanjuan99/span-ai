@@ -23,6 +23,7 @@ import (
 	"unicode"
 
 	"span/internal/agent"
+	"span/internal/blocker"
 	"span/internal/branch"
 	"span/internal/feature"
 	"span/internal/handoff"
@@ -223,6 +224,9 @@ type Cursor struct {
 	Folder          string      `json:"folder,omitempty"`
 	Weight          string      `json:"weight,omitempty"`
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
+	// Blocker is the obstacle the run is parked on, with the evidence a person and the next
+	// build need. It is cleared when the stage passes or a person restarts the run.
+	Blocker *blocker.Blocker `json:"blocker,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
@@ -832,11 +836,15 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(build, statement.Hold, err.Error(), nil)
 	}
-	in := r.promptInput(build, r.failurePacket())
-	call, cancel := r.agentCall(ctx)
-	defer cancel()
-	if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
-		return r.agentBlocked(build, err)
+	// A blocker that already came back with the same output does not earn another agent run:
+	// the tree is what the hook judged, and nothing a person did since has changed that.
+	if r.cur.Blocker.Retryable() {
+		in := r.promptInput(build, r.failurePacket())
+		call, cancel := r.agentCall(ctx)
+		defer cancel()
+		if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
+			return r.agentBlocked(build, err)
+		}
 	}
 	path := featurePath(r.opt.Workspace, r.cur.Feature)
 	if err := feature.Valid(path); err != nil {
@@ -846,12 +854,30 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	}
 	sha, err := r.commit(ctx)
 	if err != nil {
-		return r.record(build, statement.Hold, err.Error(), nil)
+		return r.commitBlocked(err)
 	}
+	r.cur.Blocker = nil
 	r.cur.GitSHA = sha
 	return r.record(build, statement.Advance, "feature document present", func(s *statement.Statement) {
 		s.FeatureDoc = path
 		s.GitSHA = sha
+	})
+}
+
+// commitBlocked parks the run on a commit the repository refused. It keeps what the hook
+// said, counts how often the same output came back, and records it where a person looks.
+func (r *runner) commitBlocked(err error) (string, string, error) {
+	b := blocker.FromCommit(err, r.cur.Blocker)
+	r.cur.Blocker = b
+	r.last = failure{Fingerprint: b.Fingerprint}
+	r.journal("blocker", map[string]string{
+		"class": b.Class, "fingerprint": b.Fingerprint, "count": strconv.Itoa(b.Count),
+	})
+	return r.record(build, statement.Hold, b.Summary(), func(s *statement.Statement) {
+		s.Fingerprint = b.Fingerprint
+		s.Commands = []statement.Command{{
+			Command: "git commit", ExitCode: 1, Error: b.Summary(), Output: b.Evidence, Fingerprint: b.Fingerprint,
+		}}
 	})
 }
 
@@ -1606,6 +1632,10 @@ func (r *runner) failurePacket() string {
 	var b strings.Builder
 	if r.cur.InspectFeedback != "" {
 		fmt.Fprintf(&b, "Inspect sent this change back.\nReason: %s\n", r.cur.InspectFeedback)
+	}
+	if blk := r.cur.Blocker; blk != nil {
+		fmt.Fprintf(&b, "The repository's commit hook rejected this change.\nWhat it said:\n%s\n", blk.Evidence)
+		b.WriteString("Make the change pass the hook. Never bypass it (no --no-verify).\n")
 	}
 	if r.cur.Iteration <= 1 {
 		return closePacket(&b)

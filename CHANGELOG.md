@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: a commit the repository's hook rejects no longer loops. It is now a classified blocker (`commit-rejected`): the hook output, cleaned of colors, is kept on the run and carried into the next build prompt, and the same output twice makes the blocker non-retryable. Resuming then retries only the commit, without another agent run, until what the hook rejects changes. A rewind clears the blocker. Before, each resume ran the whole build again and hit the same hook, and the hook's text never reached the agent.
+
 - **Added**: a run can be deleted from the desk's list, one at a time, after a second click. Only its record goes (`POST /spans/{id}/delete`); the branch, the pull request and any worktree stay. A run being driven, here or by another process, is refused.
 - **Fixed**: the model selector showed only part of a CLI's models. It was a text field with a native suggestion list, which the browser filters by the text already in the field, so a saved model hid all the others. Each CLI now has a **Browse N models** list that always opens on the whole list, with a search and a count.
 

@@ -48,6 +48,7 @@ func Rewind(root, id, stage string) error {
 	cur.Repairs = nil
 	cur.WideSHA = ""
 	cur.AgentBlock = nil
+	cur.Blocker = nil
 	cur.InspectBlocks = 0
 	cur.InspectFeedback = ""
 	cur.Rewound = true

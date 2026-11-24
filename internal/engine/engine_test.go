@@ -101,6 +101,8 @@ type fakeSource struct {
 	sha       string
 	// messages are the commit messages, in order.
 	messages []string
+	// commitErr makes Commit fail the way a rejecting pre-commit hook does.
+	commitErr error
 }
 
 func (s *fakeSource) Head(context.Context) (string, error) { return s.sha, nil }
@@ -108,6 +110,9 @@ func (s *fakeSource) Dirty(context.Context) (bool, error)  { return s.dirty, nil
 func (s *fakeSource) Commit(_ context.Context, message string) (string, error) {
 	s.commits++
 	s.messages = append(s.messages, message)
+	if s.commitErr != nil {
+		return "", s.commitErr
+	}
 	s.sha = "abc123"
 	s.dirty = s.stayDirty
 	return s.sha, nil
