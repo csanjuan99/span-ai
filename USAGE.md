@@ -675,6 +675,12 @@ A decision is a question with the evidence quoted, two to four options that each
 
 The build agent can raise a decision too. When the brief asks for something a rule of the repository forbids, or it cannot go on without you, the prompt tells it to write the request to `.span/runs/<id>/decision.json` and stop, instead of choosing a side or asking in the chat. Span reads the file once, checks it, and holds with `decision needed`. A request it cannot show (fewer than two options, an action Span does not offer) holds with the reason, and the agent gets no commit made for it. Your answer is written to `answers.md` and stays in the prompt of every later build.
 
+### What you decided stays decided
+
+Everything a person decides or writes goes to `.span/runs/<id>/decisions.jsonl`, one line each, and the file only grows. An answer that steers the build (`build` options) is a **decision**: it is added to the prompt of every stage, frame and inspect included, as `[D3] <when>, at <stage>, on "<title>": <your words>`, and it outranks the story where they differ. It never outranks a rule the repository enforces. A later decision on the same problem supersedes the earlier one, and both stay in the file. Each version of a note you save for a stage is logged too, so a second note no longer erases the first; the stage's own file still holds the latest and is what the prompt reads.
+
+The story is read again from Jira on `Reload`, and a decision is not part of the story, so it survives. When the story that comes back differs from the one the decisions were taken against, Span does not apply them silently or drop them: the next frame or build opens a decision that quotes each one and asks whether they still hold. `They still hold` anchors them to the new story, `Drop them` retires them (they stay in the log), `Stop` ends the run. Reading the story again and getting the same text asks nothing.
+
 ### Failures the base commit already had
 
 A red test in an unrelated module is not this story's to fix. Before the first build, Span

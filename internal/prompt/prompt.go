@@ -25,6 +25,8 @@ type Input struct {
 	// DecisionPath is where the build agent writes a decision request. Empty means the stage
 	// has no such channel.
 	DecisionPath string
+	// Decisions are what people decided for this run, with who and when. They outrank the brief.
+	Decisions string
 }
 
 // Frame asks for verifiable claims and forbids invented requirements.
@@ -87,6 +89,9 @@ func preamble(in Input) string {
 		fmt.Fprintf(&b, "Standards:\n%s\n", in.Standards)
 	}
 	fmt.Fprintf(&b, "Brief:\n%s\n", in.Brief)
+	if in.Decisions != "" {
+		b.WriteString(in.Decisions)
+	}
 	if in.Instructions != "" {
 		fmt.Fprintf(&b, "Stage instructions:\n%s\n", in.Instructions)
 	}

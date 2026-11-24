@@ -16,6 +16,7 @@ import (
 	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/live"
+	"span/internal/overlay"
 	"span/internal/setup"
 )
 
@@ -444,5 +445,39 @@ func TestDecideWithoutAnOpenDecisionIsRefused(t *testing.T) {
 	handler.ServeHTTP(rec, r)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestASecondNoteForAStageDoesNotEraseTheFirst(t *testing.T) {
+	root := t.TempDir()
+	writeCursor(t, root, engine.Cursor{ID: "span-3", Stage: "build", Hold: true})
+	handler := New(root, "", nil, nil, nil, nil)
+	save := func(note string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/spans/span-3/instructions/build", strings.NewReader(note))
+		req.Header.Set("Content-Type", "text/plain")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code >= 400 {
+			t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+		}
+	}
+	save("Use the ledger.")
+	save("Use the ledger.")
+	save("Keep the button disabled.")
+
+	file, err := os.ReadFile(filepath.Join(root, "span-3", "instructions", "build.md"))
+	if err != nil || string(file) != "Keep the button disabled." {
+		t.Fatalf("the stage file = %q (%v)", file, err)
+	}
+	log, err := overlay.Read(filepath.Join(root, "span-3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 2 || log[0].Text != "Use the ledger." || log[1].Text != "Keep the button disabled." || log[0].Kind != overlay.Note {
+		t.Fatalf("log = %+v", log)
+	}
+	if len(overlay.Active(log)) != 0 {
+		t.Fatal("a note was applied as a decision")
 	}
 }

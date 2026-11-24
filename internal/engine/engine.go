@@ -31,6 +31,7 @@ import (
 	"span/internal/harness"
 	"span/internal/journal"
 	"span/internal/learn"
+	"span/internal/overlay"
 	"span/internal/policy"
 	"span/internal/proc"
 	"span/internal/prompt"
@@ -231,6 +232,9 @@ type Cursor struct {
 	// Decision is the question a person has to answer before the run goes on. While it is
 	// open, resuming does nothing: the answer picks the way forward.
 	Decision *decision.Request `json:"decision,omitempty"`
+	// BriefEpoch counts the times the story was read again and came back different. A
+	// decision records the epoch it was taken in, so a changed story is noticed.
+	BriefEpoch int `json:"briefEpoch,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
@@ -442,6 +446,9 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 	if strings.TrimSpace(brief) == "" {
 		return Result{}, errors.New("brief is empty")
 	}
+	if brief != r.opt.Brief {
+		r.cur.BriefEpoch++
+	}
 	r.opt.Brief = brief
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(brief), 0o644); err != nil {
 		return Result{}, err
@@ -637,7 +644,10 @@ func (r *runner) run(ctx context.Context) (Result, error) {
 	if err != nil {
 		r.cur.Hold = true
 		r.cur.Reason = "the run stopped: " + err.Error()
-		_ = r.save()
+		// The stop is already the error being returned; a save that fails too is logged, not hidden.
+		if saveErr := r.save(); saveErr != nil {
+			log.Printf("save %s: %v", r.cur.ID, saveErr)
+		}
 	}
 	return res, err
 }
@@ -796,6 +806,9 @@ func (r *runner) doIntake() (string, string, error) {
 }
 
 func (r *runner) doFrame(ctx context.Context) (string, string, error) {
+	if verdict, reason, asked, err := r.guardOverlay(frame); asked || err != nil {
+		return verdict, reason, err
+	}
 	target, err := r.pick(frame)
 	if err != nil {
 		return r.record(frame, statement.Hold, err.Error(), nil)
@@ -836,6 +849,9 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 }
 
 func (r *runner) doBuild(ctx context.Context) (string, string, error) {
+	if verdict, reason, asked, err := r.guardOverlay(build); asked || err != nil {
+		return verdict, reason, err
+	}
 	if err := r.recordBaseline(ctx); err != nil {
 		return "", "", err
 	}
@@ -874,6 +890,66 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	})
 }
 
+// askDecision parks the run on a question for a person and records the hold that says so.
+func (r *runner) askDecision(stage string, req decision.Request, reason string) (string, string, error) {
+	r.cur.Decision = &req
+	return r.record(stage, statement.Hold, reason, func(s *statement.Statement) {
+		s.Fingerprint = req.Dedupe
+	})
+}
+
+// guardOverlay stops a stage that would apply decisions taken against a story that has
+// changed since. Neither applying nor dropping them is Span's call.
+func (r *runner) guardOverlay(stage string) (verdict, reason string, asked bool, err error) {
+	entries, readErr := overlay.Read(r.spanDir())
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	stale := overlay.Stale(entries, r.cur.BriefEpoch)
+	if len(stale) == 0 {
+		return "", "", false, nil
+	}
+	req := decision.FromStale(stale, stage, r.opt.now())
+	verdict, reason, err = r.askDecision(stage, req, "decision needed: "+req.Title)
+	return verdict, reason, true, err
+}
+
+// logAnswer writes what a person chose to the run's decision log. An answer that steers the
+// build becomes a decision that reaches every prompt; the others are history. A choice about
+// earlier decisions changes the log instead of adding to what the agent reads.
+func (r *runner) logAnswer(req *decision.Request, option decision.Option, body string) error {
+	dir := r.spanDir()
+	entries, err := overlay.Read(dir)
+	if err != nil {
+		return err
+	}
+	switch option.Effect {
+	case decision.Reanchor:
+		for _, e := range overlay.Stale(entries, r.cur.BriefEpoch) {
+			if _, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Anchor, Ref: e.Seq, Epoch: r.cur.BriefEpoch, Stage: req.Stage, Title: req.Title}); err != nil {
+				return err
+			}
+		}
+		return nil
+	case decision.Drop:
+		var seqs []int
+		for _, e := range overlay.Stale(entries, r.cur.BriefEpoch) {
+			seqs = append(seqs, e.Seq)
+		}
+		_, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Supersede, Supersedes: seqs, Stage: req.Stage, Title: req.Title})
+		return err
+	}
+	kind := overlay.Note
+	if option.Then == decision.Build {
+		kind = overlay.Decision
+	}
+	_, err = overlay.Append(dir, overlay.Entry{
+		Kind: kind, Stage: req.Stage, Title: req.Title, Option: option.ID, Text: body,
+		Dedupe: req.Dedupe, Epoch: r.cur.BriefEpoch, Time: r.opt.now(),
+	})
+	return err
+}
+
 // decisionPath is where the build agent leaves a request for a person.
 func (r *runner) decisionPath() string {
 	return filepath.Join(r.spanDir(), "decision.json")
@@ -887,19 +963,19 @@ func (r *runner) takeDecisionFile(stage string) (verdict, reason string, asked b
 	if errors.Is(readErr, os.ErrNotExist) {
 		return "", "", false, nil
 	}
-	_ = os.Remove(r.decisionPath())
 	if readErr != nil {
 		return "", "", true, readErr
+	}
+	// A request that cannot be removed would be read again and asked twice.
+	if rmErr := os.Remove(r.decisionPath()); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return "", "", true, rmErr
 	}
 	req, parseErr := decision.Parse(raw, stage, r.opt.now())
 	if parseErr != nil {
 		verdict, reason, err = r.record(stage, statement.Hold, "the agent asked for a decision Span cannot show: "+parseErr.Error(), nil)
 		return verdict, reason, true, err
 	}
-	r.cur.Decision = &req
-	verdict, reason, err = r.record(stage, statement.Hold, "decision needed: "+req.Title, func(s *statement.Statement) {
-		s.Fingerprint = req.Dedupe
-	})
+	verdict, reason, err = r.askDecision(stage, req, "decision needed: "+req.Title)
 	return verdict, reason, true, err
 }
 
@@ -1525,7 +1601,7 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	if stored == "iterate" {
 		stored = statement.Hold
 	}
-	text, digest, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
+	_, digest, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
 	if err != nil {
 		return "", "", err
 	}
@@ -1542,7 +1618,6 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	if fill != nil {
 		fill(&s)
 	}
-	_ = text
 	if err := statement.Write(r.iterDir(), &s); err != nil {
 		return "", "", err
 	}
@@ -1754,8 +1829,14 @@ func (r *runner) promptInput(stage, failure string) prompt.Input {
 		}
 		r.shown[stage] = sigs
 	}
+	entries, err := overlay.Read(r.spanDir())
+	if err != nil {
+		// frame and build stop on this in guardOverlay; the stages that do not still run.
+		log.Printf("decision log %s: %v", r.cur.ID, err)
+	}
 	return prompt.Input{
-		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature), DecisionPath: r.decisionFor(stage),
+		Decisions: overlay.Render(entries, r.cur.BriefEpoch),
+		Stage:     stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature), DecisionPath: r.decisionFor(stage),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
 		Handoffs: handoff.Paths(r.cur.ID, names),
 		Failure:  failure, Manifest: manifest,
@@ -2194,7 +2275,7 @@ func Decide(ctx context.Context, opt Options, id string, answer decision.Answer)
 	if text != "" {
 		body += ": " + text
 	}
-	if err := writeAnswers(r.spanDir(), []Answer{{Question: req.Title, Body: body}}); err != nil {
+	if err := r.logAnswer(req, option, body); err != nil {
 		return Result{}, err
 	}
 	r.journal("decision", map[string]string{"id": req.ID, "class": req.Class, "option": option.ID, "textChars": strconv.Itoa(len(text))})

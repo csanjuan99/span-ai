@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"span/internal/blocker"
+	"span/internal/overlay"
 	"span/internal/statement"
 )
 
@@ -27,11 +28,21 @@ const (
 	Stop = "stop"
 )
 
+// Effects on the decision log.
+const (
+	// Reanchor keeps the stale decisions, now taken against the current story.
+	Reanchor = "reanchor"
+	// Drop retires the stale decisions. They stay in the log.
+	Drop = "drop"
+)
+
 // Classes of request.
 const (
 	CommitRejected = blocker.CommitRejected
 	// Conflict is a brief that asks for what a rule of the repository forbids.
 	Conflict = "spec-conflict"
+	// Stale is decisions taken against a story that has changed since.
+	Stale = "overlay-stale"
 	// Question is anything else the agent cannot decide alone.
 	Question = "agent-question"
 )
@@ -49,6 +60,9 @@ type Option struct {
 	Consequence string `json:"consequence"`
 	Reversible  bool   `json:"reversible"`
 	Then        string `json:"then"`
+	// Effect is what Span does to the run's decision log when the option is chosen. Only
+	// Span sets it: an agent's request never carries one.
+	Effect string `json:"effect,omitempty"`
 }
 
 // Request is one open question. Dedupe identifies the problem, not the occurrence, so the
@@ -138,6 +152,9 @@ func Parse(raw []byte, stage string, now time.Time) (Request, error) {
 	if req.Class != Conflict {
 		req.Class = Question
 	}
+	for i := range req.Options {
+		req.Options[i].Effect = ""
+	}
 	req.Stage = stage
 	req.Time = now
 	var parts []string
@@ -150,4 +167,26 @@ func Parse(raw []byte, stage string, now time.Time) (Request, error) {
 		return Request{}, err
 	}
 	return req, nil
+}
+
+// FromStale is the question a changed story puts about the decisions taken on the old one.
+func FromStale(stale []overlay.Entry, stage string, now time.Time) Request {
+	var evidence []Evidence
+	keys := []string{Stale}
+	for _, e := range stale {
+		evidence = append(evidence, Evidence{Ref: fmt.Sprintf("decision D%d, taken at %s", e.Seq, e.Stage), Excerpt: e.Text})
+		keys = append(keys, fmt.Sprint(e.Seq))
+	}
+	dedupe := statement.Signature(keys...)
+	return Request{
+		ID: "stale-" + dedupe[:12], Class: Stale, Stage: stage, Time: now, Dedupe: dedupe,
+		Title:    "The story changed after you decided",
+		Happened: "The story was read again and it is not the one these decisions were taken against. Span applies neither silently nor drops them: say whether they still hold.",
+		Evidence: evidence,
+		Options: []Option{
+			{ID: "keep", Label: "They still hold", Consequence: "The decisions go on top of the new story, as before.", Reversible: true, Then: Retry, Effect: Reanchor},
+			{ID: "drop", Label: "Drop them, the new story says what is needed", Consequence: "The decisions stop reaching the agent. They stay in the log.", Reversible: true, Then: Retry, Effect: Drop},
+			{ID: "stop", Label: "Stop this run", Consequence: "The run ends so you can reconsider.", Reversible: false, Then: Stop},
+		},
+	}
 }
