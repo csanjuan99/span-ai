@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -76,9 +77,10 @@ func Handler(root, token string) http.Handler {
 }
 
 // New is Handler plus an optional quickstart launcher and the static page.
-func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.FS) http.Handler {
+func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.FS, opts ...Option) http.Handler {
 	starts := newRecent()
 	mux := http.NewServeMux()
+	shapeRoutes(mux, newShapeConfig(opts))
 	mux.HandleFunc("GET /spans", func(w http.ResponseWriter, r *http.Request) {
 		if !wantsJSON(r) {
 			servePage(pages, w, r)
@@ -120,7 +122,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 				writeJSON(w, http.StatusAccepted, body)
 				return
 			}
-			_, _ = io.WriteString(w, out.Text)
+			writeText(w, out.Text)
 			return
 		}
 		text, err := configureOnly(r.Context(), req)
@@ -128,7 +130,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, err)
 			return
 		}
-		_, _ = io.WriteString(w, text)
+		writeText(w, text)
 	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		set, err := scope.Discover(r.URL.Query().Get("path"))
@@ -159,7 +161,10 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, err)
 			return
 		}
-		account, _ := jira.Load(project)
+		account, err := jira.Load(project)
+		if err != nil {
+			log.Printf("jira account %s: %v", project, err)
+		}
 		writeJSON(w, http.StatusOK, jira.View(account, true))
 	})
 	mux.HandleFunc("POST /jira/logout", func(w http.ResponseWriter, r *http.Request) {
@@ -474,7 +479,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 }
 
 // Listen checks the address policy and serves.
-func Listen(addr, root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.FS) error {
+func Listen(addr, root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.FS, opts ...Option) error {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return err
@@ -483,7 +488,7 @@ func Listen(addr, root, token string, launch Launch, wake Wake, hub *live.Hub, p
 	if (ip == nil || !ip.IsLoopback()) && token == "" {
 		return ErrToken
 	}
-	handler := New(root, token, launch, wake, hub, pages)
+	handler := New(root, token, launch, wake, hub, pages, opts...)
 	if token == "" {
 		// Without a token the loopback bind is the only guard, and a page that rebinds its
 		// own DNS name to 127.0.0.1 looks same-origin to the check in New.
@@ -847,8 +852,7 @@ func storyRequest(r *http.Request) (setup.Request, error) {
 				return setup.Request{}, err
 			}
 			body, err := io.ReadAll(io.LimitReader(opened, handoff.MaxBytes+1))
-			opened.Close()
-			if err != nil {
+			if err := errors.Join(err, opened.Close()); err != nil {
 				return setup.Request{}, err
 			}
 			files = append(files, handoff.File{Name: header.Filename, Body: body})
@@ -926,7 +930,17 @@ func agentPolicyPath(w http.ResponseWriter, r *http.Request) (string, string, bo
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("write response: %v", err)
+	}
+}
+
+// writeText sends a plain-text reply. The client is the only one who could be told that
+// the write failed, so the failure goes to the server log.
+func writeText(w http.ResponseWriter, text string) {
+	if _, err := io.WriteString(w, text); err != nil {
+		log.Printf("write response: %v", err)
+	}
 }
 
 // spanProject reports whether dir is a git repository (.git, a folder or a worktree's file)
@@ -958,8 +972,11 @@ func writeErr(w http.ResponseWriter, err error) {
 		status = http.StatusUnprocessableEntity
 	case "unauthorized":
 		status = http.StatusUnauthorized
-	case "not_found":
+	case "not_found", "shape_not_found":
 		status = http.StatusNotFound
+	case "shape_not_ready", "shape_not_sealed", "shape_sealed", "shape_repo_changed",
+		"jira_backlog_disabled", "jira_board_ambiguous", "jira_not_in_backlog":
+		status = http.StatusConflict
 	case "unreachable":
 		status = http.StatusBadGateway
 	}
