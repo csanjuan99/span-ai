@@ -25,6 +25,7 @@ import (
 	"span/internal/agent"
 	"span/internal/blocker"
 	"span/internal/branch"
+	"span/internal/decision"
 	"span/internal/feature"
 	"span/internal/handoff"
 	"span/internal/harness"
@@ -227,6 +228,9 @@ type Cursor struct {
 	// Blocker is the obstacle the run is parked on, with the evidence a person and the next
 	// build need. It is cleared when the stage passes or a person restarts the run.
 	Blocker *blocker.Blocker `json:"blocker,omitempty"`
+	// Decision is the question a person has to answer before the run goes on. While it is
+	// open, resuming does nothing: the answer picks the way forward.
+	Decision *decision.Request `json:"decision,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
@@ -367,6 +371,9 @@ func Resume(ctx context.Context, opt Options, id string) (Result, error) {
 	}
 	if r.cur.Done {
 		return r.finish(statement.Advance), nil
+	}
+	if r.cur.Decision != nil {
+		return r.finish(statement.Hold), nil
 	}
 	clearBusyHold(&r.cur)
 	r.takePause()
@@ -845,6 +852,9 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 		if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
 			return r.agentBlocked(build, err)
 		}
+		if verdict, reason, asked, err := r.takeDecisionFile(build); asked || err != nil {
+			return verdict, reason, err
+		}
 	}
 	path := featurePath(r.opt.Workspace, r.cur.Feature)
 	if err := feature.Valid(path); err != nil {
@@ -864,6 +874,35 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	})
 }
 
+// decisionPath is where the build agent leaves a request for a person.
+func (r *runner) decisionPath() string {
+	return filepath.Join(r.spanDir(), "decision.json")
+}
+
+// takeDecisionFile reads the request the agent left, if any, and parks the run on it. The
+// file is removed either way, so a request is read once. asked is true when the stage
+// ended here: with an open question, or with a request Span could not accept.
+func (r *runner) takeDecisionFile(stage string) (verdict, reason string, asked bool, err error) {
+	raw, readErr := os.ReadFile(r.decisionPath())
+	if errors.Is(readErr, os.ErrNotExist) {
+		return "", "", false, nil
+	}
+	_ = os.Remove(r.decisionPath())
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	req, parseErr := decision.Parse(raw, stage, r.opt.now())
+	if parseErr != nil {
+		verdict, reason, err = r.record(stage, statement.Hold, "the agent asked for a decision Span cannot show: "+parseErr.Error(), nil)
+		return verdict, reason, true, err
+	}
+	r.cur.Decision = &req
+	verdict, reason, err = r.record(stage, statement.Hold, "decision needed: "+req.Title, func(s *statement.Statement) {
+		s.Fingerprint = req.Dedupe
+	})
+	return verdict, reason, true, err
+}
+
 // commitBlocked parks the run on a commit the repository refused. It keeps what the hook
 // said, counts how often the same output came back, and records it where a person looks.
 func (r *runner) commitBlocked(err error) (string, string, error) {
@@ -873,7 +912,13 @@ func (r *runner) commitBlocked(err error) (string, string, error) {
 	r.journal("blocker", map[string]string{
 		"class": b.Class, "fingerprint": b.Fingerprint, "count": strconv.Itoa(b.Count),
 	})
-	return r.record(build, statement.Hold, b.Summary(), func(s *statement.Statement) {
+	reason := b.Summary()
+	if !b.Retryable() {
+		req := decision.FromCommit(b, build, r.opt.now())
+		r.cur.Decision = &req
+		reason += ". Decision needed: answer it on the desk to go on"
+	}
+	return r.record(build, statement.Hold, reason, func(s *statement.Statement) {
 		s.Fingerprint = b.Fingerprint
 		s.Commands = []statement.Command{{
 			Command: "git commit", ExitCode: 1, Error: b.Summary(), Output: b.Evidence, Fingerprint: b.Fingerprint,
@@ -1710,7 +1755,7 @@ func (r *runner) promptInput(stage, failure string) prompt.Input {
 		r.shown[stage] = sigs
 	}
 	return prompt.Input{
-		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature),
+		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature), DecisionPath: r.decisionFor(stage),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
 		Handoffs: handoff.Paths(r.cur.ID, names),
 		Failure:  failure, Manifest: manifest,
@@ -2118,4 +2163,64 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// decisionFor is the request file the stage may write: only build has one.
+func (r *runner) decisionFor(stage string) string {
+	if stage != build {
+		return ""
+	}
+	return r.decisionPath()
+}
+
+// Decide answers the open decision of a run and continues where the answer says. An answer
+// that is not one of the options changes nothing.
+func Decide(ctx context.Context, opt Options, id string, answer decision.Answer) (Result, error) {
+	r, release, err := acquire(opt, id)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+	req := r.cur.Decision
+	if req == nil {
+		return Result{}, errors.New("this run has no open decision")
+	}
+	option, err := req.Choose(answer)
+	if err != nil {
+		return Result{}, err
+	}
+	text := strings.TrimSpace(answer.Text)
+	body := option.Label
+	if text != "" {
+		body += ": " + text
+	}
+	if err := writeAnswers(r.spanDir(), []Answer{{Question: req.Title, Body: body}}); err != nil {
+		return Result{}, err
+	}
+	r.journal("decision", map[string]string{"id": req.ID, "class": req.Class, "option": option.ID, "textChars": strconv.Itoa(len(text))})
+	r.cur.Decision = nil
+	switch option.Then {
+	case decision.Stop:
+		r.cur.Hold = false
+		r.cur.Stop = true
+		r.cur.Reason = "stopped by a decision: " + option.Label
+		if err := r.save(); err != nil {
+			return Result{}, err
+		}
+		return r.finish(statement.Stop), nil
+	case decision.Build:
+		// The hook output stays in front of the next build; only the count starts over.
+		kept := r.cur.Blocker
+		applyRewind(&r.cur, build)
+		if kept != nil {
+			kept.Count = 0
+			r.cur.Blocker = kept
+		}
+	default:
+		r.clearWait()
+	}
+	if err := r.save(); err != nil {
+		return Result{}, err
+	}
+	return r.run(ctx)
 }

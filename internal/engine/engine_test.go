@@ -33,6 +33,9 @@ type fakeAgents struct {
 	buildHang bool
 	wanted    []string
 	selectErr error
+	// buildHook sees the build prompt before the build writes its document, the way an
+	// agent reads what it was told.
+	buildHook func(prompt string)
 }
 
 func (f *fakeAgents) Select(want string) (agent.Selection, error) {
@@ -62,6 +65,9 @@ func (f *fakeAgents) Frame(_ context.Context, _, _ string, text string) (FrameDo
 func (f *fakeAgents) Build(ctx context.Context, _, workspace, text string) error {
 	f.builds++
 	f.prompts = append(f.prompts, text)
+	if f.buildHook != nil {
+		f.buildHook(text)
+	}
 	if f.buildHang {
 		<-ctx.Done()
 		return ctx.Err()
