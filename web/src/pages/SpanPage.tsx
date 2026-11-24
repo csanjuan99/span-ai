@@ -6,7 +6,8 @@ import { Link, useParams } from "react-router"
 import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
-import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
 import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
@@ -18,6 +19,7 @@ import { Implementation } from "@/components/implementation/Implementation"
 import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
 import { Ledger } from "@/components/ledger/Ledger"
+import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
@@ -101,6 +103,24 @@ export function SpanPage() {
   })
   const canAct = Boolean(cursor?.hold) || idle
   const approval = waiting ? null : approvalOf(cursor ?? null)
+  // The failing statement stays on disk through a busy checkout, an approval and a conflict,
+  // but none of those wait on the fix, so the failed check only shows when nothing else does.
+  const showFailure = failure !== null && !busy && approval === null && conflictKind === null
+  const needs = needsYou({
+    agentBlocked: agentBlock !== null,
+    questions: waiting,
+    decision: cursor?.decision !== undefined,
+    conflict: conflict !== undefined || conflictKind !== null,
+    approval: approval !== null,
+    busy,
+    failed: showFailure,
+    stop: Boolean(cursor?.stop),
+    idle,
+    hold: Boolean(cursor?.hold),
+    done: Boolean(cursor?.done),
+  })
+  const attempt = failure === null ? "" : attemptLine(failure)
+  const where = needs?.kind === "failed" && attempt !== "" ? `${current} · ${attempt}` : current
 
   /**
    * Runs one action the page offers and says what happened. Every action reports its failure
@@ -201,28 +221,38 @@ export function SpanPage() {
         />
         <p className="text-pretty">{line}</p>
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
-        {agentBlock !== null ? (
-          <section className="flex flex-col gap-1 border border-border p-3" aria-label="Agent blocked">
-            <p className="text-sm text-hold">{agentBlock.title}</p>
-            <p className="text-pretty text-sm">{agentBlock.detail}</p>
-            <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
-          </section>
-        ) : null}
-        {approval !== null ? (
-          <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
-        ) : null}
-        {failure !== null && !busy && approval === null && conflictKind === null ? <FailureCard failure={failure} /> : null}
-        {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
-        {conflict === undefined && conflictKind === "choose" ? (
-          <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
-        ) : null}
-        {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
-          <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
-        ) : null}
-        {state.agent?.relaunch ? (
-          <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
-            Relaunch
-          </Button>
+        {needs !== null ? (
+          <NeedsYou needs={needs} where={where}>
+            {agentBlock !== null ? (
+              <section className="flex flex-col gap-1" aria-label="Agent blocked">
+                <h2 className="text-base font-medium">{agentBlock.title}</h2>
+                <p className="text-pretty text-sm">{agentBlock.detail}</p>
+                <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
+              </section>
+            ) : null}
+            {approval !== null ? (
+              <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
+            ) : null}
+            {showFailure ? <FailureCard failure={failure} /> : null}
+            {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
+            {conflict === undefined && conflictKind === "choose" ? (
+              <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
+            ) : null}
+            {waiting ? (
+              <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
+            ) : null}
+            {cursor?.decision !== undefined && !waiting ? (
+              <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
+            ) : null}
+            {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
+              <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
+            ) : null}
+            {state.agent?.relaunch ? (
+              <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
+                Relaunch
+              </Button>
+            ) : null}
+            </NeedsYou>
         ) : null}
         {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
       </header>
@@ -251,14 +281,6 @@ export function SpanPage() {
             </div>
           ) : null}
           <Ledger statements={state.span?.statements ?? []} />
-          {waiting ? (
-            <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
-          ) : null}
-
-          {cursor?.decision !== undefined && !waiting ? (
-            <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
-          ) : null}
-
           {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
           {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
           <div className="flex flex-col gap-3 border-t border-border pt-4">

@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -34,7 +36,7 @@ export function Waiting(props: {
   }
 
   return (
-    <form className="flex flex-col gap-3 border-t border-border pt-4" onSubmit={(event) => void answer(event)}>
+    <form className="flex flex-col gap-3" onSubmit={(event) => void answer(event)}>
       <p className="text-pretty text-sm text-muted-foreground">
         Frame reads the story in the language it is written and carries what it already decides into this run. Answer here
         when the story does not say it.

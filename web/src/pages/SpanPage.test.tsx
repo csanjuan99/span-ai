@@ -100,3 +100,46 @@ describe("a stage held by its mode", () => {
     expect(screen.queryByRole("button", { name: "Approve merge" })).toBeNull()
   })
 })
+
+describe("the block that holds what the run waits on", () => {
+  const decision = {
+    id: "d1",
+    class: "scope",
+    stage: "frame",
+    title: "Where should delivery attempts be recorded?",
+    happened: "Two designs fit the story.",
+    evidence: [],
+    options: [{ id: "a", label: "A table", consequence: "One migration.", reversible: true }],
+    recommendation: "a",
+  }
+
+  it("holds the questions of a waiting run, above the tabs", () => {
+    state = held({ stage: "frame", reason: "open questions: 1", questions: ["What is the retry limit?"] })
+    page()
+    const block = screen.getByRole("region", { name: "Needs you" })
+    expect(block.textContent).toContain("Waiting for your answers")
+    expect(block.textContent).toContain("What is the retry limit?")
+    expect(screen.getByRole("button", { name: "Answer and continue" })).toBeTruthy()
+  })
+
+  it("holds an open decision, and names the case in words", () => {
+    state = held({ stage: "frame", reason: "decision needed", decision })
+    page()
+    const block = screen.getByRole("region", { name: "Needs you" })
+    expect(block.textContent).toContain("Decision needed")
+    expect(block.textContent).toContain("Where should delivery attempts be recorded?")
+    expect(block.textContent).toContain("recommended")
+  })
+
+  it("names the approval and keeps it as the action", () => {
+    state = held({})
+    page()
+    expect(screen.getByRole("region", { name: "Needs you" }).textContent).toContain("Approval needed")
+  })
+
+  it("draws no block while the run goes on by itself", () => {
+    state = held({ hold: false, reason: "" })
+    page()
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull()
+  })
+})

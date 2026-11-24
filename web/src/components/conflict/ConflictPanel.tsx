@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 
 import { abortConflict, chooseConflict, hintConflict } from "@/lib/api"
@@ -70,7 +72,7 @@ export function ConflictPanel({ id, conflict }: { id: string; conflict: Conflict
   const abort = () => void send("abort", () => abortConflict(id), "the merge was not aborted")
 
   return (
-    <section aria-labelledby="conflict-title" className="flex flex-col gap-3 border border-border p-3">
+    <section aria-labelledby="conflict-title" className="flex flex-col gap-3">
       <h2 id="conflict-title" className="text-balance text-sm text-hold">
         Merge conflict
       </h2>

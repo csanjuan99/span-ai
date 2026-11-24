@@ -23,7 +23,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | ID | Spec | Route | What | Commit |
 | --- | --- | --- | --- | --- |
 | T1 | S3, S6 | inline | Shell and StageRail on the tokens: pills, durations, theme toggle | done, see git log |
-| T2 | S2 | inline | `NeedsYou` block lifted out of the Ledger tab, covering every case | |
+| T2 | S2 | inline | `NeedsYou` block lifted out of the Ledger tab, covering every case | done, see git log |
 | T3 | S4 | inline | Run controls and "Safe and kept" aside | |
 | T4 | S5 | inline | Proof summary from `buildReport` | |
 | T5 | S5 | deferred | Backend: test counts from the prove gate (own feature) | |

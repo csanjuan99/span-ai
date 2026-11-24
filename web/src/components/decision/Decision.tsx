@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, type FormEvent } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -27,7 +29,7 @@ export function Decision(props: {
   }
 
   return (
-    <form className="flex flex-col gap-4 border-t border-border pt-4" onSubmit={(event) => void decide(event)}>
+    <form className="flex flex-col gap-4" onSubmit={(event) => void decide(event)}>
       <div className="flex flex-col gap-1">
         <h3 className="text-balance text-base font-medium">{request.title}</h3>
         <p className="text-pretty text-sm text-muted-foreground">{request.happened}</p>
