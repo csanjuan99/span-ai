@@ -323,3 +323,88 @@ export interface BranchChoice {
   branches: string[]
   defaultBase: string
 }
+
+/** Where a fact in the example map came from. */
+export const shapeSourceKinds = ["prompt", "answer", "code", "context"] as const
+
+/** The states of one question. */
+export const shapeQuestionStates = ["open", "answered", "assumed"] as const
+
+/** The states of one product-context proposal. */
+export const shapeProposalStates = ["proposed", "accepted"] as const
+
+/** The states of a shaping session. */
+export const shapeStates = ["interviewing", "ready", "split", "sealed"] as const
+
+/** Where a fact in the example map came from. */
+export interface ShapeSource {
+  kind: (typeof shapeSourceKinds)[number]
+  ref: string
+}
+
+export interface ShapeRule {
+  id: string
+  text: string
+  source: ShapeSource
+}
+
+export interface ShapeExample {
+  id: string
+  /** The id of the rule the example illustrates. */
+  rule: string
+  text: string
+  source: ShapeSource
+}
+
+export interface ShapeQuestion {
+  id: string
+  text: string
+  blocks: string
+  assume: string
+  status: (typeof shapeQuestionStates)[number]
+  answer: string
+}
+
+export interface ShapeSplit {
+  story: string
+  leftOut: string
+}
+
+export interface ShapeProposal {
+  id: string
+  section: string
+  text: string
+  status: (typeof shapeProposalStates)[number]
+}
+
+export interface ShapeJira {
+  key: string
+  url: string
+  status: string
+}
+
+/** One shaping session, as the server keeps it. */
+export interface ShapeSession {
+  id: string
+  workspace: string
+  repo: string
+  idea: string
+  status: (typeof shapeStates)[number]
+  rules: ShapeRule[]
+  examples: ShapeExample[]
+  questions: ShapeQuestion[]
+  split: ShapeSplit[]
+  proposals: ShapeProposal[]
+  story: string
+  digest: string
+  jira: ShapeJira | null
+}
+
+/** What creating the story in Jira would do, shown before anything is created. */
+export interface ShapePreview {
+  project: string
+  board: { id: number; name: string }
+  backlogStatuses: string[]
+  summary: string
+  description: string
+}

@@ -1,8 +1,13 @@
+import { isRecord, rows, text } from "@/lib/guards"
 import {
   conflictActions,
   conflictKinds,
   conflictRisks,
   conflictStates,
+  shapeProposalStates,
+  shapeQuestionStates,
+  shapeSourceKinds,
+  shapeStates,
   type AcceptanceView,
   type Conflict,
   type ConflictGroup,
@@ -23,6 +28,15 @@ import {
   type BranchChoice,
   type AgentStatus,
   type SpanHead,
+  type ShapeExample,
+  type ShapeJira,
+  type ShapePreview,
+  type ShapeProposal,
+  type ShapeQuestion,
+  type ShapeRule,
+  type ShapeSession,
+  type ShapeSource,
+  type ShapeSplit,
 } from "@/lib/types"
 
 /** One run a submission started. A submission over several repos starts one per repo. */
@@ -43,14 +57,6 @@ export interface Started {
   /** Some repos started and some did not; `notes` says which. */
   partial: boolean
   notes: string
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value : ""
 }
 
 function count(value: unknown): number {
@@ -482,13 +488,18 @@ export async function startRun(form: FormData): Promise<Started | string> {
   return raw
 }
 
+/** The error JSON, or a body that was not JSON read as its own message. */
+function errorBody(raw: string): unknown {
+  try {
+    return parseJSON(raw)
+  } catch {
+    return { message: raw || "request failed" }
+  }
+}
+
 /** The message a failed response carries, or the raw body when it is not the error JSON. */
 function failureText(raw: string): string {
-  try {
-    return messageOf(parseJSON(raw))
-  } catch {
-    return raw || "request failed"
-  }
+  return messageOf(errorBody(raw))
 }
 
 async function postJSON(url: string, body: unknown): Promise<void> {
@@ -729,4 +740,147 @@ export function spanHeadsOf(value: unknown): SpanHead[] {
   const body = isRecord(value) ? value : {}
   const rows = Array.isArray(body.spans) ? body.spans : []
   return rows.map(spanHeadOf).filter((row) => row.id !== "")
+}
+
+/** A refusal that carries the server's error code beside its message. */
+export class ApiError extends Error {
+  readonly code: string
+
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = "ApiError"
+    this.code = code
+  }
+}
+
+async function shapeRequest(method: "GET" | "POST", url: string, body?: unknown): Promise<unknown> {
+  const headers = new Headers({ Accept: "application/json" })
+  if (body !== undefined) {
+    headers.set("Content-Type", "application/json")
+  }
+  const response = await fetch(url, { method, headers: withAuth(headers), body: body === undefined ? undefined : JSON.stringify(body) })
+  refuseUnauthorized(response)
+  const raw = await response.text()
+  if (response.ok) {
+    return raw === "" ? null : parseJSON(raw)
+  }
+  const payload = errorBody(raw)
+  throw new ApiError(isRecord(payload) ? text(payload.error) : "", messageOf(payload))
+}
+
+function shapeSource(value: unknown): ShapeSource {
+  const row = isRecord(value) ? value : {}
+  return { kind: oneOf(row.kind, shapeSourceKinds, "prompt"), ref: text(row.ref) }
+}
+
+function shapeJira(value: unknown): ShapeJira | null {
+  if (!isRecord(value) || text(value.key) === "") {
+    return null
+  }
+  return { key: text(value.key), url: text(value.url), status: text(value.status) }
+}
+
+/** Reads one shaping session. The reply is untrusted input, so every part has a safe default. */
+export function shapeSession(value: unknown): ShapeSession {
+  const body = isRecord(value) ? value : {}
+  const map = isRecord(body.map) ? body.map : {}
+  const rules: ShapeRule[] = rows(map.rules).map((row) => ({ id: text(row.id), text: text(row.text), source: shapeSource(row.source) }))
+  const examples: ShapeExample[] = rows(map.examples).map((row) => ({
+    id: text(row.id),
+    rule: text(row.rule),
+    text: text(row.text),
+    source: shapeSource(row.source),
+  }))
+  const questions: ShapeQuestion[] = rows(map.questions).map((row) => ({
+    id: text(row.id),
+    text: text(row.text),
+    blocks: text(row.blocks),
+    assume: text(row.assume),
+    status: oneOf(row.status, shapeQuestionStates, "open"),
+    answer: text(row.answer),
+  }))
+  const split: ShapeSplit[] = rows(body.split).map((row) => ({ story: text(row.story), leftOut: text(row.leftOut) }))
+  const proposals: ShapeProposal[] = rows(body.proposals).map((row) => ({
+    id: text(row.id),
+    section: text(row.section),
+    text: text(row.text),
+    status: oneOf(row.status, shapeProposalStates, "proposed"),
+  }))
+  return {
+    id: text(body.id),
+    workspace: text(body.workspace),
+    repo: text(body.repo),
+    idea: text(body.idea),
+    status: oneOf(body.status, shapeStates, "interviewing"),
+    rules,
+    examples,
+    questions,
+    split,
+    proposals,
+    story: text(body.story),
+    digest: text(body.digest),
+    jira: shapeJira(body.jira),
+  }
+}
+
+/** Reads the Jira preview. */
+export function shapePreview(value: unknown): ShapePreview {
+  const body = isRecord(value) ? value : {}
+  const board = isRecord(body.board) ? body.board : {}
+  return {
+    project: text(body.project),
+    board: { id: count(board.id), name: text(board.name) },
+    backlogStatuses: stringList(body.backlogStatuses),
+    summary: text(body.summary),
+    description: text(body.description),
+  }
+}
+
+/** The sessions of one workspace, newest as the server orders them. */
+export async function listShapes(workspace: string): Promise<ShapeSession[]> {
+  const body = await shapeRequest("GET", `/shapes?workspace=${encodeURIComponent(workspace)}`)
+  return Array.isArray(body) ? body.map(shapeSession) : []
+}
+
+/** One session. */
+export async function getShape(id: string, workspace: string): Promise<ShapeSession> {
+  return shapeSession(await shapeRequest("GET", `/shapes/${encodeURIComponent(id)}?workspace=${encodeURIComponent(workspace)}`))
+}
+
+/** Starts a session; the server runs the first turn before it answers. */
+export async function createShape(input: { workspace: string; repo?: string; idea: string; agent?: string; model?: string }): Promise<ShapeSession> {
+  return shapeSession(await shapeRequest("POST", "/shapes", input))
+}
+
+/** Sends every answer and accepted assumption of one round; the server runs the next turn. */
+export async function answerShape(id: string, workspace: string, answers: { question: string; text: string }[], assume: string[]): Promise<ShapeSession> {
+  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/answers`, { workspace, answers, assume }))
+}
+
+/** Accepts the product-context proposals the person ticked. */
+export async function acceptShapeContext(id: string, workspace: string, accept: string[]): Promise<ShapeSession> {
+  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/context`, { workspace, accept }))
+}
+
+/** Seals the story. Refuses with `shape_not_ready` while a question is open. */
+export async function sealShape(id: string, workspace: string): Promise<ShapeSession> {
+  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/seal`, { workspace }))
+}
+
+/** What the Jira issue would look like, with nothing created. */
+export async function previewShapeIssue(id: string, workspace: string, project: string, board: string): Promise<ShapePreview> {
+  const query = new URLSearchParams({ workspace, project })
+  if (board.trim() !== "") {
+    query.set("board", board.trim())
+  }
+  return shapePreview(await shapeRequest("GET", `/shapes/${encodeURIComponent(id)}/jira/preview?${query.toString()}`))
+}
+
+/** Creates the issue in the backlog. Only the confirm button calls this, so `confirm` is always true. */
+export async function createShapeIssue(id: string, workspace: string, project: string, board: string): Promise<ShapeSession> {
+  const request: { workspace: string; project: string; board?: number; confirm: true } = { workspace, project, confirm: true }
+  if (board.trim() !== "") {
+    request.board = Number(board.trim())
+  }
+  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/jira`, request))
 }
