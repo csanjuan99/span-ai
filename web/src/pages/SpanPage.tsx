@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
@@ -21,8 +23,10 @@ import { Rewind } from "@/components/rewind/Rewind"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
 import { Shell } from "@/components/shell/Shell"
 import { StageRail } from "@/components/stage-rail/StageRail"
+import { stageDurations } from "@/lib/stage-times"
 import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
+import { ActionWithHint } from "@/components/action-with-hint/ActionWithHint"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -61,17 +65,6 @@ export function SpanPage() {
           done: cursor?.done ?? false,
         })
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setNote("")
-    try {
-      await saveInstruction(id, selected, body)
-      setNote("Instruction saved.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the instruction was not saved")
-    }
-  }
-
   const lines = withAgent(
     timelineLines({
       statements: state.span?.statements ?? [],
@@ -109,100 +102,83 @@ export function SpanPage() {
   const canAct = Boolean(cursor?.hold) || idle
   const approval = waiting ? null : approvalOf(cursor ?? null)
 
-  async function answer(answers: { question: string; body: string }[]) {
+  /**
+   * Runs one action the page offers and says what happened. Every action reports its failure
+   * the same way, so the person always reads either the confirmation or the reason.
+   */
+  async function act(
+    request: () => Promise<unknown>,
+    outcome: { log: string; say: string | ((result: unknown) => string); failed: string },
+  ) {
     setNote("")
     try {
-      await answerRun(id, answers)
-      state.note("answer saved")
-      setNote("Answer saved. Frame is reading the story again.")
+      const result = await request()
+      if (outcome.log !== "") {
+        state.note(outcome.log)
+      }
+      setNote(typeof outcome.say === "function" ? outcome.say(result) : outcome.say)
     } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the answer was not saved")
+      setNote(err instanceof Error ? err.message : outcome.failed)
     }
   }
 
+  const asked = (what: string) => (why: unknown) => (typeof why === "string" && why !== "" ? why : `${what} requested.`)
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await act(() => saveInstruction(id, selected, body), {
+      log: "",
+      say: "Instruction saved.",
+      failed: "the instruction was not saved",
+    })
+  }
+
+  const answer = (answers: { question: string; body: string }[]) =>
+    act(() => answerRun(id, answers), {
+      log: "answer saved",
+      say: "Answer saved. Frame is reading the story again.",
+      failed: "the answer was not saved",
+    })
+
   async function decide(option: string, text: string) {
-    setNote("")
     const open = cursor?.decision
     if (open === undefined) {
       return
     }
-    try {
-      await decideRun(id, open.id, option, text)
-      state.note("decision saved")
-      setNote("Decision saved. The run is going on.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the decision was not saved")
-    }
+    await act(() => decideRun(id, open.id, option, text), {
+      log: "decision saved",
+      say: "Decision saved. The run is going on.",
+      failed: "the decision was not saved",
+    })
   }
 
-  async function reloadStory() {
-    setNote("")
-    try {
-      await readStory(id)
-      state.note("reading the story again")
-      setNote("Reading the story again.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the story was not read")
-    }
-  }
+  const reloadStory = () =>
+    act(() => readStory(id), {
+      log: "reading the story again",
+      say: "Reading the story again.",
+      failed: "the story was not read",
+    })
 
-  async function resume() {
-    setNote("")
-    try {
-      await resumeRun(id)
-      state.note("resume")
-      setNote("The run is continuing.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run did not continue")
-    }
-  }
+  const resume = () =>
+    act(() => resumeRun(id), { log: "resume", say: "The run is continuing.", failed: "the run did not continue" })
 
   async function approve() {
     if (approval === null) {
       return
     }
-    setNote("")
-    try {
-      await approveStage(id, approval.stage, approval.environment)
-      state.note(`approved ${approval.stage}`)
-      setNote("Approved. The run is continuing.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the approval was not saved")
-    }
+    await act(() => approveStage(id, approval.stage, approval.environment), {
+      log: `approved ${approval.stage}`,
+      say: "Approved. The run is continuing.",
+      failed: "the approval was not saved",
+    })
   }
 
-  async function pause() {
-    setNote("")
-    try {
-      const why = await pauseRun(id)
-      state.note("pause")
-      setNote(why === "" ? "Pause requested." : why)
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the pause was not requested")
-    }
-  }
+  const pause = () => act(() => pauseRun(id), { log: "pause", say: asked("Pause"), failed: "the pause was not requested" })
 
-  async function stop() {
-    setNote("")
-    try {
-      const why = await stopRun(id)
-      state.note("stop")
-      setNote(why === "" ? "Stop requested." : why)
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run was not stopped")
-    }
-  }
+  const stop = () => act(() => stopRun(id), { log: "stop", say: asked("Stop"), failed: "the run was not stopped" })
 
-  async function relaunch() {
-    setNote("")
-    try {
-      await relaunchRun(id)
-      state.note("relaunch")
-      setNote("The run is starting again.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run did not start")
-    }
-  }
+  const relaunch = () =>
+    act(() => relaunchRun(id), { log: "relaunch", say: "The run is starting again.", failed: "the run did not start" })
 
   return (
     <Shell path={`~/spans/${id}`} status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`} lines={lines}>
@@ -217,7 +193,12 @@ export function SpanPage() {
         {cursor !== undefined && branchLine(cursor) !== "" ? (
           <p className="text-pretty text-sm text-muted-foreground">{branchLine(cursor)}</p>
         ) : null}
-        <StageRail stage={cursor?.stage ?? ""} verdict={verdict} sealed={sealed} />
+        <StageRail
+          stage={cursor?.stage ?? ""}
+          verdict={verdict}
+          sealed={sealed}
+          durations={stageDurations(state.span?.statements ?? [])}
+        />
         <p className="text-pretty">{line}</p>
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
         {agentBlock !== null ? (
@@ -228,12 +209,7 @@ export function SpanPage() {
           </section>
         ) : null}
         {approval !== null ? (
-          <div className="flex flex-col gap-2">
-            <Button type="button" className="self-start" onClick={() => void approve()}>
-              {approval.label}
-            </Button>
-            <p className="text-pretty text-sm text-muted-foreground">{approval.hint}</p>
-          </div>
+          <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
         ) : null}
         {failure !== null && !busy && approval === null && conflictKind === null ? <FailureCard failure={failure} /> : null}
         {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
@@ -241,12 +217,7 @@ export function SpanPage() {
           <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
         ) : null}
         {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
-          <div className="flex flex-col gap-2">
-            <Button type="button" className="self-start" onClick={() => void resume()}>
-              {action.label}
-            </Button>
-            <p className="text-pretty text-sm text-muted-foreground">{action.hint}</p>
-          </div>
+          <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
         ) : null}
         {state.agent?.relaunch ? (
           <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>

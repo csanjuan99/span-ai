@@ -1,10 +1,20 @@
-import * as React from "react"
+"use client"
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 
 type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
 
 type ThemeProviderProps = {
-  children: React.ReactNode
+  children: ReactNode
   defaultTheme?: Theme
   storageKey?: string
   disableTransitionOnChange?: boolean
@@ -18,7 +28,7 @@ type ThemeProviderState = {
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 const THEME_VALUES: Theme[] = ["dark", "light", "system"]
 
-const ThemeProviderContext = React.createContext<
+const ThemeProviderContext = createContext<
   ThemeProviderState | undefined
 >(undefined)
 
@@ -83,7 +93,7 @@ export function ThemeProvider({
   disableTransitionOnChange = true,
   ...props
 }: ThemeProviderProps) {
-  const [theme, setThemeState] = React.useState<Theme>(() => {
+  const [theme, setThemeState] = useState<Theme>(() => {
     const storedTheme = localStorage.getItem(storageKey)
     if (isTheme(storedTheme)) {
       return storedTheme
@@ -92,7 +102,9 @@ export function ThemeProvider({
     return defaultTheme
   })
 
-  const setTheme = React.useCallback(
+  // Stable identity: the context value below is compared by consumers, and the `storage`
+  // listener depends on it.
+  const setTheme = useCallback(
     (nextTheme: Theme) => {
       localStorage.setItem(storageKey, nextTheme)
       setThemeState(nextTheme)
@@ -100,7 +112,8 @@ export function ThemeProvider({
     [storageKey]
   )
 
-  const applyTheme = React.useCallback(
+  // Stable identity: the effect that follows the system theme re-subscribes when it changes.
+  const applyTheme = useCallback(
     (nextTheme: Theme) => {
       const root = document.documentElement
       const resolvedTheme =
@@ -119,7 +132,7 @@ export function ThemeProvider({
     [disableTransitionOnChange]
   )
 
-  React.useEffect(() => {
+  useEffect(() => {
     applyTheme(theme)
 
     if (theme !== "system") {
@@ -138,7 +151,7 @@ export function ThemeProvider({
     }
   }, [theme, applyTheme])
 
-  React.useEffect(() => {
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) {
         return
@@ -178,7 +191,7 @@ export function ThemeProvider({
     }
   }, [storageKey])
 
-  React.useEffect(() => {
+  useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) {
         return
@@ -203,7 +216,8 @@ export function ThemeProvider({
     }
   }, [defaultTheme, storageKey])
 
-  const value = React.useMemo(
+  // Without memoizing, every provider render would re-render every consumer.
+  const value = useMemo(
     () => ({
       theme,
       setTheme,
@@ -218,8 +232,11 @@ export function ThemeProvider({
   )
 }
 
+/** The theme state, or undefined when no provider is mounted (a page shown on its own). */
+export const useOptionalTheme = () => useContext(ThemeProviderContext)
+
 export const useTheme = () => {
-  const context = React.useContext(ThemeProviderContext)
+  const context = useContext(ThemeProviderContext)
 
   if (context === undefined) {
     throw new Error("useTheme must be used within a ThemeProvider")
