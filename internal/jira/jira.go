@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +54,7 @@ type Error struct {
 	Msg  string
 }
 
+// Error formats the code and message.
 func (e *Error) Error() string {
 	if e.Msg == "" {
 		return e.Code
@@ -59,6 +62,7 @@ func (e *Error) Error() string {
 	return e.Code + ": " + e.Msg
 }
 
+// SpanCode returns the stable code callers match on.
 func (e *Error) SpanCode() string { return e.Code }
 
 // Path is the account file for one project: <project>/.span/jira.json.
@@ -134,9 +138,13 @@ func Load(project string) (Account, error) {
 
 // Logout removes the saved account for this project.
 func Logout(project string) Public {
-	path, err := Path(project)
-	if err == nil {
-		_ = os.Remove(path)
+	if path, err := Path(project); err == nil {
+		// Only a missing file counts as signed out. Any other failure leaves
+		// the account on disk, and the reload below reports it as configured.
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			account, loadErr := Load(project)
+			return View(account, loadErr == nil)
+		}
 	}
 	account, err := Load(project)
 	return View(account, err == nil)
@@ -172,8 +180,8 @@ func (c Client) Issue(ctx context.Context, key string) (Story, error) {
 		return Story{}, err
 	}
 	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return Story{}, &Error{Code: "invalid", Msg: "jira response is not json"}
+	if err := decodeJSON(body, &payload); err != nil {
+		return Story{}, err
 	}
 	fields, _ := payload["fields"].(map[string]any)
 	names, _ := payload["names"].(map[string]string)
@@ -223,8 +231,8 @@ func (c Client) Search(ctx context.Context, jql string) ([]Story, error) {
 			Fields map[string]any `json:"fields"`
 		} `json:"issues"`
 	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, &Error{Code: "invalid", Msg: "jira response is not json"}
+	if err := decodeJSON(body, &payload); err != nil {
+		return nil, err
 	}
 	out := make([]Story, 0, len(payload.Issues))
 	for _, issue := range payload.Issues {
@@ -328,26 +336,13 @@ func (c Client) Transition(ctx context.Context, key, statusName string) error {
 	if statusName == "" {
 		return &Error{Code: "invalid", Msg: "status name is missing"}
 	}
-	endpoint := c.Account.BaseURL + "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
-	raw, err := c.get(ctx, endpoint)
+	available, err := c.transitions(ctx, key)
 	if err != nil {
 		return err
 	}
-	var payload struct {
-		Transitions []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-			To   struct {
-				Name string `json:"name"`
-			} `json:"to"`
-		} `json:"transitions"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return &Error{Code: "invalid", Msg: "jira response is not json"}
-	}
 	var id string
-	names := make([]string, 0, len(payload.Transitions))
-	for _, item := range payload.Transitions {
+	names := make([]string, 0, len(available))
+	for _, item := range available {
 		label := item.To.Name
 		if label == "" {
 			label = item.Name
@@ -366,6 +361,38 @@ func (c Client) Transition(ctx context.Context, key, statusName string) error {
 	if id == "" {
 		return &Error{Code: "invalid", Msg: c.scrub("status " + statusName + " is not available: " + strings.Join(names, ", "))}
 	}
+	return c.applyTransition(ctx, key, id)
+}
+
+// transition is one move Jira offers for an issue right now.
+type transition struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	To   struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"to"`
+}
+
+// transitions lists the moves available for the issue in its current status.
+func (c Client) transitions(ctx context.Context, key string) ([]transition, error) {
+	endpoint := c.Account.BaseURL + "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
+	raw, err := c.get(ctx, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	var payload struct {
+		Transitions []transition `json:"transitions"`
+	}
+	if err := decodeJSON(raw, &payload); err != nil {
+		return nil, err
+	}
+	return payload.Transitions, nil
+}
+
+// applyTransition performs the transition with this id on the issue.
+func (c Client) applyTransition(ctx context.Context, key, id string) error {
+	endpoint := c.Account.BaseURL + "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
 	body, err := json.Marshal(map[string]any{"transition": map[string]string{"id": id}})
 	if err != nil {
 		return err
@@ -517,4 +544,12 @@ func keyPattern(key string) bool {
 		}
 	}
 	return true
+}
+
+// decodeJSON parses a Jira response body, hiding the body from the error.
+func decodeJSON(raw []byte, v any) error {
+	if err := json.Unmarshal(raw, v); err != nil {
+		return &Error{Code: "invalid", Msg: "jira response is not json"}
+	}
+	return nil
 }

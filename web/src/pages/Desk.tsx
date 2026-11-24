@@ -7,8 +7,12 @@ import { Link, useNavigate } from "react-router"
 import { agentList, basePlaceholder, branchChoice, getJSON, postForm, rememberServeToken, serveToken, startRun, UnauthorizedError, type Started } from "@/lib/api"
 import { agentReviewMs, deskAgentLine, timelineLines, withAgent, type TimelineAction } from "@/lib/timeline"
 import type { AgentChoice, AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
+import { isRecord, reasonText } from "@/lib/guards"
+import { readJiraSession } from "@/lib/jira-session"
+import { repoNames } from "@/lib/repos"
 import { setupSteps, type StepId } from "@/lib/setup"
 import { spanHeadsOf } from "@/lib/api"
+import { PromptHeading } from "@/components/shell/PromptHeading"
 import { Shell } from "@/components/shell/Shell"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
 import { Setup } from "@/components/setup/Setup"
@@ -37,20 +41,9 @@ interface StoryHit {
   summary: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 function reposOf(value: unknown): Repo[] {
-  if (!isRecord(value) || !Array.isArray(value.repos)) {
-    return []
-  }
-  const names = value.repos.filter(isRecord).flatMap((item) => (typeof item.name === "string" && item.name !== "" ? [item.name] : []))
+  const names = repoNames(value)
   return names.map((name) => ({ name, checked: names.length === 1 }))
-}
-
-function reasonText(reason: unknown, fallback: string): string {
-  return reason instanceof Error ? reason.message : fallback
 }
 
 function sessionOf(value: unknown): JiraSession {
@@ -136,7 +129,7 @@ export function Desk() {
           setNeedsToken(true)
           setSettingsOpen(true)
         }
-        setListNote(err instanceof Error ? err.message : "the desk could not load")
+        setListNote(reasonText(err, "the desk could not load"))
       })
     return () => {
       closed = true
@@ -177,12 +170,13 @@ export function Desk() {
       return
     }
     try {
-      const body = await getJSON(`/jira?path=${encodeURIComponent(project)}`)
+      const body = await readJiraSession(project)
       setSession(sessionOf(body))
     } catch (err: unknown) {
       // The action that needs the session reports its own failure; this says why the band
       // still shows Jira as not connected.
-      setListNote(err instanceof Error ? `Jira session not read: ${err.message}` : "Jira session not read")
+      const detail = reasonText(err, "")
+      setListNote(detail === "" ? "Jira session not read" : `Jira session not read: ${detail}`)
     }
   }
 
@@ -213,7 +207,7 @@ export function Desk() {
     // Settled one by one: a Jira outage must not hide the repositories, nor the reverse.
     const [repoResult, jiraResult] = await Promise.allSettled([
       getJSON(`/repos?path=${encodeURIComponent(workspace)}`),
-      getJSON(`/jira?path=${encodeURIComponent(workspace)}`),
+      readJiraSession(workspace),
     ])
     if (repoResult.status === "fulfilled") {
       setRepos(reposOf(repoResult.value))
@@ -238,10 +232,10 @@ export function Desk() {
       await postForm("/jira/account", data)
       setToken("")
       setJiraNote("Session saved for this folder.")
-      const next = await getJSON(`/jira?path=${encodeURIComponent(workspace)}`)
+      const next = await readJiraSession(workspace)
       setSession(sessionOf(next))
     } catch (err: unknown) {
-      setJiraNote(err instanceof Error ? err.message : "the session was not saved")
+      setJiraNote(reasonText(err, "the session was not saved"))
     }
   }
 
@@ -253,20 +247,20 @@ export function Desk() {
       setJiraNote("Session closed for this folder.")
       setSession({ configured: false, email: "", baseUrl: "" })
     } catch (err: unknown) {
-      setJiraNote(err instanceof Error ? err.message : "the session was not closed")
+      setJiraNote(reasonText(err, "the session was not closed"))
     }
   }
 
-  async function loadStory() {
+  async function loadStory(key: string) {
     setStoryNote("")
     try {
-      const body = await getJSON(`/jira/issues/${encodeURIComponent(issue)}?path=${encodeURIComponent(workspace)}`)
+      const body = await getJSON(`/jira/issues/${encodeURIComponent(key)}?path=${encodeURIComponent(workspace)}`)
       const loaded = storyOf(body)
       setIssue(loaded.key)
       setStory(loaded.brief)
       void readSession(workspace)
     } catch (err: unknown) {
-      setStoryNote(err instanceof Error ? err.message : "the story could not be loaded")
+      setStoryNote(reasonText(err, "the story could not be loaded"))
     }
   }
 
@@ -277,7 +271,7 @@ export function Desk() {
       setStories(storiesOf(body))
       void readSession(workspace)
     } catch (err: unknown) {
-      setStoryNote(err instanceof Error ? err.message : "the stories could not be loaded")
+      setStoryNote(reasonText(err, "the stories could not be loaded"))
     }
   }
 
@@ -312,7 +306,7 @@ export function Desk() {
       note("run started")
       void navigate(`/spans/${result.id}`)
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "the run did not start"
+      const message = reasonText(err, "the run did not start")
       setRunNote(message)
       note(message)
     }
@@ -371,15 +365,19 @@ export function Desk() {
   return (
     <Shell path="~/span" status="desk" lines={lines}>
       <header>
-        <h1 className="text-balance text-xl">
-          <span className="text-primary">$ </span>span desk
-        </h1>
+        <PromptHeading as="h1">span desk</PromptHeading>
         <p className="text-pretty text-muted-foreground">Turn a Jira story into a reviewed pull request.</p>
         <p className="mt-1 text-sm">
           <Link className="text-primary underline-offset-4 hover:underline" to="/metrics">
             Metrics
           </Link>{" "}
           <span className="text-muted-foreground">how the runs on this server went</span>
+        </p>
+        <p className="mt-1 text-sm">
+          <Link className="text-primary underline-offset-4 hover:underline" to="/shaping">
+            Shape a story
+          </Link>{" "}
+          <span className="text-muted-foreground">turn an idea into a sealed story before the run</span>
         </p>
       </header>
       <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
@@ -392,10 +390,10 @@ export function Desk() {
             value={workspace}
             onChange={(event) => setWorkspace(event.target.value)}
             onBlur={() => {
-              void getJSON(`/jira?path=${encodeURIComponent(workspace)}`)
+              void readJiraSession(workspace)
                 .then((body) => setSession(sessionOf(body)))
                 .catch((err: unknown) => {
-                  setJiraNote(err instanceof Error ? err.message : "the session could not be read")
+                  setJiraNote(reasonText(err, "the session could not be read"))
                 })
             }}
           />
@@ -425,7 +423,7 @@ export function Desk() {
           <Label htmlFor="issue">Story key</Label>
           <Input id="issue" name="issue" value={issue} onChange={(event) => setIssue(event.target.value)} />
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => void loadStory()}>
+            <Button type="button" variant="secondary" onClick={() => void loadStory(issue)}>
               Load one story
             </Button>
             <Button type="button" variant="secondary" onClick={() => void loadMine()}>
@@ -442,14 +440,7 @@ export function Desk() {
                     className="text-left text-primary underline-offset-4 hover:underline"
                     onClick={() => {
                       setIssue(item.key)
-                      void getJSON(`/jira/issues/${encodeURIComponent(item.key)}?path=${encodeURIComponent(workspace)}`)
-                        .then((body) => {
-                          const loaded = storyOf(body)
-                          setStory(loaded.brief)
-                        })
-                        .catch((err: unknown) => {
-                          setStoryNote(err instanceof Error ? err.message : "the story could not be loaded")
-                        })
+                      void loadStory(item.key)
                     }}
                   >
                     {item.key} {item.summary}
@@ -511,9 +502,7 @@ export function Desk() {
         </div>
       </form>
       <section>
-        <h2 className="text-balance text-sm">
-          <span className="text-primary">$ </span>spans
-        </h2>
+        <PromptHeading>spans</PromptHeading>
         {listNote !== "" ? <p className="text-pretty text-sm text-destructive">{listNote}</p> : null}
         {spans.length === 0 ? (
           <p className="mt-2 text-pretty text-muted-foreground">No runs yet. Load a story above, then run it; it will appear here.</p>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 
-import { acceptanceView, agentStatus, getJSON, implementationView, liveFrame, snapshot, socketProtocol } from "@/lib/api"
+import { acceptanceView, agentStatus, getJSON, implementationView, liveFrame, snapshot, socketProtocol, UnauthorizedError } from "@/lib/api"
+import { reasonText } from "@/lib/guards"
 import { coveredByReplay, frameGate, reconnectDelay } from "@/lib/reconnect"
 import { agentReviewMs, type TimelineAction, type TimelineFrame } from "@/lib/timeline"
 import type { AgentStatus, AcceptanceView, ImplementationView, LiveFrame, Snapshot, Statement } from "@/lib/types"
@@ -25,10 +26,6 @@ function upsert(statements: Statement[], next: Statement): Statement[] {
     (item) => !(item.stage === next.stage && item.iteration === next.iteration && item.digest === next.digest),
   )
   return [...kept, next]
-}
-
-function reasonText(reason: unknown, fallback: string): string {
-  return reason instanceof Error ? reason.message : fallback
 }
 
 /** Reads one socket message; anything that is not a live frame is noise, not a crash. */
@@ -203,6 +200,8 @@ export function useSpan(id: string): SpanState {
     setAgent(null)
     setAgentAt("")
   }
+  // note and remember are dependencies of the live-stream effect below; a stable identity
+  // keeps that effect from tearing down and reopening the stream on every render.
   const note = useCallback((text: string) => {
     setActions((current) => [...current, { at: new Date().toISOString(), text }])
   }, [])
@@ -378,15 +377,32 @@ export function useSpan(id: string): SpanState {
 
   useEffect(() => {
     let gone = false
+    let lastFailure = ""
     const pull = () => {
       void getJSON(`/spans/${id}/agent`)
         .then((body) => {
           if (!gone) {
+            lastFailure = ""
             setAgent(agentStatus(body))
             setAgentAt(new Date().toISOString())
           }
         })
-        .catch(() => undefined)
+        .catch((err: unknown) => {
+          if (gone) {
+            return
+          }
+          // The poll keeps running; the agent line shows the last good read. A refused token is
+          // the page's error, any other failure is one line in the timeline, once per reason.
+          if (err instanceof UnauthorizedError) {
+            setError(err.message)
+            return
+          }
+          const reason = reasonText(err, "unknown error")
+          if (reason !== lastFailure) {
+            lastFailure = reason
+            note(`the agent status could not be read: ${reason}`)
+          }
+        })
     }
     pull()
     const timer = window.setInterval(pull, agentReviewMs)
@@ -394,7 +410,7 @@ export function useSpan(id: string): SpanState {
       gone = true
       window.clearInterval(timer)
     }
-  }, [id])
+  }, [id, note])
 
   return { span, acceptance, implementation, transcript, frames, actions, agent, agentAt, note, error, connected }
 }

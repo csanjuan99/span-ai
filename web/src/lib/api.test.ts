@@ -12,7 +12,14 @@ import {
   hintConflict,
   liveFrame,
   modelList,
+  ApiError,
+  answerShape,
+  createShape,
+  createShapeIssue,
+  previewShapeIssue,
   saveModel,
+  sealShape,
+  shapeSession,
   snapshot,
   startRun,
 } from "@/lib/api"
@@ -347,5 +354,81 @@ describe("models", () => {
     const [url, init] = fetchMock.mock.calls[0] ?? ["", {}]
     expect(url).toBe("/agent/model")
     expect(String(init.body)).toBe("project=%2Fp&cli=claude&model=opus")
+  })
+})
+
+const rawSession = {
+  id: "sh-1",
+  workspace: "/w",
+  repo: "api",
+  idea: "idea",
+  status: "ready",
+  map: {
+    rules: [{ id: "R1", text: "rule", source: { kind: "code", ref: "a.go" } }],
+    examples: [{ id: "E1", rule: "R1", text: "ex", source: { kind: "prompt", ref: "" } }],
+    questions: [{ id: "Q1", text: "q?", blocks: "R1", assume: "yes", status: "open", answer: "" }],
+  },
+  split: [{ story: "a", leftOut: "b" }],
+  proposals: [{ id: "P1", section: "Users", text: "t", status: "proposed" }],
+  story: "# s",
+  digest: "abc",
+  jira: { key: "PRJ-1", url: "https://j/PRJ-1", status: "Backlog" },
+}
+
+describe("shapeSession", () => {
+  it("flattens the map and keeps the source of every fact", () => {
+    const session = shapeSession(rawSession)
+    expect(session.rules[0]?.source).toEqual({ kind: "code", ref: "a.go" })
+    expect(session.examples[0]?.rule).toBe("R1")
+    expect(session.questions[0]?.status).toBe("open")
+    expect(session.jira?.key).toBe("PRJ-1")
+  })
+
+  it("treats an empty jira object as no issue and tolerates missing parts", () => {
+    const session = shapeSession({ id: "x", jira: {} })
+    expect(session.jira).toBeNull()
+    expect(session.rules).toEqual([])
+    expect(session.status).toBe("interviewing")
+  })
+})
+
+describe("shape client", () => {
+  it("posts the idea and reads the session back", async () => {
+    reply(201, rawSession)
+    const session = await createShape({ workspace: "/w", repo: "api", idea: "idea" })
+    expect(session.id).toBe("sh-1")
+    const call = vi.mocked(fetch).mock.calls[0]
+    expect(call?.[0]).toBe("/shapes")
+    expect(call?.[1]?.method).toBe("POST")
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ workspace: "/w", repo: "api", idea: "idea" })
+  })
+
+  it("sends answers and assumptions in one body", async () => {
+    reply(200, rawSession)
+    await answerShape("sh-1", "/w", [{ question: "Q1", text: "a" }], ["Q2"])
+    const call = vi.mocked(fetch).mock.calls[0]
+    expect(call?.[0]).toBe("/shapes/sh-1/answers")
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ workspace: "/w", answers: [{ question: "Q1", text: "a" }], assume: ["Q2"] })
+  })
+
+  it("keeps the error code and message of a refusal", async () => {
+    reply(409, { error: "shape_not_ready", message: "open questions: Q1" })
+    const failure = await sealShape("sh-1", "/w").catch((err: unknown) => err)
+    expect(failure).toBeInstanceOf(ApiError)
+    expect(failure).toMatchObject({ code: "shape_not_ready", message: "open questions: Q1" })
+  })
+
+  it("reads the preview from the query", async () => {
+    reply(200, { project: "PRJ", board: { id: 7, name: "Kanban" }, backlogStatuses: ["Backlog"], summary: "s", description: "d" })
+    const preview = await previewShapeIssue("sh-1", "/w", "PRJ", "7")
+    expect(preview.board).toEqual({ id: 7, name: "Kanban" })
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/shapes/sh-1/jira/preview?workspace=%2Fw&project=PRJ&board=7")
+  })
+
+  it("confirms the Jira creation explicitly", async () => {
+    reply(200, rawSession)
+    await createShapeIssue("sh-1", "/w", "PRJ", "")
+    const body: unknown = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    expect(body).toEqual({ workspace: "/w", project: "PRJ", confirm: true })
   })
 })

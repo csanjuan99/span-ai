@@ -4,7 +4,7 @@ Usage: [USAGE.md](USAGE.md).
 
 From this folder, run `./span`. The shell does not search the current directory, so `span` alone is not a command and nothing is added to `PATH`.
 
-`./span serve` opens the quickstart page. The **Folder** field is the project. The Jira login is saved in that folder at `.span/jira.json`, not once for the user. `./span repos` lists the checkout you point at, or the checkouts one level inside a folder. A story can run in one repo or in several. Each selected repo gets its own run and its own `feat/`, `fix/`, or `hotfix/` branch.
+`./span serve` opens the quickstart page. **Shape a story** on that page builds a user story with an agent that asks questions, seals it when nothing is open, and can create it in the backlog of a Kanban board in Jira ([USAGE.md](USAGE.md#shaping-a-story)). The **Folder** field is the project. The Jira login is saved in that folder at `.span/jira.json`, not once for the user. `./span repos` lists the checkout you point at, or the checkouts one level inside a folder. A story can run in one repo or in several. Each selected repo gets its own run and its own `feat/`, `fix/`, or `hotfix/` branch.
 
 Span runs one feature from a brief to a deploy. The same Go binary runs on a laptop or a server. Reports are the control surface.
 

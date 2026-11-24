@@ -153,6 +153,37 @@ If you also pass `--story`, that text is the brief and the issue key is still us
 | `unreachable` | The site URL does not answer. Check `https://your-site.atlassian.net` |
 | `invalid` | The site URL is missing, or Jira rejected the query |
 
+## Shaping a story
+
+A story can be built inside Span instead of in another tool. Open **Shape a story** on the desk (`/shaping`), give the idea and, in a folder of checkouts, the repo it touches.
+
+Each turn the agent reads the idea, your answers, the product context and the repository, and returns an example map: rules, examples under each rule, and at most three new questions. Every rule and example says where it came from: `prompt`, `answer`, `code` (the path it read) or `context`. A question shows what it blocks and the assumption Span would make. Answer it, or accept the assumption; an accepted assumption becomes a `Supuesto` in the story, never a rule. The method is Example Mapping, described in `harness/skills/user-story/references/interview.md`.
+
+The interview must not change the repository. Span compares `git status`, the content of every listed file, where `HEAD` points and every branch and tag before and after each turn, so a commit, a checkout or a new tag counts too. A difference fails the turn with `shape_repo_changed` naming what changed. Span does not undo it. Files git ignores and files outside the repo are not compared. The repo of a session must be the folder or a checkout inside it (`shape_repo_outside`).
+
+- **Product context.** The interview reads `span/context/product.md` in the folder when it exists: personas, glossary, known surfaces. The agent can propose additions. They are written to the file only when you tick them.
+- **Split.** When the map holds two outcomes a person could receive separately, the session shows the split and cannot be sealed. Start a narrower session.
+- **Seal.** The story can be sealed only when no question is open (`shape_not_ready` lists the open ones). Sealing keeps the markdown and its sha256 digest, and the session does not change after that.
+- **Jira.** A sealed story can be created in Jira, and only in the backlog of the project's Kanban board. Give the project key, and the board id when the project has more than one Kanban board. The page shows a preview first and creates only after you confirm. The issue is a Story, unassigned, labelled `span`. Span reads its status back and moves it into a backlog status when it landed elsewhere. It never puts it in To Do or In Progress. The key is stored in the session, so asking again creates nothing.
+- **Run.** **Start run** on a sealed session starts a run with the sealed story as the brief and the Jira key, when there is one, as the issue.
+
+Sessions live in `<workspace>/.span/shapes/<id>/session.json`.
+
+| Message | What it means |
+| --- | --- |
+| `shape_not_ready` | A question is still open. Answer it or accept its assumption |
+| `shape_sealed` | The session is sealed and does not change. Start another one |
+| `shape_not_sealed` | Jira and runs need a sealed story |
+| `shape_repo_changed` | The agent changed the repository during a turn. The paths are listed |
+| `shape_not_git` | The repo of the session is not a git checkout |
+| `shape_repo_outside` | The repo named for the session is outside the folder |
+| `confirm_required` | Creating in Jira was asked without confirming the preview |
+| `jira_backlog_disabled` | The board's Backlog column has no status, so the backlog is off. Turn it on in the board's column settings, or nothing is created |
+| `jira_board_ambiguous` | The project has more than one Kanban board. The message lists them; pass the board id |
+| `jira_not_in_backlog` | The issue was created but no transition reaches a backlog status. The key is stored and shown |
+
+HTTP: `POST /shapes`, `GET /shapes`, `GET /shapes/{id}`, `POST /shapes/{id}/answers`, `POST /shapes/{id}/context`, `POST /shapes/{id}/seal`, `GET /shapes/{id}/jira/preview`, `POST /shapes/{id}/jira`. Each takes the `workspace`; a relative one is read from the folder the server runs in, as on the desk.
+
 ## Branches
 
 Only three prefixes exist.

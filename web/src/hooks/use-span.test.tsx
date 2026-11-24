@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { agentReviewMs } from "@/lib/timeline"
 import { useSpan } from "@/hooks/use-span"
 
 type Listener = (event: { data?: unknown }) => void
@@ -62,6 +63,7 @@ const cursor = (stage: string, gitSHA = "") => ({ id: "s1", stage, gitSHA })
 const span = (stage: string) => ({ cursor: cursor(stage), statements: [], acceptance: [] })
 
 let failImplementation = false
+let failAgent = false
 /** Lets one test hold a response back to deliver it out of order. */
 let intercept: ((url: string) => Promise<Response> | undefined) | null = null
 
@@ -75,6 +77,9 @@ function respond(url: string): Response {
     return new Response(JSON.stringify({ skipped: true, lines: [] }), { status: 200 })
   }
   if (url.endsWith("/agent")) {
+    if (failAgent) {
+      return new Response(JSON.stringify({ message: "agent registry down" }), { status: 500 })
+    }
     return new Response(JSON.stringify({ id: "s1", running: false }), { status: 200 })
   }
   return new Response(JSON.stringify(span("frame")), { status: 200 })
@@ -84,6 +89,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   FakeSocket.made = []
   failImplementation = false
+  failAgent = false
   intercept = null
   vi.stubGlobal("WebSocket", FakeSocket)
   vi.stubGlobal(
@@ -401,5 +407,24 @@ describe("useSpan first load", () => {
     expect(result.current.acceptance?.skipped).toBe(true)
     expect(result.current.implementation).toBeNull()
     expect(result.current.error).toBe("")
+  })
+})
+
+describe("useSpan agent poll", () => {
+  it("records a failed poll once, keeps polling, and recovers", async () => {
+    failAgent = true
+    const { result } = renderHook(() => useSpan("s1"))
+    await settle()
+    const failures = () => result.current.actions.filter((line) => line.text.includes("the agent status could not be read: agent registry down"))
+    expect(failures()).toHaveLength(1)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(agentReviewMs)
+    })
+    expect(failures()).toHaveLength(1)
+    failAgent = false
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(agentReviewMs)
+    })
+    expect(result.current.agent).not.toBeNull()
   })
 })
