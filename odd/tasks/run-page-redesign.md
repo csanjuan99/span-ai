@@ -27,7 +27,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T3 | S4 | inline | Run controls and "Safe and kept" aside | done, see git log |
 | T4 | S5 | inline | Proof summary from `buildReport` | done, see git log |
 | T5 | S5 | deferred | Backend: test counts from the prove gate (own feature) | |
-| T7 | S8 | inline | Running card while the run goes on by itself | |
+| T7 | S8 | inline | Running card while the run goes on by itself | done, see git log |
 | T8 | S8 | inline | Done state block with Jira and merge links | |
 | T9 | S8 | inline | Relative times beside held and waiting | |
 | T10 | S8 | inline | Transcript and command log as code-view entries | |

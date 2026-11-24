@@ -10,6 +10,7 @@ import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } fr
 import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
 import { proofOf } from "@/lib/proof"
+import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
 import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
@@ -26,6 +27,7 @@ import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
+import { RunningCard } from "@/components/running-card/RunningCard"
 import { RunControls } from "@/components/run-controls/RunControls"
 import { SafeAndKept } from "@/components/safe-and-kept/SafeAndKept"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
@@ -122,6 +124,17 @@ export function SpanPage() {
     hold: Boolean(cursor?.hold),
     done: Boolean(cursor?.done),
   })
+  // While the agent works and nothing asks for a person, the page says so instead of staying blank.
+  const running =
+    needs === null && cursor !== undefined && !cursor.done && state.agent?.running === true
+      ? runningOf({
+          stage: cursor.stage,
+          agent: state.agent.name,
+          branch: cursor.branch,
+          workspace: cursor.workspace,
+          transcript: state.transcript,
+        })
+      : null
   const attempt = failure === null ? "" : attemptLine(failure)
   const where = needs?.kind === "failed" && attempt !== "" ? `${current} · ${attempt}` : current
 
@@ -296,7 +309,8 @@ export function SpanPage() {
                 {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
               </NeedsYou>
             ) : null}
-            {proof !== null ? <ProofSummary proof={proof} /> : null}
+            {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
+          {proof !== null ? <ProofSummary proof={proof} /> : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList>
@@ -357,9 +371,11 @@ export function SpanPage() {
             {!paused && !cursor?.done && !idle ? (
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="secondary" onClick={() => void pause()}>
-                    Pause after this stage
-                  </Button>
+                  {running === null ? (
+                    <Button type="button" variant="secondary" onClick={() => void pause()}>
+                      Pause after this stage
+                    </Button>
+                  ) : null}
                   <Button type="button" variant="secondary" onClick={() => void stop()}>
                     Stop now
                   </Button>

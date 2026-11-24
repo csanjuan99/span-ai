@@ -214,3 +214,42 @@ describe("the order on a narrow screen", () => {
     expect(screen.getByRole("region", { name: "Needs you" }).parentElement?.className).toContain("order-1")
   })
 })
+
+describe("the card while the run goes on by itself", () => {
+  const working = (over: Partial<Cursor> = {}): SpanState => ({
+    ...held({ stage: "build", hold: false, reason: "", workspace: "/w/billing-api", ...over }),
+    transcript: ["editing retry.go"],
+    agent: { id: "span-1", running: true, relaunch: false, name: "claude-code", pid: 7, stage: "build", elapsed: "2m", summary: "running" },
+  })
+
+  it("says nothing is needed, what the agent does now and what happens next", () => {
+    state = working()
+    page()
+    const card = screen.getByRole("region", { name: "Running" })
+    expect(card.textContent).toContain("Nothing needed from you")
+    expect(card.textContent).toContain("Claude Code is working in build.")
+    expect(card.textContent).toContain("editing retry.go")
+    expect(card.textContent).toContain("Build seals, then prove runs on its own.")
+    expect(card.textContent).toContain("billing-api · feat/x")
+  })
+
+  it("carries the pause action, so it is offered once and not twice", () => {
+    state = working()
+    page()
+    expect(screen.getAllByRole("button", { name: "Pause after this stage" })).toHaveLength(1)
+    expect(screen.getByRole("region", { name: "Running" }).querySelector("button")?.textContent).toBe("Pause after this stage")
+    expect(screen.getByRole("button", { name: "Stop now" })).toBeTruthy()
+  })
+
+  it("is not drawn when the run waits on a person", () => {
+    state = held({ stage: "build" })
+    page()
+    expect(screen.queryByRole("region", { name: "Running" })).toBeNull()
+  })
+
+  it("is not drawn once the run is done", () => {
+    state = { ...working({ done: true }) }
+    page()
+    expect(screen.queryByRole("region", { name: "Running" })).toBeNull()
+  })
+})
