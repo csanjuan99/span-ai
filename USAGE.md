@@ -419,7 +419,7 @@ manifest:
 ```
 
 `open: hold` or `merge: hold` pauses before that effect, and only a person releases it: the page shows **Approve merge** (or **Approve open**, or **Approve promote to <env>**) instead of a retry, because a retry reaches the same hold. The approval is bound to the commit the page showed, so a new commit is held again, and it is spent only when the stage advances. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
-`open: hold` or `merge: hold` pauses before that effect. `conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts). Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
+`conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts).
 
 `prove`, `qa` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
 
@@ -680,6 +680,19 @@ The build agent can raise a decision too. When the brief asks for something a ru
 Everything a person decides or writes goes to `.span/runs/<id>/decisions.jsonl`, one line each, and the file only grows. An answer that steers the build (`build` options) is a **decision**: it is added to the prompt of every stage, frame and inspect included, as `[D3] <when>, at <stage>, on "<title>": <your words>`, and it outranks the story where they differ. It never outranks a rule the repository enforces. A later decision on the same problem supersedes the earlier one, and both stay in the file. Each version of a note you save for a stage is logged too, so a second note no longer erases the first; the stage's own file still holds the latest and is what the prompt reads.
 
 The story is read again from Jira on `Reload`, and a decision is not part of the story, so it survives. When the story that comes back differs from the one the decisions were taken against, Span does not apply them silently or drop them: the next frame or build opens a decision that quotes each one and asks whether they still hold. `They still hold` anchors them to the new story, `Drop them` retires them (they stay in the log), `Stop` ends the run. Reading the story again and getting the same text asks nothing.
+
+### Gates before the build: rules and plan
+
+Frame is given the repository's `AGENTS.md` (the first 8,000 bytes) and asked to list each place where the story asks for something a rule forbids. It does not resolve one. Span opens a decision that quotes both sides, recommends following the rule because the rule is enforced and the story is not, and offers `Follow the story, I will change the rule` and `Stop`. Your answer is a decision in the log, so it reaches every later prompt, and the same conflict is not asked again for that version of the story, however frame words it next time. A repository without `AGENTS.md` skips this.
+
+`stages.plan` decides whether the plan frame proposes waits for you before anything is built:
+
+```yaml
+stages:
+  plan: conditional   # auto (default), conditional, hold
+```
+
+`auto` never waits. `hold` always waits. `conditional` waits only when the story weighs `deep`. The plan comes as a decision: the claims and assumptions quoted, `Build this plan`, `Revise it with my words` and `Stop`. Approving does not run frame again, so the plan you read is the plan that is built. Revising runs frame with your words and puts the new plan back for review. `open` and `merge` keep their own `auto` or `hold`; `merge` still defaults to `auto`, so set `merge: hold` where a person must release it.
 
 ### Failures the base commit already had
 

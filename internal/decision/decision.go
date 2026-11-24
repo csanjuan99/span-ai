@@ -36,11 +36,21 @@ const (
 	Drop = "drop"
 )
 
+// What choosing an option does to the run besides moving it.
+const (
+	// Record keeps the answer as a decision every later prompt carries.
+	Record = "record"
+	// Approve releases the plan gate so frame is not asked again.
+	Approve = "approve"
+)
+
 // Classes of request.
 const (
 	CommitRejected = blocker.CommitRejected
 	// Conflict is a brief that asks for what a rule of the repository forbids.
 	Conflict = "spec-conflict"
+	// PlanReview is the plan frame proposes, held for a person before any build.
+	PlanReview = "plan-review"
 	// Stale is decisions taken against a story that has changed since.
 	Stale = "overlay-stale"
 	// Question is anything else the agent cannot decide alone.
@@ -188,5 +198,65 @@ func FromStale(stale []overlay.Entry, stage string, now time.Time) Request {
 			{ID: "drop", Label: "Drop them, the new story says what is needed", Consequence: "The decisions stop reaching the agent. They stay in the log.", Reversible: true, Then: Retry, Effect: Drop},
 			{ID: "stop", Label: "Stop this run", Consequence: "The run ends so you can reconsider.", Reversible: false, Then: Stop},
 		},
+	}
+}
+
+// Clash is one place where the story asks for what a rule of the repository forbids. The
+// frame agent finds it; Span decides what to do about it.
+type Clash struct {
+	Story string `json:"story"`
+	Rule  string `json:"rule"`
+	Ref   string `json:"ref"`
+}
+
+// FromClashes is the question a story that contradicts the repository's rules puts to a
+// person. Span never picks a side: the options are Span's, not the agent's, and the one
+// that follows the rule is recommended because the rule is enforced and the story is not.
+func FromClashes(clashes []Clash, stage string, now time.Time) Request {
+	var evidence []Evidence
+	keys := []string{Conflict}
+	for _, c := range clashes {
+		evidence = append(evidence,
+			Evidence{Ref: "story", Excerpt: c.Story},
+			Evidence{Ref: c.Ref, Excerpt: c.Rule},
+		)
+		keys = append(keys, strings.ToLower(c.Rule))
+	}
+	dedupe := statement.Signature(keys...)
+	return Request{
+		ID: "clash-" + dedupe[:12], Class: Conflict, Stage: stage, Time: now, Dedupe: dedupe,
+		Title:    "The story asks for something the repository's rules forbid",
+		Happened: fmt.Sprintf("Frame found %d place(s) where the story and a rule of the repository disagree. Span does not pick a side silently.", len(clashes)),
+		Evidence: evidence,
+		Options: []Option{
+			{ID: "follow-rule", Label: "Follow the repository rule", Consequence: "Frame and build follow the rule. Where the story says otherwise, the feature document says what is not met as written.", Reversible: true, Then: Retry, Effect: Record},
+			{ID: "follow-story", Label: "Follow the story, I will change the rule", Consequence: "Build follows the story. A hook that enforces the rule can still reject the commit, and you will be asked then.", Reversible: true, Then: Retry, Effect: Record},
+			{ID: "stop", Label: "Stop this run", Consequence: "The run ends so the story or the rule can be fixed first.", Reversible: false, Then: Stop},
+		},
+		Recommendation: "follow-rule",
+	}
+}
+
+// FromPlan is the plan frame proposes, put in front of a person before anything is built.
+func FromPlan(claims, assumptions []string, criteria int, stage string, now time.Time) Request {
+	var evidence []Evidence
+	for i, claim := range claims {
+		evidence = append(evidence, Evidence{Ref: fmt.Sprintf("claim %d", i+1), Excerpt: claim})
+	}
+	for i, assumption := range assumptions {
+		evidence = append(evidence, Evidence{Ref: fmt.Sprintf("assumption %d", i+1), Excerpt: assumption})
+	}
+	dedupe := statement.Signature(append([]string{PlanReview}, claims...)...)
+	return Request{
+		ID: "plan-" + dedupe[:12], Class: PlanReview, Stage: stage, Time: now, Dedupe: dedupe,
+		Title:    "Review the plan before it is built",
+		Happened: fmt.Sprintf("Frame read the story as %d claim(s), %d assumption(s) and %d acceptance criteria. Nothing is built until you say so.", len(claims), len(assumptions), criteria),
+		Evidence: evidence,
+		Options: []Option{
+			{ID: "approve", Label: "Build this plan", Consequence: "The build starts from these claims. Frame does not run again.", Reversible: true, Then: Retry, Effect: Approve},
+			{ID: "revise", Label: "Revise it with my words", Consequence: "Frame reads your words and proposes the plan again, and you review that one.", Reversible: true, Then: Retry, Effect: Record},
+			{ID: "stop", Label: "Stop this run", Consequence: "The run ends.", Reversible: false, Then: Stop},
+		},
+		Recommendation: "approve",
 	}
 }

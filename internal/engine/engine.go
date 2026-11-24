@@ -111,7 +111,9 @@ type FrameDoc struct {
 	Assumptions []string `json:"assumptions"`
 	Questions   []string `json:"questions"`
 	Acceptance  []string `json:"acceptance"`
-	OutOfScope  bool     `json:"outOfScope"`
+	// Conflicts are the places where the story asks for what the repository's rules forbid.
+	Conflicts  []decision.Clash `json:"conflicts"`
+	OutOfScope bool             `json:"outOfScope"`
 }
 
 // Answer is one reply to a question the run is waiting on.
@@ -387,6 +389,14 @@ func Resume(ctx context.Context, opt Options, id string) (Result, error) {
 	return r.run(ctx)
 }
 
+// notWaiting is the answer for a run that has no question open: where it stands, unchanged.
+func (r *runner) notWaiting() Result {
+	if r.cur.Stop {
+		return r.finish(statement.Stop)
+	}
+	return r.finish(statement.Hold)
+}
+
 // Waiting reports a run that stopped or held for questions and can continue.
 func Waiting(cur Cursor) bool {
 	if cur.Done {
@@ -406,10 +416,7 @@ func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Re
 	}
 	defer release()
 	if !Waiting(r.cur) {
-		if r.cur.Stop {
-			return r.finish(statement.Stop), nil
-		}
-		return r.finish(statement.Hold), nil
+		return r.notWaiting(), nil
 	}
 	if err := writeAnswers(r.spanDir(), answers); err != nil {
 		return Result{}, err
@@ -438,10 +445,7 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 	}
 	defer release()
 	if !Waiting(r.cur) {
-		if r.cur.Stop {
-			return r.finish(statement.Stop), nil
-		}
-		return r.finish(statement.Hold), nil
+		return r.notWaiting(), nil
 	}
 	if strings.TrimSpace(brief) == "" {
 		return Result{}, errors.New("brief is empty")
@@ -809,6 +813,14 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 	if verdict, reason, asked, err := r.guardOverlay(frame); asked || err != nil {
 		return verdict, reason, err
 	}
+	// A plan a person approved is built as proposed: frame does not run again, because a
+	// second run could propose a different plan than the one that was approved.
+	if r.approved(frame, "") {
+		if doc, ok := r.readFramePlan(); ok {
+			r.spendApproval(frame, "")
+			return r.advanceFrame(len(doc.Claims))
+		}
+	}
 	target, err := r.pick(frame)
 	if err != nil {
 		return r.record(frame, statement.Hold, err.Error(), nil)
@@ -840,12 +852,100 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 	if len(questions) > 0 {
 		return r.block(ctx, questions)
 	}
+	if verdict, reason, asked, err := r.askClashes(doc.Conflicts); asked || err != nil {
+		return verdict, reason, err
+	}
 	if len(doc.Claims) == 0 {
 		return r.record(frame, statement.Hold, "frame produced no claims: the agent returned the story with nothing to check. Resume to ask again, or make the story say what must be true when it is done.", nil)
 	}
+	if r.planGated() {
+		if err := r.saveFramePlan(doc); err != nil {
+			return "", "", err
+		}
+		req := decision.FromPlan(doc.Claims, doc.Assumptions, len(doc.Acceptance), frame, r.opt.now())
+		return r.askDecision(frame, req, "decision needed: "+req.Title)
+	}
+	return r.advanceFrame(len(doc.Claims))
+}
+
+// advanceFrame seals frame as done with its claims counted.
+func (r *runner) advanceFrame(claims int) (string, string, error) {
 	now := r.opt.now()
 	r.cur.FrameAdvancedAt = &now
-	return r.record(frame, statement.Advance, fmt.Sprintf("%d claims", len(doc.Claims)), nil)
+	return r.record(frame, statement.Advance, fmt.Sprintf("%d claims", claims), nil)
+}
+
+// planGated reports whether the plan frame proposed must wait for a person. conditional
+// waits only for a story weighed deep: a plan nobody reads is a gate that costs and says
+// nothing.
+func (r *runner) planGated() bool {
+	switch r.opt.Policy.PlanMode() {
+	case statement.Hold:
+		return true
+	case "conditional":
+		return r.weight() == policy.Deep
+	}
+	return false
+}
+
+func (r *runner) framePlanPath() string { return filepath.Join(r.iterDir(), "plan.json") }
+
+func (r *runner) saveFramePlan(doc FrameDoc) error {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(r.iterDir(), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(r.framePlanPath(), raw, 0o644)
+}
+
+func (r *runner) readFramePlan() (FrameDoc, bool) {
+	raw, err := os.ReadFile(r.framePlanPath())
+	if err != nil {
+		return FrameDoc{}, false
+	}
+	var doc FrameDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return FrameDoc{}, false
+	}
+	return doc, true
+}
+
+// askClashes parks the run when frame found a rule the story breaks. A person who already
+// answered one for this version of the story is not asked again, however frame words the
+// next one: the answer is in the log and in every prompt.
+func (r *runner) askClashes(clashes []decision.Clash) (verdict, reason string, asked bool, err error) {
+	if len(clashes) == 0 {
+		return "", "", false, nil
+	}
+	entries, readErr := overlay.Read(r.spanDir())
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	for _, e := range overlay.Active(entries) {
+		if e.Class == decision.Conflict && e.Stage == frame && e.Epoch == r.cur.BriefEpoch {
+			return "", "", false, nil
+		}
+	}
+	req := decision.FromClashes(clashes, frame, r.opt.now())
+	verdict, reason, err = r.askDecision(frame, req, "decision needed: "+req.Title)
+	return verdict, reason, true, err
+}
+
+// rulesText is the repository's AGENTS.md, cut to what a prompt can carry. A repository
+// without one has no rules to compare the story with.
+func (r *runner) rulesText() string {
+	raw, err := os.ReadFile(filepath.Join(r.opt.Workspace, "AGENTS.md"))
+	if err != nil {
+		return ""
+	}
+	const limit = 8000
+	if len(raw) > limit {
+		raw = raw[:limit]
+	}
+	return strings.ToValidUTF8(strings.TrimSpace(string(raw)), "")
 }
 
 func (r *runner) doBuild(ctx context.Context) (string, string, error) {
@@ -938,13 +1038,17 @@ func (r *runner) logAnswer(req *decision.Request, option decision.Option, body s
 		}
 		_, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Supersede, Supersedes: seqs, Stage: req.Stage, Title: req.Title})
 		return err
+	case decision.Approve:
+		if err := writeAtomic(filepath.Join(dir, approvalFile(req.Stage, "")), []byte(r.cur.GitSHA+"\n")); err != nil {
+			return err
+		}
 	}
 	kind := overlay.Note
-	if option.Then == decision.Build {
+	if option.Then == decision.Build || option.Effect == decision.Record {
 		kind = overlay.Decision
 	}
 	_, err = overlay.Append(dir, overlay.Entry{
-		Kind: kind, Stage: req.Stage, Title: req.Title, Option: option.ID, Text: body,
+		Kind: kind, Stage: req.Stage, Class: req.Class, Title: req.Title, Option: option.ID, Text: body,
 		Dedupe: req.Dedupe, Epoch: r.cur.BriefEpoch, Time: r.opt.now(),
 	})
 	return err
@@ -1005,8 +1109,17 @@ func (r *runner) commitBlocked(err error) (string, string, error) {
 // weight reads the story as it stands now. It is not frozen at intake: frame can install
 // criteria, and a brief that grows into twenty of them earns more checks.
 func (r *runner) weight() string {
-	names, _ := handoffNames(r.spanDir())
-	return r.opt.Policy.Weight(len(qa.Lines(r.opt.Brief)), names)
+	return r.opt.Policy.Weight(len(qa.Lines(r.opt.Brief)), r.handoffNamesOrLog())
+}
+
+// handoffNamesOrLog lists the handoff files of the run. A directory that cannot be read
+// means no handoffs for this prompt, and the reason is logged instead of lost.
+func (r *runner) handoffNamesOrLog() []string {
+	names, err := handoffNames(r.spanDir())
+	if err != nil {
+		log.Printf("handoffs %s: %v", r.cur.ID, err)
+	}
+	return names
 }
 
 // provePlan scopes the focused band to the files that declare this story's criteria.
@@ -1170,7 +1283,11 @@ func (r *runner) doQA(ctx context.Context) (string, string, error) {
 			s.Commands = []statement.Command{{Command: command, Band: "qa", Error: reason}}
 		})
 	}
-	prev, hadProve, _ := statement.Read(r.iterDir(), proveSt)
+	prev, hadProve, readErr := statement.Read(r.iterDir(), proveSt)
+	if readErr != nil {
+		// An unreadable prove statement cannot be reused; qa runs its own command.
+		log.Printf("prove statement %s: %v", r.cur.ID, readErr)
+	}
 	if hadProve && r.reusableQA(prev, command, ctx) {
 		gate := qa.Judge(lines, 0, covered, qa.Outcomes{})
 		gate.Command = command
@@ -1800,8 +1917,11 @@ func closePacket(b *strings.Builder) string {
 }
 
 func (r *runner) promptInput(stage, failure string) prompt.Input {
-	text, _, _ := readInstructions(r.opt.Workspace, r.spanDir(), stage)
-	names, _ := handoffNames(r.spanDir())
+	text, _, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
+	if err != nil {
+		log.Printf("instructions %s %s: %v", r.cur.ID, stage, err)
+	}
+	names := r.handoffNamesOrLog()
 	root := r.opt.Policy.Harness
 	if root == "" {
 		root = harness.Root()
@@ -1836,6 +1956,7 @@ func (r *runner) promptInput(stage, failure string) prompt.Input {
 	}
 	return prompt.Input{
 		Decisions: overlay.Render(entries, r.cur.BriefEpoch),
+		Rules:     r.rulesFor(stage),
 		Stage:     stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature), DecisionPath: r.decisionFor(stage),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
 		Handoffs: handoff.Paths(r.cur.ID, names),
@@ -1914,7 +2035,9 @@ func (r *runner) saveLesson(own *learn.Book, stage, verdict, reason string, show
 		return
 	}
 	if fresh.Observe(stage, verdict, reason, shown) {
-		_ = learn.Save(r.bookPath, fresh)
+		if err := learn.Save(r.bookPath, fresh); err != nil {
+			log.Printf("lessons %s: %v", r.cur.ID, err)
+		}
 	}
 	r.book = fresh
 }
@@ -2244,6 +2367,14 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// rulesFor is the rules block of a stage: only frame compares the story with them.
+func (r *runner) rulesFor(stage string) string {
+	if stage != frame {
+		return ""
+	}
+	return r.rulesText()
 }
 
 // decisionFor is the request file the stage may write: only build has one.

@@ -88,3 +88,41 @@ func TestACommitDecisionOffersNoWayAroundTheHook(t *testing.T) {
 		}
 	}
 }
+
+func TestFromClashesQuotesBothSidesAndRecommendsTheEnforcedRule(t *testing.T) {
+	req := FromClashes([]Clash{{Story: "show the error on press", Rule: "disable submit while invalid", Ref: "AGENTS.md:12"}}, "frame", time.Unix(1, 0))
+	if err := req.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Evidence) != 2 || req.Evidence[0].Ref != "story" || req.Evidence[1].Ref != "AGENTS.md:12" {
+		t.Fatalf("evidence = %+v", req.Evidence)
+	}
+	if req.Recommendation != "follow-rule" || req.Class != Conflict {
+		t.Fatalf("request = %+v", req)
+	}
+	same := FromClashes([]Clash{{Story: "worded differently", Rule: "DISABLE submit while invalid", Ref: "AGENTS.md:12"}}, "frame", time.Unix(2, 0))
+	if same.Dedupe != req.Dedupe {
+		t.Fatal("the same rule broken twice got two keys")
+	}
+}
+
+func TestFromPlanShowsEveryClaimAndAssumption(t *testing.T) {
+	req := FromPlan([]string{"charge the card"}, []string{"cents"}, 3, "frame", time.Unix(1, 0))
+	if err := req.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(req.Evidence) != 2 || req.Options[0].Effect != Approve || req.Options[1].Effect != Record {
+		t.Fatalf("request = %+v", req)
+	}
+}
+
+func TestAnAgentCannotGiveItsOptionsAnEffect(t *testing.T) {
+	raw := `{"title":"T","happened":"H","options":[{"id":"a","label":"A","consequence":"c","then":"retry","effect":"approve"},{"id":"b","label":"B","consequence":"c","then":"stop"}]}`
+	got, err := Parse([]byte(raw), "build", time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Options[0].Effect != "" {
+		t.Fatalf("the agent released a gate: %+v", got.Options[0])
+	}
+}

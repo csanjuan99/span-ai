@@ -27,15 +27,18 @@ type Input struct {
 	DecisionPath string
 	// Decisions are what people decided for this run, with who and when. They outrank the brief.
 	Decisions string
+	// Rules is the repository's AGENTS.md, which frame compares the story against.
+	Rules string
 }
 
 // Frame asks for verifiable claims and forbids invented requirements.
 func Frame(in Input) string {
 	return preamble(in) + `
 Read the story in the language it is written. Carry what it already decides into this JSON.
-{"claims":[],"assumptions":[],"questions":[],"acceptance":[],"outOfScope":false}
+{"claims":[],"assumptions":[],"questions":[],"acceptance":[],"conflicts":[],"outOfScope":false}
 claims lists each thing the story says must be true when the work is done, one entry each, in the story's words. A story that asks for anything has at least one claim, so never leave it empty.
 acceptance lists each criterion the story already states, one entry, in the story's words.
+conflicts lists each place where the story asks for something the repository rules above forbid, as {"story":"what the story asks","rule":"what the rule says","ref":"AGENTS.md:line"}. Leave it empty when there is none. Do not invent one, and do not resolve one yourself.
 A question is allowed only when the story cannot be implemented without inventing a requirement.
 Do not invent a criterion the story does not state.
 Do not edit files. Do not push, merge, or deploy.
@@ -91,6 +94,9 @@ func preamble(in Input) string {
 	fmt.Fprintf(&b, "Brief:\n%s\n", in.Brief)
 	if in.Decisions != "" {
 		b.WriteString(in.Decisions)
+	}
+	if in.Rules != "" {
+		fmt.Fprintf(&b, "Repository rules (AGENTS.md), enforced by the repository:\n%s\n", in.Rules)
 	}
 	if in.Instructions != "" {
 		fmt.Fprintf(&b, "Stage instructions:\n%s\n", in.Instructions)

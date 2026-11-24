@@ -38,7 +38,9 @@ type Entry struct {
 	Time time.Time `json:"time"`
 	Kind string    `json:"kind"`
 	// Stage is where the person was when they wrote it.
-	Stage  string `json:"stage,omitempty"`
+	Stage string `json:"stage,omitempty"`
+	// Class is the kind of question a decision answered.
+	Class  string `json:"class,omitempty"`
 	Title  string `json:"title,omitempty"`
 	Option string `json:"option,omitempty"`
 	Text   string `json:"text,omitempty"`
@@ -80,8 +82,12 @@ func Append(dir string, e Entry) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	defer f.Close()
 	if _, err := f.Write(append(raw, '\n')); err != nil {
+		_ = f.Close()
+		return Entry{}, err
+	}
+	// A failed close can be the only sign the line never reached the disk.
+	if err := f.Close(); err != nil {
 		return Entry{}, err
 	}
 	return e, nil
