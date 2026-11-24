@@ -35,7 +35,7 @@ Span uses the agent CLIs the developer already has (cursor, claude, codex, pi) w
 
 ## Brand Commitments
 
-The existing identity is binding: a terminal session, not a marketing dashboard (see DESIGN.md). New surfaces extend it.
+A calm workbench with a terminal inside: soft, human product surfaces and precise code surfaces that belong to one family (see DESIGN.md). Not a marketing dashboard. New surfaces extend the Span AI design system.
 
 ## Evidence on Hand
 
@@ -48,3 +48,4 @@ Real run state in `.span/runs` and `agents.json` per project; no external benchm
 - A first-time developer reaches a working run without reading docs.
 - Works the same whether launched from a folder of repositories or inside one repository.
 - Dense and scannable over decorative: the user is mid-task.
+- Intuitive first: what needs the person is the first thing on the run page, with what happens next stated beside the action.

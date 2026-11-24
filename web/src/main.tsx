@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client"
 import "./index.css"
 import { App } from "@/App"
 import { ErrorBoundary } from "@/components/error-boundary/ErrorBoundary"
+import { ThemeProvider } from "@/components/theme-provider"
 
 const root = document.getElementById("root")
 if (!root) {
@@ -12,8 +13,10 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
+    <ThemeProvider>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </ThemeProvider>
   </StrictMode>,
 )
