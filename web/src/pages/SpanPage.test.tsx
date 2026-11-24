@@ -143,3 +143,41 @@ describe("the block that holds what the run waits on", () => {
     expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull()
   })
 })
+
+describe("the side of the page", () => {
+  const advance = (stage: string): Statement => ({
+    stage,
+    iteration: 1,
+    verdict: "advance",
+    reason: "",
+    commands: [],
+  })
+
+  it("keeps what is safe next to the controls, never inside a tab", () => {
+    state = held({ stage: "build" }, [advance("intake"), advance("frame")])
+    page()
+    const kept = screen.getByRole("region", { name: "Safe and kept" })
+    expect(kept.textContent).toContain("2 stages sealed")
+    expect(kept.textContent).toContain("feat/x")
+    expect(screen.getByRole("region", { name: "Run controls" })).toBeTruthy()
+  })
+
+  it("offers pause and stop only while the run is going on", () => {
+    state = held({ hold: false, reason: "" })
+    page()
+    expect(screen.getByRole("button", { name: "Pause after this stage" })).toBeTruthy()
+    cleanup()
+    state = held({})
+    page()
+    expect(screen.queryByRole("button", { name: "Pause after this stage" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Stop now" })).toBeNull()
+  })
+
+  it("says a stopped run will not continue inside the block that names it", () => {
+    state = held({ hold: false, stop: true, reason: "stopped by a person" })
+    page()
+    const block = screen.getByRole("region", { name: "Needs you" })
+    expect(block.textContent).toContain("Run stopped")
+    expect(block.textContent).toContain("This run will not continue.")
+  })
+})
