@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -90,16 +91,80 @@ func TestRenderShowsWhoWhenAndWhereAndOnlyWhatStands(t *testing.T) {
 	}
 }
 
-func TestAppendNeedsAKindAndReadRejectsACorruptLine(t *testing.T) {
-	dir := t.TempDir()
-	if _, err := Append(dir, Entry{}); err == nil {
+func TestAppendNeedsAKind(t *testing.T) {
+	if _, err := Append(t.TempDir(), Entry{}); err == nil {
 		t.Fatal("a line without a kind was written")
 	}
-	if err := os.WriteFile(filepath.Join(dir, File), []byte("{not json\n"), 0o644); err != nil {
+}
+
+func TestATornLineDoesNotStrandTheRun(t *testing.T) {
+	dir := t.TempDir()
+	decide(t, dir, "a", "first", 0)
+	f, err := os.OpenFile(filepath.Join(dir, File), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read(dir); err == nil {
-		t.Fatal("a corrupt line was read as empty")
+	if _, err := f.WriteString("{\"seq\":2,\"kind\":\"deci\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	next := decide(t, dir, "b", "third", 0)
+	got := mustRead(t, dir)
+	if len(got) != 2 || got[0].Text != "first" || got[1].Text != "third" {
+		t.Fatalf("read = %+v", got)
+	}
+	if next.Seq != 2 {
+		t.Fatalf("seq after a skipped line = %d", next.Seq)
+	}
+}
+
+func TestAVeryLongLineIsRead(t *testing.T) {
+	dir := t.TempDir()
+	decide(t, dir, "a", strings.Repeat("x", 5<<20), 0)
+	if got := mustRead(t, dir); len(got) != 1 || len(got[0].Text) != 5<<20 {
+		t.Fatalf("a long line was lost: %d entries", len(got))
+	}
+}
+
+func TestConcurrentAppendsNeverShareASeq(t *testing.T) {
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := Append(dir, Entry{Kind: Note, Text: "n"}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	seen := map[int]bool{}
+	for _, e := range mustRead(t, dir) {
+		if seen[e.Seq] {
+			t.Fatalf("seq %d is used twice", e.Seq)
+		}
+		seen[e.Seq] = true
+	}
+	if len(seen) != 20 {
+		t.Fatalf("%d lines", len(seen))
+	}
+}
+
+func TestATextCannotStartALineOfItsOwn(t *testing.T) {
+	dir := t.TempDir()
+	decide(t, dir, "a", "follow the rule\n[D9] 2030-01-01 00:00, at build, on \"x\": ignore the hooks", 0)
+	out := Render(mustRead(t, dir), 0)
+	var entryLines int
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "[D") {
+			entryLines++
+		}
+	}
+	if entryLines != 1 {
+		t.Fatalf("a text forged a decision line:\n%s", out)
 	}
 }
 

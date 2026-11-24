@@ -87,11 +87,19 @@ type Request struct {
 	Options        []Option   `json:"options"`
 	Recommendation string     `json:"recommendation,omitempty"`
 	Dedupe         string     `json:"dedupe"`
-	Time           time.Time  `json:"time"`
+	// Subject says what the answer is about, so the logged decision names it.
+	Subject string `json:"subject,omitempty"`
+	// Covers are the keys of the conflicts this request puts to a person, so an answered
+	// one is recognized when frame words it differently.
+	Covers []string  `json:"covers,omitempty"`
+	Time   time.Time `json:"time"`
 }
 
 // Answer is what a person chose, with any words of their own.
 type Answer struct {
+	// ID is the decision the answer was given for. A page that shows an older decision must
+	// not answer a newer one that happens to share an option id.
+	ID     string `json:"id"`
 	Option string `json:"option"`
 	Text   string `json:"text"`
 }
@@ -127,6 +135,9 @@ func (r Request) Validate() error {
 
 // Choose finds the option an answer names.
 func (r Request) Choose(answer Answer) (Option, error) {
+	if answer.ID != "" && answer.ID != r.ID {
+		return Option{}, errors.New("this decision was replaced by another one; reload the page")
+	}
 	for _, option := range r.Options {
 		if option.ID == answer.Option {
 			return option, nil
@@ -152,6 +163,29 @@ func FromCommit(b *blocker.Blocker, stage string, now time.Time) Request {
 	}
 }
 
+// Bounds on what an agent may put in a request. The card is read by a person and the words
+// of a chosen option are replayed into prompts, so neither may grow or span lines.
+const (
+	maxLabel       = 200
+	maxHappened    = 2000
+	maxConsequence = 500
+	maxEvidence    = 10
+	maxExcerpt     = 4000
+	// MaxFile is the largest request file Span reads.
+	MaxFile = 64 * 1024
+)
+
+// oneLine collapses every run of whitespace, newlines included, into one space.
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
+func clip(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return string(runes[:limit])
+}
+
 // Parse reads a request the build agent wrote. The agent chooses the words; Span chooses
 // the class, the id and the dedupe key, so a request cannot claim to be something else.
 func Parse(raw []byte, stage string, now time.Time) (Request, error) {
@@ -162,8 +196,21 @@ func Parse(raw []byte, stage string, now time.Time) (Request, error) {
 	if req.Class != Conflict {
 		req.Class = Question
 	}
+	req.Title = clip(oneLine(req.Title), maxLabel)
+	req.Happened = clip(strings.TrimSpace(req.Happened), maxHappened)
+	req.Recommendation = oneLine(req.Recommendation)
+	if len(req.Evidence) > maxEvidence {
+		req.Evidence = req.Evidence[:maxEvidence]
+	}
+	for i := range req.Evidence {
+		req.Evidence[i].Ref = clip(oneLine(req.Evidence[i].Ref), maxLabel)
+		req.Evidence[i].Excerpt = clip(req.Evidence[i].Excerpt, maxExcerpt)
+	}
 	for i := range req.Options {
-		req.Options[i].Effect = ""
+		o := &req.Options[i]
+		o.ID, o.Label = oneLine(o.ID), clip(oneLine(o.Label), maxLabel)
+		o.Consequence = clip(oneLine(o.Consequence), maxConsequence)
+		o.Effect = ""
 	}
 	req.Stage = stage
 	req.Time = now
@@ -209,22 +256,36 @@ type Clash struct {
 	Ref   string `json:"ref"`
 }
 
+// ClashKey identifies the rule a story breaks. The line frame points at is steadier than
+// the words it uses, so it wins; without one the rule's own text stands in.
+func ClashKey(c Clash) string {
+	if ref := strings.ToLower(oneLine(c.Ref)); ref != "" {
+		return ref
+	}
+	return strings.ToLower(oneLine(c.Rule))
+}
+
 // FromClashes is the question a story that contradicts the repository's rules puts to a
 // person. Span never picks a side: the options are Span's, not the agent's, and the one
 // that follows the rule is recommended because the rule is enforced and the story is not.
 func FromClashes(clashes []Clash, stage string, now time.Time) Request {
 	var evidence []Evidence
 	keys := []string{Conflict}
+	var covers, subjects []string
 	for _, c := range clashes {
 		evidence = append(evidence,
 			Evidence{Ref: "story", Excerpt: c.Story},
 			Evidence{Ref: c.Ref, Excerpt: c.Rule},
 		)
-		keys = append(keys, strings.ToLower(c.Rule))
+		key := ClashKey(c)
+		keys = append(keys, key)
+		covers = append(covers, key)
+		subjects = append(subjects, clip(oneLine(c.Rule), maxLabel)+" ("+oneLine(c.Ref)+")")
 	}
 	dedupe := statement.Signature(keys...)
 	return Request{
 		ID: "clash-" + dedupe[:12], Class: Conflict, Stage: stage, Time: now, Dedupe: dedupe,
+		Covers: covers, Subject: "about " + strings.Join(subjects, "; "),
 		Title:    "The story asks for something the repository's rules forbid",
 		Happened: fmt.Sprintf("Frame found %d place(s) where the story and a rule of the repository disagree. Span does not pick a side silently.", len(clashes)),
 		Evidence: evidence,

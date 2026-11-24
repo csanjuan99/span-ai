@@ -354,8 +354,6 @@ func SetAgent(path, value string) error {
 	return writeChecked(path, replaceAgent(raw, value), mode)
 }
 
-// writeChecked validates the new body and replaces the file with it through a temp file, so
-// a body that would not load never reaches the disk.
 // readForEdit reads span.yaml for a rewrite. A new file is 0644 like the one quickstart
 // writes, a missing one is empty, and a rewrite keeps the file's own mode.
 func readForEdit(path string) (string, os.FileMode, error) {
@@ -373,6 +371,8 @@ func readForEdit(path string) (string, os.FileMode, error) {
 	return string(raw), info.Mode().Perm(), nil
 }
 
+// writeChecked validates the new body and replaces the file with it through a temp file, so
+// a body that would not load never reaches the disk.
 func writeChecked(path, next string, mode os.FileMode) error {
 	var check File
 	if err := yaml.Unmarshal([]byte(next), &check); err != nil {

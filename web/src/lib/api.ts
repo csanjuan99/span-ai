@@ -512,8 +512,8 @@ export async function answerRun(id: string, answers: { question: string; body: s
 }
 
 /** Answers the decision a run waits on and continues it where the answer says. */
-export async function decideRun(id: string, option: string, text: string): Promise<void> {
-  await postForm(`/spans/${encodeURIComponent(id)}/decide`, new URLSearchParams({ option, text }))
+export async function decideRun(id: string, decision: string, option: string, text: string): Promise<void> {
+  await postForm(`/spans/${encodeURIComponent(id)}/decide`, new URLSearchParams({ decision, option, text }))
 }
 
 /** Reads the Jira story again and continues the waiting run. */

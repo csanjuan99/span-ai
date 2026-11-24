@@ -419,13 +419,19 @@ func TestDecideWakesTheRunWithTheChosenOption(t *testing.T) {
 		handler.ServeHTTP(rec, r)
 		return rec
 	}
-	if rec := post("/spans/span-1/decide", "option=skip-hook"); rec.Code != http.StatusBadRequest || got.Decision != nil {
+	if rec := post("/spans/span-1/decide", "option=fix"); rec.Code != http.StatusBadRequest || got.Decision != nil {
+		t.Fatalf("an answer that names no decision: %d %+v", rec.Code, got)
+	}
+	if rec := post("/spans/span-1/decide", "decision=older&option=fix"); rec.Code != http.StatusBadRequest || got.Decision != nil || !strings.Contains(rec.Body.String(), "replaced") {
+		t.Fatalf("an answer to a decision that is gone: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := post("/spans/span-1/decide", "decision=d1&option=skip-hook"); rec.Code != http.StatusBadRequest || got.Decision != nil {
 		t.Fatalf("an option the decision does not have: %d %+v", rec.Code, got)
 	}
 	if rec := post("/spans/span-1/resume", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "decision") {
 		t.Fatalf("resume over an open decision: %d %s", rec.Code, rec.Body.String())
 	}
-	rec := post("/spans/span-1/decide", "option=fix&text=keep+it+disabled")
+	rec := post("/spans/span-1/decide", "decision=d1&option=fix&text=keep+it+disabled")
 	if rec.Code != http.StatusAccepted || got.Decision == nil || got.Decision.Option != "fix" || got.Decision.Text != "keep it disabled" {
 		t.Fatalf("status %d signal %+v", rec.Code, got)
 	}
@@ -439,7 +445,7 @@ func TestDecideWithoutAnOpenDecisionIsRefused(t *testing.T) {
 	root := t.TempDir()
 	writeCursor(t, root, engine.Cursor{ID: "span-2", Stage: "build", Hold: true})
 	handler := New(root, "", nil, func(context.Context, string, Signal) error { t.Fatal("woke a run with nothing to decide"); return nil }, nil, nil)
-	r := httptest.NewRequest(http.MethodPost, "/spans/span-2/decide", strings.NewReader("option=fix"))
+	r := httptest.NewRequest(http.MethodPost, "/spans/span-2/decide", strings.NewReader("decision=d1&option=fix"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, r)

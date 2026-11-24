@@ -9,9 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -47,6 +50,8 @@ type Entry struct {
 	// Dedupe names the problem a decision answers. A new decision with the key of an active
 	// one supersedes it.
 	Dedupe string `json:"dedupe,omitempty"`
+	// Covers are the conflict keys a decision answered.
+	Covers []string `json:"covers,omitempty"`
 	// Epoch is the version of the story a decision was taken against.
 	Epoch int `json:"epoch"`
 	// Ref is the decision an anchor refers to.
@@ -54,16 +59,25 @@ type Entry struct {
 	Supersedes []int `json:"supersedes,omitempty"`
 }
 
+var mu sync.Mutex
+
 // Append adds one line, assigns its Seq and returns it. The file is only ever appended to.
 func Append(dir string, e Entry) (Entry, error) {
 	if e.Kind == "" {
 		return Entry{}, errors.New("an overlay line needs a kind")
 	}
+	// Appends from the page and from a run share this process; the lock keeps two of them
+	// from taking the same Seq.
+	mu.Lock()
+	defer mu.Unlock()
 	entries, err := Read(dir)
 	if err != nil {
 		return Entry{}, err
 	}
-	e.Seq = len(entries) + 1
+	for _, old := range entries {
+		e.Seq = max(e.Seq, old.Seq)
+	}
+	e.Seq++
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
 	}
@@ -104,19 +118,26 @@ func Read(dir string) ([]Entry, error) {
 	}
 	defer f.Close()
 	var out []Entry
-	scan := bufio.NewScanner(f)
-	scan.Buffer(make([]byte, 0, 64*1024), 4<<20)
-	for scan.Scan() {
-		if strings.TrimSpace(scan.Text()) == "" {
-			continue
+	reader := bufio.NewReader(f)
+	for n := 1; ; n++ {
+		line, readErr := reader.ReadBytes('\n')
+		if len(strings.TrimSpace(string(line))) > 0 {
+			var e Entry
+			if err := json.Unmarshal(line, &e); err != nil {
+				// One torn line must not strand the run: it is skipped and said, and every
+				// other decision still stands.
+				log.Printf("%s line %d skipped: %v", File, n, err)
+			} else {
+				out = append(out, e)
+			}
 		}
-		var e Entry
-		if err := json.Unmarshal(scan.Bytes(), &e); err != nil {
-			return nil, fmt.Errorf("%s line %d: %w", File, len(out)+1, err)
+		if errors.Is(readErr, io.EOF) {
+			return out, nil
 		}
-		out = append(out, e)
+		if readErr != nil {
+			return nil, readErr
+		}
 	}
-	return out, scan.Err()
 }
 
 // Active is the decisions that still stand: not superseded, with the epoch of the newest
@@ -157,6 +178,10 @@ func Stale(entries []Entry, epoch int) []Entry {
 	return out
 }
 
+// oneLine keeps a stored text on one line, so what a person or an agent wrote cannot start a
+// line of its own and pass for another decision.
+func oneLine(text string) string { return strings.Join(strings.Fields(text), " ") }
+
 // Render is the block a prompt carries: each decision with who took it, when, and where,
 // so an agent can weigh it and a reader can find it.
 func Render(entries []Entry, epoch int) string {
@@ -167,7 +192,7 @@ func Render(entries []Entry, epoch int) string {
 	var b strings.Builder
 	b.WriteString("Decisions a person took for this run. Where the story says otherwise, follow them. They never override a rule the repository enforces (a hook, CI).\n")
 	for _, e := range active {
-		fmt.Fprintf(&b, "[D%d] %s, at %s, on %q: %s", e.Seq, e.Time.UTC().Format("2006-01-02 15:04"), e.Stage, e.Title, e.Text)
+		fmt.Fprintf(&b, "[D%d] %s, at %s, on %q: %s", e.Seq, e.Time.UTC().Format("2006-01-02 15:04"), e.Stage, oneLine(e.Title), oneLine(e.Text))
 		if e.Epoch != epoch {
 			b.WriteString(" (taken against an earlier version of the story)")
 		}

@@ -38,10 +38,18 @@ Read the story in the language it is written. Carry what it already decides into
 {"claims":[],"assumptions":[],"questions":[],"acceptance":[],"conflicts":[],"outOfScope":false}
 claims lists each thing the story says must be true when the work is done, one entry each, in the story's words. A story that asks for anything has at least one claim, so never leave it empty.
 acceptance lists each criterion the story already states, one entry, in the story's words.
-conflicts lists each place where the story asks for something the repository rules above forbid, as {"story":"what the story asks","rule":"what the rule says","ref":"AGENTS.md:line"}. Leave it empty when there is none. Do not invent one, and do not resolve one yourself.
-A question is allowed only when the story cannot be implemented without inventing a requirement.
+` + conflictLine(in) + `A question is allowed only when the story cannot be implemented without inventing a requirement.
 Do not invent a criterion the story does not state.
 Do not edit files. Do not push, merge, or deploy.
+`
+}
+
+// conflictLine asks frame for conflicts only when there are repository rules to compare with.
+func conflictLine(in Input) string {
+	if in.Rules == "" {
+		return ""
+	}
+	return `conflicts lists each place where the story asks for something the repository rules above forbid, as {"story":"what the story asks","rule":"what the rule says","ref":"AGENTS.md:line"}. Leave it empty when there is none. Do not invent one, and do not resolve one yourself.
 `
 }
 

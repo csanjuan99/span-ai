@@ -122,8 +122,12 @@ export function SpanPage() {
 
   async function decide(option: string, text: string) {
     setNote("")
+    const open = cursor?.decision
+    if (open === undefined) {
+      return
+    }
     try {
-      await decideRun(id, option, text)
+      await decideRun(id, open.id, option, text)
       state.note("decision saved")
       setNote("Decision saved. The run is going on.")
     } catch (err: unknown) {
@@ -236,7 +240,7 @@ export function SpanPage() {
         {conflict === undefined && conflictKind === "choose" ? (
           <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
         ) : null}
-        {!waiting && approval === null && canAct && action !== null ? (
+        {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
           <div className="flex flex-col gap-2">
             <Button type="button" className="self-start" onClick={() => void resume()}>
               {action.label}

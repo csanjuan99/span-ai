@@ -569,11 +569,16 @@ func decideRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Reques
 		writeConflict(w, "this run has no open decision")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
 	if err := r.ParseForm(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	answer := decision.Answer{Option: r.PostForm.Get("option"), Text: r.PostForm.Get("text")}
+	answer := decision.Answer{ID: r.PostForm.Get("decision"), Option: r.PostForm.Get("option"), Text: r.PostForm.Get("text")}
+	if answer.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "message": "an answer names the decision it is for"})
+		return
+	}
 	if _, err := req.Choose(answer); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "message": err.Error()})
 		return

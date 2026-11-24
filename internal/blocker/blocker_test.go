@@ -1,7 +1,9 @@
 package blocker
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -47,5 +49,27 @@ func TestEvidenceKeepsTheTailWithinTheLimit(t *testing.T) {
 	got := FromCommit(long, nil)
 	if len(got.Evidence) > 4096 || !strings.HasSuffix(got.Evidence, "the rule that failed") {
 		t.Fatalf("evidence = %d bytes, tail %q", len(got.Evidence), got.Evidence[max(0, len(got.Evidence)-30):])
+	}
+}
+
+func TestOnlyARefusedCommitIsAHookRejection(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "the hook refused", err: errors.New("git commit -m feat: span x: exit status 1: STATUS: FAILED"), want: true},
+		{name: "git add failed", err: errors.New("git add -A -- .: exit status 128: fatal: index.lock"), want: false},
+		{name: "no identity", err: errors.New("git commit -m feat: Author identity unknown"), want: false},
+		{name: "cancelled", err: context.Canceled, want: false},
+		{name: "timed out", err: fmt.Errorf("git commit -m x: exit status 1: %w", context.DeadlineExceeded), want: false},
+		{name: "nil", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsHookRejection(tt.err); got != tt.want {
+				t.Fatalf("IsHookRejection = %v", got)
+			}
+		})
 	}
 }

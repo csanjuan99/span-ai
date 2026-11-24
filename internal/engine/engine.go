@@ -237,6 +237,12 @@ type Cursor struct {
 	// BriefEpoch counts the times the story was read again and came back different. A
 	// decision records the epoch it was taken in, so a changed story is noticed.
 	BriefEpoch int `json:"briefEpoch,omitempty"`
+	// StoryHash identifies the story as fetched, which brief.md stops being once frame
+	// or an answer installs criteria into it. Only a story that really changed moves the epoch.
+	StoryHash string `json:"storyHash,omitempty"`
+	// CommitOnly makes the next build try the commit again without running the agent: a
+	// person answered a question that was about the commit, not about the code.
+	CommitOnly bool `json:"commitOnly,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
@@ -353,6 +359,7 @@ func Open(opt Options) (string, error) {
 	if err := ignoreStateRoot(opt.Root); err != nil {
 		return "", err
 	}
+	r.cur.StoryHash = storyHash(opt.Brief)
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(opt.Brief), 0o644); err != nil {
 		return "", err
 	}
@@ -387,6 +394,12 @@ func Resume(ctx context.Context, opt Options, id string) (Result, error) {
 		return Result{}, err
 	}
 	return r.run(ctx)
+}
+
+// storyHash identifies a story's text.
+func storyHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
 }
 
 // notWaiting is the answer for a run that has no question open: where it stands, unchanged.
@@ -450,8 +463,14 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 	if strings.TrimSpace(brief) == "" {
 		return Result{}, errors.New("brief is empty")
 	}
-	if brief != r.opt.Brief {
+	// A run from before story hashes compares with brief.md, as it always did.
+	known := r.cur.StoryHash
+	if known == "" {
+		known = storyHash(r.opt.Brief)
+	}
+	if next := storyHash(brief); next != known {
 		r.cur.BriefEpoch++
+		r.cur.StoryHash = next
 	}
 	r.opt.Brief = brief
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(brief), 0o644); err != nil {
@@ -862,6 +881,8 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		if err := r.saveFramePlan(doc); err != nil {
 			return "", "", err
 		}
+		// An approval belongs to the plan it was given for; this is a new one.
+		r.spendApproval(frame, "")
 		req := decision.FromPlan(doc.Claims, doc.Assumptions, len(doc.Acceptance), frame, r.opt.now())
 		return r.askDecision(frame, req, "decision needed: "+req.Title)
 	}
@@ -924,12 +945,24 @@ func (r *runner) askClashes(clashes []decision.Clash) (verdict, reason string, a
 	if readErr != nil {
 		return "", "", true, readErr
 	}
+	answered := map[string]bool{}
 	for _, e := range overlay.Active(entries) {
 		if e.Class == decision.Conflict && e.Stage == frame && e.Epoch == r.cur.BriefEpoch {
-			return "", "", false, nil
+			for _, key := range e.Covers {
+				answered[key] = true
+			}
 		}
 	}
-	req := decision.FromClashes(clashes, frame, r.opt.now())
+	var fresh []decision.Clash
+	for _, c := range clashes {
+		if !answered[decision.ClashKey(c)] {
+			fresh = append(fresh, c)
+		}
+	}
+	if len(fresh) == 0 {
+		return "", "", false, nil
+	}
+	req := decision.FromClashes(fresh, frame, r.opt.now())
 	verdict, reason, err = r.askDecision(frame, req, "decision needed: "+req.Title)
 	return verdict, reason, true, err
 }
@@ -961,7 +994,13 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	}
 	// A blocker that already came back with the same output does not earn another agent run:
 	// the tree is what the hook judged, and nothing a person did since has changed that.
-	if r.cur.Blocker.Retryable() {
+	commitOnly := r.cur.CommitOnly || !r.cur.Blocker.Retryable()
+	r.cur.CommitOnly = false
+	if !commitOnly {
+		// A request file left by an earlier run that died is not this run's question.
+		if err := os.Remove(r.decisionPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", "", err
+		}
 		in := r.promptInput(build, r.failurePacket())
 		call, cancel := r.agentCall(ctx)
 		defer cancel()
@@ -988,6 +1027,25 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 		s.FeatureDoc = path
 		s.GitSHA = sha
 	})
+}
+
+var errTooLarge = errors.New("the file is too large")
+
+// readCapped reads a file an agent wrote, refusing one larger than limit.
+func readCapped(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%w: larger than %d bytes", errTooLarge, limit)
+	}
+	return raw, nil
 }
 
 // askDecision parks the run on a question for a person and records the hold that says so.
@@ -1017,7 +1075,7 @@ func (r *runner) guardOverlay(stage string) (verdict, reason string, asked bool,
 // logAnswer writes what a person chose to the run's decision log. An answer that steers the
 // build becomes a decision that reaches every prompt; the others are history. A choice about
 // earlier decisions changes the log instead of adding to what the agent reads.
-func (r *runner) logAnswer(req *decision.Request, option decision.Option, body string) error {
+func (r *runner) logAnswer(req *decision.Request, option decision.Option, body string, typed bool) error {
 	dir := r.spanDir()
 	entries, err := overlay.Read(dir)
 	if err != nil {
@@ -1030,26 +1088,32 @@ func (r *runner) logAnswer(req *decision.Request, option decision.Option, body s
 				return err
 			}
 		}
-		return nil
 	case decision.Drop:
 		var seqs []int
 		for _, e := range overlay.Stale(entries, r.cur.BriefEpoch) {
 			seqs = append(seqs, e.Seq)
 		}
-		_, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Supersede, Supersedes: seqs, Stage: req.Stage, Title: req.Title})
-		return err
+		if _, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Supersede, Supersedes: seqs, Stage: req.Stage, Title: req.Title}); err != nil {
+			return err
+		}
 	case decision.Approve:
 		if err := writeAtomic(filepath.Join(dir, approvalFile(req.Stage, "")), []byte(r.cur.GitSHA+"\n")); err != nil {
 			return err
 		}
 	}
+	// Words a person typed always reach the agent: a card that asks for them and then
+	// files them as history would be lying. Without words, only an answer that steers the
+	// work is a decision, and the rest are history.
 	kind := overlay.Note
-	if option.Then == decision.Build || option.Effect == decision.Record {
+	if option.Then == decision.Build || option.Effect == decision.Record || (typed && option.Then != decision.Stop) {
 		kind = overlay.Decision
+	}
+	if kind == overlay.Note && (option.Effect == decision.Reanchor || option.Effect == decision.Drop) {
+		return nil
 	}
 	_, err = overlay.Append(dir, overlay.Entry{
 		Kind: kind, Stage: req.Stage, Class: req.Class, Title: req.Title, Option: option.ID, Text: body,
-		Dedupe: req.Dedupe, Epoch: r.cur.BriefEpoch, Time: r.opt.now(),
+		Dedupe: req.Dedupe, Covers: req.Covers, Epoch: r.cur.BriefEpoch, Time: r.opt.now(),
 	})
 	return err
 }
@@ -1063,9 +1127,17 @@ func (r *runner) decisionPath() string {
 // file is removed either way, so a request is read once. asked is true when the stage
 // ended here: with an open question, or with a request Span could not accept.
 func (r *runner) takeDecisionFile(stage string) (verdict, reason string, asked bool, err error) {
-	raw, readErr := os.ReadFile(r.decisionPath())
+	raw, readErr := readCapped(r.decisionPath(), decision.MaxFile)
 	if errors.Is(readErr, os.ErrNotExist) {
 		return "", "", false, nil
+	}
+	if errors.Is(readErr, errTooLarge) {
+		// Said like any request Span cannot show, instead of failing the whole run.
+		if err := os.Remove(r.decisionPath()); err != nil {
+			log.Printf("decision file %s: %v", r.cur.ID, err)
+		}
+		verdict, reason, err = r.record(stage, statement.Hold, "the agent asked for a decision Span cannot show: "+readErr.Error(), nil)
+		return verdict, reason, true, err
 	}
 	if readErr != nil {
 		return "", "", true, readErr
@@ -1086,6 +1158,11 @@ func (r *runner) takeDecisionFile(stage string) (verdict, reason string, asked b
 // commitBlocked parks the run on a commit the repository refused. It keeps what the hook
 // said, counts how often the same output came back, and records it where a person looks.
 func (r *runner) commitBlocked(err error) (string, string, error) {
+	if !blocker.IsHookRejection(err) {
+		// Not the hook: git could not even try, or the run was cancelled. Blaming a hook
+		// would send a person to fix the wrong thing, so the real error is the reason.
+		return r.record(build, statement.Hold, err.Error(), nil)
+	}
 	b := blocker.FromCommit(err, r.cur.Blocker)
 	r.cur.Blocker = b
 	r.last = failure{Fingerprint: b.Fingerprint}
@@ -2402,11 +2479,17 @@ func Decide(ctx context.Context, opt Options, id string, answer decision.Answer)
 		return Result{}, err
 	}
 	text := strings.TrimSpace(answer.Text)
+	if runes := []rune(text); len(runes) > maxAnswerRunes {
+		text = string(runes[:maxAnswerRunes])
+	}
 	body := option.Label
+	if req.Subject != "" {
+		body += " " + req.Subject
+	}
 	if text != "" {
 		body += ": " + text
 	}
-	if err := r.logAnswer(req, option, body); err != nil {
+	if err := r.logAnswer(req, option, body, text != ""); err != nil {
 		return Result{}, err
 	}
 	r.journal("decision", map[string]string{"id": req.ID, "class": req.Class, "option": option.ID, "textChars": strconv.Itoa(len(text))})
@@ -2430,9 +2513,16 @@ func Decide(ctx context.Context, opt Options, id string, answer decision.Answer)
 		}
 	default:
 		r.clearWait()
+		// A question the build agent raised about the commit is answered by trying the
+		// commit again, as its prompt says, not by paying for another agent run.
+		r.cur.CommitOnly = option.Then == decision.Retry && req.Stage == build &&
+			(req.Class == decision.Question || req.Class == decision.Conflict)
 	}
 	if err := r.save(); err != nil {
 		return Result{}, err
 	}
 	return r.run(ctx)
 }
+
+// maxAnswerRunes bounds the words a person's answer adds to every later prompt.
+const maxAnswerRunes = 4000

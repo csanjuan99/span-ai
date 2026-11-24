@@ -10,6 +10,7 @@ S3. A person's rewind clears the blocker, so a changed brief or note gets a fres
 S4. Any stage can raise a structured decision request (title, what happened, evidence, 2-4 options with consequence, recommendation, free text), and answering it resumes at the right stage. A build agent that stops to ask is detected, not counted as a finished build. There is no option that bypasses the hook.
 S5. Decisions go to an append-only log with their full text. A second note no longer replaces the first. Decisions are applied on top of the brief on every build, with provenance, and a decision survives `Reload`.
 S6. Before build, the brief is checked against the repo's `AGENTS.md`; a contradiction raises a decision request. After frame, a plan pause fires only on conflict, ambiguity or risk. `merge` always holds.
+S8. Judgment Day findings both judges reported are fixed: only a refused `git commit` is a hook rejection; words a person types always reach the prompt; an agent's retry only retries the commit; a different conflict is asked even after another was answered; reloading an unchanged story asks nothing; a torn log line does not strand a run; an agent's words are one bounded line; an answer names the decision it is for.
 S7. Each behavior has a regression test, including the incident replay (brief contradicts hook, one request, answer persists).
 
 ## Tasks
@@ -19,6 +20,8 @@ S7. Each behavior has a regression test, including the incident replay (brief co
 - [x] T3 (S5, S7) decision log and overlay on the brief. inline. RED: compile failure on Input.Decisions/BriefEpoch; GREEN: 5 overlay tests, 5 engine tests, 1 serve test. Full suite ok
 - [x] T4 (S6, S7) preflight against AGENTS.md and conditional gates. inline. RED: compile failure on decision.Clash/Stages.Plan; GREEN: 7 engine gate tests, 3 decision tests, 1 policy test. Full suite ok
 
+- [x] T5 (S1-S6) address the findings both judges corroborated. inline. 9 engine tests, 8 unit tests added; full suite ok
+
 ## Log
 
 L1 (2026-11-24, user): "Si, implementa en ese orden con odd, luego haces judgment day y luego haces revisión rdd"
@@ -26,3 +29,4 @@ L3: T1 landed in 1c3a6ba. The pre-commit hook (GGA) rejected the first T1 commit
 L4: S5 design note: story drift is detected by BriefEpoch (bumped only when Reload brings different text), not by hashing brief.md, because frame and answers also edit brief.md and would raise false drift.
 L5: S6 deviation, on purpose: `merge` keeps its default of auto. Flipping it to hold would change what existing span.yaml files do (a consumed config contract, high-risk item 3). The plan gate is new and defaults to auto for the same reason; the creator's span.yaml can set plan: conditional and merge: hold.
 L2: Route: all inline, tasks depend on each other so no writer trigger holds. Risk lines per task.
+L6: Judgment Day on fa62e7e (diff sha 8218083512edbcdc): 0 CRITICAL, 7 WARNING corroborated by both judges, 3 reported by one. No severe confirmed, so JD is APPROVED with INFO. The corroborated warnings were fixed anyway as T5 because they defeat the stated goal (resilience); they were not a JD fix round.

@@ -4,6 +4,8 @@
 package blocker
 
 import (
+	"context"
+	"errors"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -31,6 +33,17 @@ type Blocker struct {
 // spend the same money to reach the same wall.
 func (b *Blocker) Retryable() bool {
 	return b == nil || b.Count < 2
+}
+
+// IsHookRejection reports whether err is a refused `git commit`. A failed `git add`, a
+// status that could not be read, a missing identity and a cancelled run fail the same call
+// but are not the repository's hook speaking, so they stay plain holds with their own text.
+func IsHookRejection(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	text := err.Error()
+	return strings.Contains(text, "git commit -m") && strings.Contains(text, "exit status")
 }
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
