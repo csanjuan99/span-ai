@@ -195,3 +195,18 @@ needs smaller candidates. Plan: at publish time, slice the branch into chained P
 `ask-on-risk` asks for the chain strategy) with the shape package and its guard fix as their
 own slice, and review each slice. Per-commit assessment was not run after each work unit; it
 should have been, and that is why the open slice became the whole branch.
+
+L13. 2026-11-24, user: "en cadena sobre una rama feature en la que estamos trabajando". Chain
+strategy `feature-branch-chain`, one slicing pass by unit, rebuilt locally by cherry-pick (final
+tree identical to the old feat/story-shaping head): 01-skill 360, 02-jira 751, 03-shape 1702,
+04-serve 990, 05-web 2077, 06-docs 232 changed lines. Slices 02-05 exceed 400: each is one
+behavior with its tests (tests are 40-50% of each), so they are `size:exception` candidates.
+Assessed per slice against its parent: 01, 02, 04, 05 medium (under_budget, no review due), 06
+passive, 03 high (item 2 escalated). 03 reviewed with consent (risk, resilience, reliability):
+approved and acknowledged, lineage review-0b2a943542aa7234. Nine non-blocking findings as
+follow-ups: proposal section/text not sanitised before it is written into product.md; Answer is
+not retry-safe after a failed turn; AcceptProposals appends before saving, so a retry after a
+failed save appends twice; status can read ready with a stale story when the next turn fails;
+no lock in internal/shape (the HTTP layer serializes per session, the package does not);
+gitignored and outside-repo paths are not guarded. Push, the tracker PR and the child PRs are
+still the user's decision.
