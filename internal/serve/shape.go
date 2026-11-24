@@ -164,10 +164,15 @@ func shapeRoutes(mux *http.ServeMux, c *shapeConfig) {
 // workspaceDir accepts only an absolute path to an existing folder.
 func workspaceDir(raw string) (string, error) {
 	path := strings.TrimSpace(raw)
-	if path == "" || !filepath.IsAbs(path) {
-		return "", &requestError{"invalid", "workspace must be an absolute path"}
+	if path == "" {
+		return "", &requestError{"invalid", "workspace is missing"}
 	}
-	path = filepath.Clean(path)
+	// A relative folder is read from the server's folder, as /quickstart reads it, and kept
+	// absolute so the session names the same folder whatever the server's folder later is.
+	path, err := filepath.Abs(path)
+	if err != nil {
+		return "", &requestError{"invalid", fmt.Sprintf("workspace %q cannot be resolved", raw)}
+	}
 	if info, err := os.Stat(path); err != nil || !info.IsDir() {
 		return "", &requestError{"invalid", fmt.Sprintf("workspace %q is not a folder", path)}
 	}

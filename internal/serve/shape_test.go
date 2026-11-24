@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -300,6 +301,24 @@ func TestShapeWorkspaceMustBeAnExistingFolder(t *testing.T) {
 		if rec.Code != http.StatusBadRequest || errCode(t, rec) != "invalid" {
 			t.Fatalf("workspace %q: %d %s", ws, rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestShapeRelativeWorkspaceResolvesAgainstTheServerFolder(t *testing.T) {
+	rig := newShapeRig(t, openReply(t))
+	t.Chdir(rig.ws)
+	rec := rig.do(http.MethodPost, "/shapes", map[string]any{"workspace": ".", "idea": "x"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("start %d %s", rec.Code, rec.Body)
+	}
+	got := rig.session(rec)
+	want, err := filepath.EvalSymlinks(rig.ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := filepath.EvalSymlinks(got.Workspace)
+	if err != nil || stored != want {
+		t.Fatalf("workspace %q, want %q (%v)", got.Workspace, want, err)
 	}
 }
 
