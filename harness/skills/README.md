@@ -12,6 +12,7 @@ Portable agent skills following the [Agent Skills](https://agentskills.io) open 
 | `cost-sentinel/` | ops | Read-only AWS cost spot-check after a deploy or suspected runaway |
 | `change-impact/` | architecture | Before building or changing a behavior: what it creates, modifies, or extends, and which other behaviors can break |
 | `api-first/` | architecture | Before building a backend capability a third party can call: write the consumer contract first, in the repo's own language and style |
+| `user-story/` | product | Writing a user story with BR, AC, and TC, or shaping one through an Example Mapping interview |
 
 ## Conventions
 
