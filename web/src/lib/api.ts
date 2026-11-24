@@ -8,6 +8,7 @@ import {
   type ConflictGroup,
   type ConflictOption,
   type Cursor,
+  type DecisionRequest,
   type Gate,
   type ImplementationView,
   type LiveFrame,
@@ -230,8 +231,10 @@ function cursor(value: unknown): Cursor {
     throw new Error("cursor is missing")
   }
   const conflict = conflictOf(value.conflict)
+  const decision = decisionOf(value.decision)
   return {
     ...(conflict === undefined ? {} : { conflict }),
+    ...(decision === undefined ? {} : { decision }),
     id: text(value.id),
     stage: text(value.stage),
     iteration: count(value.iteration),
@@ -246,6 +249,41 @@ function cursor(value: unknown): Cursor {
     workspace: text(value.workspace),
     issue: text(value.issue),
     questions: stringList(value.questions),
+  }
+}
+
+/**
+ * Reads the decision a run waits on. A request with fewer than two usable options is
+ * dropped: the page would show a question nobody can answer.
+ */
+export function decisionOf(value: unknown): DecisionRequest | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+  const options = Array.isArray(value.options)
+    ? value.options.filter(isRecord).map((option) => ({
+        id: text(option.id),
+        label: text(option.label),
+        consequence: text(option.consequence),
+        reversible: flag(option.reversible),
+      }))
+    : []
+  const usable = options.filter((option) => option.id !== "" && option.label !== "")
+  if (usable.length < 2) {
+    return undefined
+  }
+  const evidence = Array.isArray(value.evidence)
+    ? value.evidence.filter(isRecord).map((item) => ({ ref: text(item.ref), excerpt: text(item.excerpt) }))
+    : []
+  return {
+    id: text(value.id),
+    class: text(value.class),
+    stage: text(value.stage),
+    title: text(value.title),
+    happened: text(value.happened),
+    evidence,
+    options: usable,
+    recommendation: text(value.recommendation),
   }
 }
 
@@ -471,6 +509,11 @@ async function postJSON(url: string, body: unknown): Promise<void> {
 /** Sends the answers and continues the waiting run. */
 export async function answerRun(id: string, answers: { question: string; body: string }[]): Promise<void> {
   await postJSON(`/spans/${id}/answer`, { answers })
+}
+
+/** Answers the decision a run waits on and continues it where the answer says. */
+export async function decideRun(id: string, option: string, text: string): Promise<void> {
+  await postForm(`/spans/${encodeURIComponent(id)}/decide`, new URLSearchParams({ option, text }))
 }
 
 /** Reads the Jira story again and continues the waiting run. */

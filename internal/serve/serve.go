@@ -20,6 +20,7 @@ import (
 
 	"span/internal/agent"
 	"span/internal/branch"
+	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
@@ -59,8 +60,10 @@ type Launch func(ctx context.Context, req setup.Request) (Outcome, error)
 // Signal is how a person continues a run from the page.
 type Signal struct {
 	Answers []engine.Answer
-	Reload  bool
-	Resume  bool
+	// Decision answers the run's open decision request.
+	Decision *decision.Answer
+	Reload   bool
+	Resume   bool
 }
 
 // Wake continues a waiting or paused run. A nil wake leaves those routes absent.
@@ -250,6 +253,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	})
 	mux.HandleFunc("POST /spans/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, false, false)
+	})
+	mux.HandleFunc("POST /spans/{id}/decide", func(w http.ResponseWriter, r *http.Request) {
+		decideRun(wake, root, r.PathValue("id"), w, r)
 	})
 	mux.HandleFunc("POST /spans/{id}/story", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, true, false)
@@ -517,6 +523,10 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 		signal.Answers = body.Answers
 	}
 	if resume {
+		if snap.Cursor.Decision != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is waiting for a decision"})
+			return
+		}
 		if engine.Waiting(snap.Cursor) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is waiting for an answer"})
 			return
@@ -530,6 +540,39 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err := wake(r.Context(), id, signal); err != nil {
+		writeBusy(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+}
+
+// decideRun answers the decision a run is waiting on. An answer that names no option of
+// that decision is refused before anything is woken.
+func decideRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request) {
+	if wake == nil || !safe(id) {
+		http.NotFound(w, r)
+		return
+	}
+	snap, err := engine.Load(root, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	req := snap.Cursor.Decision
+	if req == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run has no open decision"})
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	answer := decision.Answer{Option: r.PostForm.Get("option"), Text: r.PostForm.Get("text")}
+	if _, err := req.Choose(answer); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "message": err.Error()})
+		return
+	}
+	if err := wake(r.Context(), id, Signal{Decision: &answer}); err != nil {
 		writeBusy(w, err)
 		return
 	}

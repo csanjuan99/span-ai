@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/live"
 	"span/internal/setup"
@@ -398,5 +399,50 @@ func TestAProjectBaseNeverTurnsAStoryIntoAHotfix(t *testing.T) {
 	Handler(t.TempDir(), "").ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "branch feat/add-saved-cards\nbase master\n") {
 		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDecideWakesTheRunWithTheChosenOption(t *testing.T) {
+	root := t.TempDir()
+	req := decision.Request{ID: "d1", Title: "t", Happened: "h", Options: []decision.Option{
+		{ID: "fix", Label: "Fix", Consequence: "c", Then: decision.Build}, {ID: "stop", Label: "Stop", Consequence: "c", Then: decision.Stop},
+	}}
+	writeCursor(t, root, engine.Cursor{ID: "span-1", Stage: "build", Hold: true, Decision: &req})
+	var got Signal
+	handler := New(root, "", nil, func(_ context.Context, _ string, signal Signal) error { got = signal; return nil }, nil, nil)
+
+	post := func(path, form string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
+		return rec
+	}
+	if rec := post("/spans/span-1/decide", "option=skip-hook"); rec.Code != http.StatusBadRequest || got.Decision != nil {
+		t.Fatalf("an option the decision does not have: %d %+v", rec.Code, got)
+	}
+	if rec := post("/spans/span-1/resume", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "decision") {
+		t.Fatalf("resume over an open decision: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := post("/spans/span-1/decide", "option=fix&text=keep+it+disabled")
+	if rec.Code != http.StatusAccepted || got.Decision == nil || got.Decision.Option != "fix" || got.Decision.Text != "keep it disabled" {
+		t.Fatalf("status %d signal %+v", rec.Code, got)
+	}
+	events, err := os.ReadFile(filepath.Join(root, "span-1", "events.jsonl"))
+	if err != nil || !strings.Contains(string(events), `"decide"`) || strings.Contains(string(events), "keep it disabled") {
+		t.Fatalf("journal = %s (%v)", events, err)
+	}
+}
+
+func TestDecideWithoutAnOpenDecisionIsRefused(t *testing.T) {
+	root := t.TempDir()
+	writeCursor(t, root, engine.Cursor{ID: "span-2", Stage: "build", Hold: true})
+	handler := New(root, "", nil, func(context.Context, string, Signal) error { t.Fatal("woke a run with nothing to decide"); return nil }, nil, nil)
+	r := httptest.NewRequest(http.MethodPost, "/spans/span-2/decide", strings.NewReader("option=fix"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, r)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d", rec.Code)
 	}
 }

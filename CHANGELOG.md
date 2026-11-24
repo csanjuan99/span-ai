@@ -6,6 +6,8 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Added**: decisions. A run that cannot choose for itself now asks a structured question on its page: what happened, the evidence quoted, two to four options with what each one does, a recommendation and a box for your words. A repeated commit rejection opens one, and the build agent can open one by writing `.span/runs/<id>/decision.json` instead of asking in the chat, which Span used to read as a finished build. Answering (`POST /spans/{id}/decide`) resumes where the option says: build again with your words, retry the commit alone, or stop. `Resume` does nothing while one is open. No option skips a hook.
+
 - **Fixed**: a commit the repository's hook rejects no longer loops. It is now a classified blocker (`commit-rejected`): the hook output, cleaned of colors, is kept on the run and carried into the next build prompt, and the same output twice makes the blocker non-retryable. Resuming then retries only the commit, without another agent run, until what the hook rejects changes. A rewind clears the blocker. Before, each resume ran the whole build again and hit the same hook, and the hook's text never reached the agent.
 
 - **Added**: a run can be deleted from the desk's list, one at a time, after a second click. Only its record goes (`POST /spans/{id}/delete`); the branch, the pull request and any worktree stay. A run being driven, here or by another process, is refused.

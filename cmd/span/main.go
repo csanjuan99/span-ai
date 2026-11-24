@@ -259,6 +259,11 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 				reportRun(id, err)
 				return
 			}
+			if wakeup.Decision != nil {
+				_, err := engine.Decide(flight, opt, id, *wakeup.Decision)
+				reportRun(id, err)
+				return
+			}
 			if wakeup.Reload {
 				_, err := engine.Reload(flight, opt, id, brief)
 				reportRun(id, err)

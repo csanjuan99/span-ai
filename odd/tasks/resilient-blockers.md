@@ -15,11 +15,12 @@ S7. Each behavior has a regression test, including the incident replay (brief co
 ## Tasks
 
 - [x] T1 (S1-S3, S7) classify commit rejection, cap the loop. inline. RED: build failure on missing Blocker, GREEN: 3 engine tests + 3 unit tests, full suite ok
-- [ ] T2 (S4, S7) structured decision request for any stage. inline
+- [x] T2 (S4, S7) structured decision request for any stage. inline. RED: compile failure on Cursor.Decision; GREEN: 7 engine tests, 4 decision tests, 2 serve tests, 3 web tests. Full suites ok
 - [ ] T3 (S5, S7) decision log and overlay on the brief. inline
 - [ ] T4 (S6, S7) preflight against AGENTS.md and conditional gates. inline
 
 ## Log
 
 L1 (2026-11-24, user): "Si, implementa en ese orden con odd, luego haces judgment day y luego haces revisión rdd"
+L3: T1 landed in 1c3a6ba. The pre-commit hook (GGA) rejected the first T1 commit for a duplicated test helper; fixed, not bypassed.
 L2: Route: all inline, tasks depend on each other so no writer trigger holds. Risk lines per task.

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
-import { answerRun, approveStage, branchLine, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
+import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
 import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
@@ -21,6 +21,7 @@ import { Rewind } from "@/components/rewind/Rewind"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
 import { Shell } from "@/components/shell/Shell"
 import { StageRail } from "@/components/stage-rail/StageRail"
+import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -116,6 +117,17 @@ export function SpanPage() {
       setNote("Answer saved. Frame is reading the story again.")
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "the answer was not saved")
+    }
+  }
+
+  async function decide(option: string, text: string) {
+    setNote("")
+    try {
+      await decideRun(id, option, text)
+      state.note("decision saved")
+      setNote("Decision saved. The run is going on.")
+    } catch (err: unknown) {
+      setNote(err instanceof Error ? err.message : "the decision was not saved")
     }
   }
 
@@ -268,8 +280,12 @@ export function SpanPage() {
             <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
           ) : null}
 
+          {cursor?.decision !== undefined && !waiting ? (
+            <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
+          ) : null}
+
           {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
-          {!waiting && !cursor?.stop ? (
+          {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
           <div className="flex flex-col gap-3 border-t border-border pt-4">
             {paused || showNote ? (
               <form className="flex flex-col gap-3" onSubmit={(event) => void save(event)}>

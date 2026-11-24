@@ -237,8 +237,7 @@ const conflictFile = `{"class":"spec-conflict","title":"AC 400 contradicts AGENT
 func TestABuildThatWritesADecisionFileParksTheRunInsteadOfCommitting(t *testing.T) {
 	opt, agents, source, _, _, _ := baseOpt(t)
 	agents.buildHook = func(text string) {
-		_, rest, _ := strings.Cut(text, "Write this JSON to ")
-		path, _, _ := strings.Cut(rest, " and stop")
+		path := decisionPathFrom(text)
 		if err := os.WriteFile(path, []byte(conflictFile), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -265,9 +264,11 @@ func TestABuildThatWritesADecisionFileParksTheRunInsteadOfCommitting(t *testing.
 func TestAnInvalidDecisionFileHoldsWithWhatIsWrong(t *testing.T) {
 	opt, agents, _, _, _, _ := baseOpt(t)
 	agents.buildHook = func(text string) {
-		_, rest, _ := strings.Cut(text, "Write this JSON to ")
-		path, _, _ := strings.Cut(rest, " and stop")
-		_ = os.WriteFile(path, []byte(`{"title":"x","happened":"y","options":[{"id":"a","label":"A","consequence":"c","then":"skip-hook"},{"id":"b","label":"B","consequence":"c","then":"stop"}]}`), 0o644)
+		path := decisionPathFrom(text)
+		bad := `{"title":"x","happened":"y","options":[{"id":"a","label":"A","consequence":"c","then":"skip-hook"},{"id":"b","label":"B","consequence":"c","then":"stop"}]}`
+		if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	got, err := Start(context.Background(), opt)
 	if err != nil {
@@ -279,4 +280,11 @@ func TestAnInvalidDecisionFileHoldsWithWhatIsWrong(t *testing.T) {
 	if cur := readCursor(t, opt, got.ID); cur.Decision != nil {
 		t.Fatalf("an invalid request became a decision: %+v", cur.Decision)
 	}
+}
+
+// decisionPathFrom reads the request file the build prompt names, the way an agent would.
+func decisionPathFrom(prompt string) string {
+	_, rest, _ := strings.Cut(prompt, "Write this JSON to ")
+	path, _, _ := strings.Cut(rest, " and stop")
+	return path
 }

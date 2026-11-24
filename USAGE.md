@@ -667,6 +667,14 @@ Two stops run before the cap:
 
 Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build, and build is given the finding: the next prompt starts with "Inspect sent this change back" and its reason, until inspect passes. Two returns can correct the change. The third holds with `inspect cap:` and the finding. Resuming a run held there is a request for one more round: build gets the finding again and the count starts over, so each extra round needs a person to ask for it. To fix it by hand instead, change the files and use Rewind to restart at prove, which runs inspect again.
 
+### When the repository refuses the commit, and decisions
+
+Span commits the build with the repository's own hooks on. A refusal is a blocker of class `commit-rejected`, not a plain hold. The hook's output, without terminal colors, is kept on the run and goes into the next build prompt, so the agent sees what the hook said. The second refusal with the same output means another build would end the same way: Span stops spending agent runs and opens a **decision**. Span never skips a hook, and no option of a decision offers to.
+
+A decision is a question with the evidence quoted, two to four options that each say what Span does next, a recommended one, and a box for your own words. Answer it on the run's page. An option does one of three things: `build` runs the build again with your words as guidance, `retry` tries the commit again without running the agent (you changed the rule or the hook in the repository), `stop` ends the run. While a decision is open, `Resume` does nothing and the page offers the decision instead; a restart from a stage clears it.
+
+The build agent can raise a decision too. When the brief asks for something a rule of the repository forbids, or it cannot go on without you, the prompt tells it to write the request to `.span/runs/<id>/decision.json` and stop, instead of choosing a side or asking in the chat. Span reads the file once, checks it, and holds with `decision needed`. A request it cannot show (fewer than two options, an action Span does not offer) holds with the reason, and the agent gets no commit made for it. Your answer is written to `answers.md` and stays in the prompt of every later build.
+
 ### Failures the base commit already had
 
 A red test in an unrelated module is not this story's to fix. Before the first build, Span
