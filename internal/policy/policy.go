@@ -115,6 +115,9 @@ type Modes struct {
 	Open    string `yaml:"open"`
 	Merge   string `yaml:"merge"`
 	Promote string `yaml:"promote"`
+	// Plan decides whether the plan frame proposes waits for a person before any build:
+	// auto never waits, conditional waits for a story weighed deep, hold always waits.
+	Plan string `yaml:"plan"`
 	// Conflict decides what happens when the base cannot be merged cleanly into the branch.
 	// hold (the default) waits for a person to choose; auto applies the first option only
 	// when every group of the conflict is low risk.
@@ -206,6 +209,9 @@ func (f File) Validate() error {
 			return fmt.Errorf("stage mode %q is not auto or hold", mode)
 		}
 	}
+	if mode := f.PlanMode(); mode != "auto" && mode != "hold" && mode != "conditional" {
+		return fmt.Errorf("stages.plan %q is not auto, conditional or hold", mode)
+	}
 	if mode := f.ConflictMode(); mode != "auto" && mode != "hold" {
 		return fmt.Errorf("stages.conflict %q is not auto or hold", mode)
 	}
@@ -253,6 +259,15 @@ func (f File) Validate() error {
 		}
 	}
 	return nil
+}
+
+// PlanMode returns how the plan frame proposes is released: auto builds it, hold waits for
+// a person every time, conditional waits only for a story weighed deep.
+func (f File) PlanMode() string {
+	if mode := strings.TrimSpace(f.Stages.Plan); mode != "" {
+		return mode
+	}
+	return "auto"
 }
 
 // OpenMode returns the open stage mode.
@@ -332,22 +347,28 @@ func SetAgent(path, value string) error {
 	if !agent.Known(value) {
 		return fmt.Errorf("agent %q is not one of auto, any, or %s", value, agent.IDs())
 	}
-	// A new file is 0644 like the one quickstart writes; a rewrite keeps the file's mode.
-	mode := os.FileMode(0o644)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		raw, err = nil, nil
-	} else if err == nil {
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			return statErr
-		}
-		mode = info.Mode().Perm()
-	}
+	raw, mode, err := readForEdit(path)
 	if err != nil {
 		return err
 	}
-	return writeChecked(path, replaceAgent(string(raw), value), mode)
+	return writeChecked(path, replaceAgent(raw, value), mode)
+}
+
+// readForEdit reads span.yaml for a rewrite. A new file is 0644 like the one quickstart
+// writes, a missing one is empty, and a rewrite keeps the file's own mode.
+func readForEdit(path string) (string, os.FileMode, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", 0o644, nil
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, err
+	}
+	return string(raw), info.Mode().Perm(), nil
 }
 
 // writeChecked validates the new body and replaces the file with it through a temp file, so
@@ -368,7 +389,7 @@ func writeChecked(path, next string, mode os.FileMode) error {
 	name := tmp.Name()
 	defer func() { _ = os.Remove(name) }()
 	if _, err := tmp.WriteString(next); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -389,21 +410,11 @@ func SetModel(path, id, model string) error {
 	if model != "" && !agent.ValidModel(model) {
 		return fmt.Errorf("%q is not a model name", model)
 	}
-	mode := os.FileMode(0o644)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		raw, err = nil, nil
-	} else if err == nil {
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			return statErr
-		}
-		mode = info.Mode().Perm()
-	}
+	raw, mode, err := readForEdit(path)
 	if err != nil {
 		return err
 	}
-	next, err := replaceModel(string(raw), id, model)
+	next, err := replaceModel(raw, id, model)
 	if err != nil {
 		return err
 	}

@@ -23,12 +23,15 @@ import (
 	"unicode"
 
 	"span/internal/agent"
+	"span/internal/blocker"
 	"span/internal/branch"
+	"span/internal/decision"
 	"span/internal/feature"
 	"span/internal/handoff"
 	"span/internal/harness"
 	"span/internal/journal"
 	"span/internal/learn"
+	"span/internal/overlay"
 	"span/internal/policy"
 	"span/internal/proc"
 	"span/internal/prompt"
@@ -108,7 +111,9 @@ type FrameDoc struct {
 	Assumptions []string `json:"assumptions"`
 	Questions   []string `json:"questions"`
 	Acceptance  []string `json:"acceptance"`
-	OutOfScope  bool     `json:"outOfScope"`
+	// Conflicts are the places where the story asks for what the repository's rules forbid.
+	Conflicts  []decision.Clash `json:"conflicts"`
+	OutOfScope bool             `json:"outOfScope"`
 }
 
 // Answer is one reply to a question the run is waiting on.
@@ -223,6 +228,21 @@ type Cursor struct {
 	Folder          string      `json:"folder,omitempty"`
 	Weight          string      `json:"weight,omitempty"`
 	AgentBlock      *AgentBlock `json:"agentBlock,omitempty"`
+	// Blocker is the obstacle the run is parked on, with the evidence a person and the next
+	// build need. It is cleared when the stage passes or a person restarts the run.
+	Blocker *blocker.Blocker `json:"blocker,omitempty"`
+	// Decision is the question a person has to answer before the run goes on. While it is
+	// open, resuming does nothing: the answer picks the way forward.
+	Decision *decision.Request `json:"decision,omitempty"`
+	// BriefEpoch counts the times the story was read again and came back different. A
+	// decision records the epoch it was taken in, so a changed story is noticed.
+	BriefEpoch int `json:"briefEpoch,omitempty"`
+	// StoryHash identifies the story as fetched, which brief.md stops being once frame
+	// or an answer installs criteria into it. Only a story that really changed moves the epoch.
+	StoryHash string `json:"storyHash,omitempty"`
+	// CommitOnly makes the next build try the commit again without running the agent: a
+	// person answered a question that was about the commit, not about the code.
+	CommitOnly bool `json:"commitOnly,omitempty"`
 	// Feature is this run's identity: its feature document odd/tasks/<feature>.md and its
 	// commit scope. It comes from the branch, never from span.yaml, so parallel runs in one
 	// project never write the same document.
@@ -339,6 +359,7 @@ func Open(opt Options) (string, error) {
 	if err := ignoreStateRoot(opt.Root); err != nil {
 		return "", err
 	}
+	r.cur.StoryHash = storyHash(opt.Brief)
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(opt.Brief), 0o644); err != nil {
 		return "", err
 	}
@@ -364,12 +385,29 @@ func Resume(ctx context.Context, opt Options, id string) (Result, error) {
 	if r.cur.Done {
 		return r.finish(statement.Advance), nil
 	}
+	if r.cur.Decision != nil {
+		return r.finish(statement.Hold), nil
+	}
 	clearBusyHold(&r.cur)
 	r.takePause()
 	if err := r.save(); err != nil {
 		return Result{}, err
 	}
 	return r.run(ctx)
+}
+
+// storyHash identifies a story's text.
+func storyHash(text string) string {
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// notWaiting is the answer for a run that has no question open: where it stands, unchanged.
+func (r *runner) notWaiting() Result {
+	if r.cur.Stop {
+		return r.finish(statement.Stop)
+	}
+	return r.finish(statement.Hold)
 }
 
 // Waiting reports a run that stopped or held for questions and can continue.
@@ -391,10 +429,7 @@ func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Re
 	}
 	defer release()
 	if !Waiting(r.cur) {
-		if r.cur.Stop {
-			return r.finish(statement.Stop), nil
-		}
-		return r.finish(statement.Hold), nil
+		return r.notWaiting(), nil
 	}
 	if err := writeAnswers(r.spanDir(), answers); err != nil {
 		return Result{}, err
@@ -423,13 +458,19 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 	}
 	defer release()
 	if !Waiting(r.cur) {
-		if r.cur.Stop {
-			return r.finish(statement.Stop), nil
-		}
-		return r.finish(statement.Hold), nil
+		return r.notWaiting(), nil
 	}
 	if strings.TrimSpace(brief) == "" {
 		return Result{}, errors.New("brief is empty")
+	}
+	// A run from before story hashes compares with brief.md, as it always did.
+	known := r.cur.StoryHash
+	if known == "" {
+		known = storyHash(r.opt.Brief)
+	}
+	if next := storyHash(brief); next != known {
+		r.cur.BriefEpoch++
+		r.cur.StoryHash = next
 	}
 	r.opt.Brief = brief
 	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(brief), 0o644); err != nil {
@@ -626,7 +667,10 @@ func (r *runner) run(ctx context.Context) (Result, error) {
 	if err != nil {
 		r.cur.Hold = true
 		r.cur.Reason = "the run stopped: " + err.Error()
-		_ = r.save()
+		// The stop is already the error being returned; a save that fails too is logged, not hidden.
+		if saveErr := r.save(); saveErr != nil {
+			log.Printf("save %s: %v", r.cur.ID, saveErr)
+		}
 	}
 	return res, err
 }
@@ -785,6 +829,17 @@ func (r *runner) doIntake() (string, string, error) {
 }
 
 func (r *runner) doFrame(ctx context.Context) (string, string, error) {
+	if verdict, reason, asked, err := r.guardOverlay(frame); asked || err != nil {
+		return verdict, reason, err
+	}
+	// A plan a person approved is built as proposed: frame does not run again, because a
+	// second run could propose a different plan than the one that was approved.
+	if r.approved(frame, "") {
+		if doc, ok := r.readFramePlan(); ok {
+			r.spendApproval(frame, "")
+			return r.advanceFrame(len(doc.Claims))
+		}
+	}
 	target, err := r.pick(frame)
 	if err != nil {
 		return r.record(frame, statement.Hold, err.Error(), nil)
@@ -816,15 +871,120 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 	if len(questions) > 0 {
 		return r.block(ctx, questions)
 	}
+	if verdict, reason, asked, err := r.askClashes(doc.Conflicts); asked || err != nil {
+		return verdict, reason, err
+	}
 	if len(doc.Claims) == 0 {
 		return r.record(frame, statement.Hold, "frame produced no claims: the agent returned the story with nothing to check. Resume to ask again, or make the story say what must be true when it is done.", nil)
 	}
+	if r.planGated() {
+		if err := r.saveFramePlan(doc); err != nil {
+			return "", "", err
+		}
+		// An approval belongs to the plan it was given for; this is a new one.
+		r.spendApproval(frame, "")
+		req := decision.FromPlan(doc.Claims, doc.Assumptions, len(doc.Acceptance), frame, r.opt.now())
+		return r.askDecision(frame, req, "decision needed: "+req.Title)
+	}
+	return r.advanceFrame(len(doc.Claims))
+}
+
+// advanceFrame seals frame as done with its claims counted.
+func (r *runner) advanceFrame(claims int) (string, string, error) {
 	now := r.opt.now()
 	r.cur.FrameAdvancedAt = &now
-	return r.record(frame, statement.Advance, fmt.Sprintf("%d claims", len(doc.Claims)), nil)
+	return r.record(frame, statement.Advance, fmt.Sprintf("%d claims", claims), nil)
+}
+
+// planGated reports whether the plan frame proposed must wait for a person. conditional
+// waits only for a story weighed deep: a plan nobody reads is a gate that costs and says
+// nothing.
+func (r *runner) planGated() bool {
+	switch r.opt.Policy.PlanMode() {
+	case statement.Hold:
+		return true
+	case "conditional":
+		return r.weight() == policy.Deep
+	}
+	return false
+}
+
+func (r *runner) framePlanPath() string { return filepath.Join(r.iterDir(), "plan.json") }
+
+func (r *runner) saveFramePlan(doc FrameDoc) error {
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(r.iterDir(), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(r.framePlanPath(), raw, 0o644)
+}
+
+func (r *runner) readFramePlan() (FrameDoc, bool) {
+	raw, err := os.ReadFile(r.framePlanPath())
+	if err != nil {
+		return FrameDoc{}, false
+	}
+	var doc FrameDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return FrameDoc{}, false
+	}
+	return doc, true
+}
+
+// askClashes parks the run when frame found a rule the story breaks. A person who already
+// answered one for this version of the story is not asked again, however frame words the
+// next one: the answer is in the log and in every prompt.
+func (r *runner) askClashes(clashes []decision.Clash) (verdict, reason string, asked bool, err error) {
+	if len(clashes) == 0 {
+		return "", "", false, nil
+	}
+	entries, readErr := overlay.Read(r.spanDir())
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	answered := map[string]bool{}
+	for _, e := range overlay.Active(entries) {
+		if e.Class == decision.Conflict && e.Stage == frame && e.Epoch == r.cur.BriefEpoch {
+			for _, key := range e.Covers {
+				answered[key] = true
+			}
+		}
+	}
+	var fresh []decision.Clash
+	for _, c := range clashes {
+		if !answered[decision.ClashKey(c)] {
+			fresh = append(fresh, c)
+		}
+	}
+	if len(fresh) == 0 {
+		return "", "", false, nil
+	}
+	req := decision.FromClashes(fresh, frame, r.opt.now())
+	verdict, reason, err = r.askDecision(frame, req, "decision needed: "+req.Title)
+	return verdict, reason, true, err
+}
+
+// rulesText is the repository's AGENTS.md, cut to what a prompt can carry. A repository
+// without one has no rules to compare the story with.
+func (r *runner) rulesText() string {
+	raw, err := os.ReadFile(filepath.Join(r.opt.Workspace, "AGENTS.md"))
+	if err != nil {
+		return ""
+	}
+	const limit = 8000
+	if len(raw) > limit {
+		raw = raw[:limit]
+	}
+	return strings.ToValidUTF8(strings.TrimSpace(string(raw)), "")
 }
 
 func (r *runner) doBuild(ctx context.Context) (string, string, error) {
+	if verdict, reason, asked, err := r.guardOverlay(build); asked || err != nil {
+		return verdict, reason, err
+	}
 	if err := r.recordBaseline(ctx); err != nil {
 		return "", "", err
 	}
@@ -832,11 +992,24 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(build, statement.Hold, err.Error(), nil)
 	}
-	in := r.promptInput(build, r.failurePacket())
-	call, cancel := r.agentCall(ctx)
-	defer cancel()
-	if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
-		return r.agentBlocked(build, err)
+	// A blocker that already came back with the same output does not earn another agent run:
+	// the tree is what the hook judged, and nothing a person did since has changed that.
+	commitOnly := r.cur.CommitOnly || !r.cur.Blocker.Retryable()
+	r.cur.CommitOnly = false
+	if !commitOnly {
+		// A request file left by an earlier run that died is not this run's question.
+		if err := os.Remove(r.decisionPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return "", "", err
+		}
+		in := r.promptInput(build, r.failurePacket())
+		call, cancel := r.agentCall(ctx)
+		defer cancel()
+		if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
+			return r.agentBlocked(build, err)
+		}
+		if verdict, reason, asked, err := r.takeDecisionFile(build); asked || err != nil {
+			return verdict, reason, err
+		}
 	}
 	path := featurePath(r.opt.Workspace, r.cur.Feature)
 	if err := feature.Valid(path); err != nil {
@@ -846,8 +1019,9 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	}
 	sha, err := r.commit(ctx)
 	if err != nil {
-		return r.record(build, statement.Hold, err.Error(), nil)
+		return r.commitBlocked(err)
 	}
+	r.cur.Blocker = nil
 	r.cur.GitSHA = sha
 	return r.record(build, statement.Advance, "feature document present", func(s *statement.Statement) {
 		s.FeatureDoc = path
@@ -855,11 +1029,174 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 	})
 }
 
+var errTooLarge = errors.New("the file is too large")
+
+// readCapped reads a file an agent wrote, refusing one larger than limit.
+func readCapped(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("%w: larger than %d bytes", errTooLarge, limit)
+	}
+	return raw, nil
+}
+
+// askDecision parks the run on a question for a person and records the hold that says so.
+func (r *runner) askDecision(stage string, req decision.Request, reason string) (string, string, error) {
+	r.cur.Decision = &req
+	return r.record(stage, statement.Hold, reason, func(s *statement.Statement) {
+		s.Fingerprint = req.Dedupe
+	})
+}
+
+// guardOverlay stops a stage that would apply decisions taken against a story that has
+// changed since. Neither applying nor dropping them is Span's call.
+func (r *runner) guardOverlay(stage string) (verdict, reason string, asked bool, err error) {
+	entries, readErr := overlay.Read(r.spanDir())
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	stale := overlay.Stale(entries, r.cur.BriefEpoch)
+	if len(stale) == 0 {
+		return "", "", false, nil
+	}
+	req := decision.FromStale(stale, stage, r.opt.now())
+	verdict, reason, err = r.askDecision(stage, req, "decision needed: "+req.Title)
+	return verdict, reason, true, err
+}
+
+// logAnswer writes what a person chose to the run's decision log. An answer that steers the
+// build becomes a decision that reaches every prompt; the others are history. A choice about
+// earlier decisions changes the log instead of adding to what the agent reads.
+func (r *runner) logAnswer(req *decision.Request, option decision.Option, body string, typed bool) error {
+	dir := r.spanDir()
+	entries, err := overlay.Read(dir)
+	if err != nil {
+		return err
+	}
+	switch option.Effect {
+	case decision.Reanchor:
+		for _, e := range overlay.Stale(entries, r.cur.BriefEpoch) {
+			if _, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Anchor, Ref: e.Seq, Epoch: r.cur.BriefEpoch, Stage: req.Stage, Title: req.Title}); err != nil {
+				return err
+			}
+		}
+	case decision.Drop:
+		var seqs []int
+		for _, e := range overlay.Stale(entries, r.cur.BriefEpoch) {
+			seqs = append(seqs, e.Seq)
+		}
+		if _, err := overlay.Append(dir, overlay.Entry{Kind: overlay.Supersede, Supersedes: seqs, Stage: req.Stage, Title: req.Title}); err != nil {
+			return err
+		}
+	case decision.Approve:
+		if err := writeAtomic(filepath.Join(dir, approvalFile(req.Stage, "")), []byte(r.cur.GitSHA+"\n")); err != nil {
+			return err
+		}
+	}
+	// Words a person typed always reach the agent: a card that asks for them and then
+	// files them as history would be lying. Without words, only an answer that steers the
+	// work is a decision, and the rest are history.
+	kind := overlay.Note
+	if option.Then == decision.Build || option.Effect == decision.Record || (typed && option.Then != decision.Stop) {
+		kind = overlay.Decision
+	}
+	if kind == overlay.Note && (option.Effect == decision.Reanchor || option.Effect == decision.Drop) {
+		return nil
+	}
+	_, err = overlay.Append(dir, overlay.Entry{
+		Kind: kind, Stage: req.Stage, Class: req.Class, Title: req.Title, Option: option.ID, Text: body,
+		Dedupe: req.Dedupe, Covers: req.Covers, Epoch: r.cur.BriefEpoch, Time: r.opt.now(),
+	})
+	return err
+}
+
+// decisionPath is where the build agent leaves a request for a person.
+func (r *runner) decisionPath() string {
+	return filepath.Join(r.spanDir(), "decision.json")
+}
+
+// takeDecisionFile reads the request the agent left, if any, and parks the run on it. The
+// file is removed either way, so a request is read once. asked is true when the stage
+// ended here: with an open question, or with a request Span could not accept.
+func (r *runner) takeDecisionFile(stage string) (verdict, reason string, asked bool, err error) {
+	raw, readErr := readCapped(r.decisionPath(), decision.MaxFile)
+	if errors.Is(readErr, os.ErrNotExist) {
+		return "", "", false, nil
+	}
+	if errors.Is(readErr, errTooLarge) {
+		// Said like any request Span cannot show, instead of failing the whole run.
+		if err := os.Remove(r.decisionPath()); err != nil {
+			log.Printf("decision file %s: %v", r.cur.ID, err)
+		}
+		verdict, reason, err = r.record(stage, statement.Hold, "the agent asked for a decision Span cannot show: "+readErr.Error(), nil)
+		return verdict, reason, true, err
+	}
+	if readErr != nil {
+		return "", "", true, readErr
+	}
+	// A request that cannot be removed would be read again and asked twice.
+	if rmErr := os.Remove(r.decisionPath()); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		return "", "", true, rmErr
+	}
+	req, parseErr := decision.Parse(raw, stage, r.opt.now())
+	if parseErr != nil {
+		verdict, reason, err = r.record(stage, statement.Hold, "the agent asked for a decision Span cannot show: "+parseErr.Error(), nil)
+		return verdict, reason, true, err
+	}
+	verdict, reason, err = r.askDecision(stage, req, "decision needed: "+req.Title)
+	return verdict, reason, true, err
+}
+
+// commitBlocked parks the run on a commit the repository refused. It keeps what the hook
+// said, counts how often the same output came back, and records it where a person looks.
+func (r *runner) commitBlocked(err error) (string, string, error) {
+	if !blocker.IsHookRejection(err) {
+		// Not the hook: git could not even try, or the run was cancelled. Blaming a hook
+		// would send a person to fix the wrong thing, so the real error is the reason.
+		return r.record(build, statement.Hold, err.Error(), nil)
+	}
+	b := blocker.FromCommit(err, r.cur.Blocker)
+	r.cur.Blocker = b
+	r.last = failure{Fingerprint: b.Fingerprint}
+	r.journal("blocker", map[string]string{
+		"class": b.Class, "fingerprint": b.Fingerprint, "count": strconv.Itoa(b.Count),
+	})
+	reason := b.Summary()
+	if !b.Retryable() {
+		req := decision.FromCommit(b, build, r.opt.now())
+		r.cur.Decision = &req
+		reason += ". Decision needed: answer it on the desk to go on"
+	}
+	return r.record(build, statement.Hold, reason, func(s *statement.Statement) {
+		s.Fingerprint = b.Fingerprint
+		s.Commands = []statement.Command{{
+			Command: "git commit", ExitCode: 1, Error: b.Summary(), Output: b.Evidence, Fingerprint: b.Fingerprint,
+		}}
+	})
+}
+
 // weight reads the story as it stands now. It is not frozen at intake: frame can install
 // criteria, and a brief that grows into twenty of them earns more checks.
 func (r *runner) weight() string {
-	names, _ := handoffNames(r.spanDir())
-	return r.opt.Policy.Weight(len(qa.Lines(r.opt.Brief)), names)
+	return r.opt.Policy.Weight(len(qa.Lines(r.opt.Brief)), r.handoffNamesOrLog())
+}
+
+// handoffNamesOrLog lists the handoff files of the run. A directory that cannot be read
+// means no handoffs for this prompt, and the reason is logged instead of lost.
+func (r *runner) handoffNamesOrLog() []string {
+	names, err := handoffNames(r.spanDir())
+	if err != nil {
+		log.Printf("handoffs %s: %v", r.cur.ID, err)
+	}
+	return names
 }
 
 // provePlan scopes the focused band to the files that declare this story's criteria.
@@ -1023,7 +1360,11 @@ func (r *runner) doQA(ctx context.Context) (string, string, error) {
 			s.Commands = []statement.Command{{Command: command, Band: "qa", Error: reason}}
 		})
 	}
-	prev, hadProve, _ := statement.Read(r.iterDir(), proveSt)
+	prev, hadProve, readErr := statement.Read(r.iterDir(), proveSt)
+	if readErr != nil {
+		// An unreadable prove statement cannot be reused; qa runs its own command.
+		log.Printf("prove statement %s: %v", r.cur.ID, readErr)
+	}
 	if hadProve && r.reusableQA(prev, command, ctx) {
 		gate := qa.Judge(lines, 0, covered, qa.Outcomes{})
 		gate.Command = command
@@ -1454,7 +1795,7 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	if stored == "iterate" {
 		stored = statement.Hold
 	}
-	text, digest, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
+	_, digest, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
 	if err != nil {
 		return "", "", err
 	}
@@ -1471,7 +1812,6 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	if fill != nil {
 		fill(&s)
 	}
-	_ = text
 	if err := statement.Write(r.iterDir(), &s); err != nil {
 		return "", "", err
 	}
@@ -1607,6 +1947,10 @@ func (r *runner) failurePacket() string {
 	if r.cur.InspectFeedback != "" {
 		fmt.Fprintf(&b, "Inspect sent this change back.\nReason: %s\n", r.cur.InspectFeedback)
 	}
+	if blk := r.cur.Blocker; blk != nil {
+		fmt.Fprintf(&b, "The repository's commit hook rejected this change.\nWhat it said:\n%s\n", blk.Evidence)
+		b.WriteString("Make the change pass the hook. Never bypass it (no --no-verify).\n")
+	}
 	if r.cur.Iteration <= 1 {
 		return closePacket(&b)
 	}
@@ -1650,8 +1994,11 @@ func closePacket(b *strings.Builder) string {
 }
 
 func (r *runner) promptInput(stage, failure string) prompt.Input {
-	text, _, _ := readInstructions(r.opt.Workspace, r.spanDir(), stage)
-	names, _ := handoffNames(r.spanDir())
+	text, _, err := readInstructions(r.opt.Workspace, r.spanDir(), stage)
+	if err != nil {
+		log.Printf("instructions %s %s: %v", r.cur.ID, stage, err)
+	}
+	names := r.handoffNamesOrLog()
 	root := r.opt.Policy.Harness
 	if root == "" {
 		root = harness.Root()
@@ -1679,8 +2026,15 @@ func (r *runner) promptInput(stage, failure string) prompt.Input {
 		}
 		r.shown[stage] = sigs
 	}
+	entries, err := overlay.Read(r.spanDir())
+	if err != nil {
+		// frame and build stop on this in guardOverlay; the stages that do not still run.
+		log.Printf("decision log %s: %v", r.cur.ID, err)
+	}
 	return prompt.Input{
-		Stage: stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature),
+		Decisions: overlay.Render(entries, r.cur.BriefEpoch),
+		Rules:     r.rulesFor(stage),
+		Stage:     stage, FeaturePath: featurePath(r.opt.Workspace, r.cur.Feature), DecisionPath: r.decisionFor(stage),
 		Brief: r.opt.Brief, Instructions: text, Answers: readAnswers(r.spanDir()),
 		Handoffs: handoff.Paths(r.cur.ID, names),
 		Failure:  failure, Manifest: manifest,
@@ -1758,7 +2112,9 @@ func (r *runner) saveLesson(own *learn.Book, stage, verdict, reason string, show
 		return
 	}
 	if fresh.Observe(stage, verdict, reason, shown) {
-		_ = learn.Save(r.bookPath, fresh)
+		if err := learn.Save(r.bookPath, fresh); err != nil {
+			log.Printf("lessons %s: %v", r.cur.ID, err)
+		}
 	}
 	r.book = fresh
 }
@@ -2089,3 +2445,84 @@ func writeAtomic(path string, data []byte) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// rulesFor is the rules block of a stage: only frame compares the story with them.
+func (r *runner) rulesFor(stage string) string {
+	if stage != frame {
+		return ""
+	}
+	return r.rulesText()
+}
+
+// decisionFor is the request file the stage may write: only build has one.
+func (r *runner) decisionFor(stage string) string {
+	if stage != build {
+		return ""
+	}
+	return r.decisionPath()
+}
+
+// Decide answers the open decision of a run and continues where the answer says. An answer
+// that is not one of the options changes nothing.
+func Decide(ctx context.Context, opt Options, id string, answer decision.Answer) (Result, error) {
+	r, release, err := acquire(opt, id)
+	if err != nil {
+		return Result{}, err
+	}
+	defer release()
+	req := r.cur.Decision
+	if req == nil {
+		return Result{}, errors.New("this run has no open decision")
+	}
+	option, err := req.Choose(answer)
+	if err != nil {
+		return Result{}, err
+	}
+	text := strings.TrimSpace(answer.Text)
+	if runes := []rune(text); len(runes) > maxAnswerRunes {
+		text = string(runes[:maxAnswerRunes])
+	}
+	body := option.Label
+	if req.Subject != "" {
+		body += " " + req.Subject
+	}
+	if text != "" {
+		body += ": " + text
+	}
+	if err := r.logAnswer(req, option, body, text != ""); err != nil {
+		return Result{}, err
+	}
+	r.journal("decision", map[string]string{"id": req.ID, "class": req.Class, "option": option.ID, "textChars": strconv.Itoa(len(text))})
+	r.cur.Decision = nil
+	switch option.Then {
+	case decision.Stop:
+		r.cur.Hold = false
+		r.cur.Stop = true
+		r.cur.Reason = "stopped by a decision: " + option.Label
+		if err := r.save(); err != nil {
+			return Result{}, err
+		}
+		return r.finish(statement.Stop), nil
+	case decision.Build:
+		// The hook output stays in front of the next build; only the count starts over.
+		kept := r.cur.Blocker
+		applyRewind(&r.cur, build)
+		if kept != nil {
+			kept.Count = 0
+			r.cur.Blocker = kept
+		}
+	default:
+		r.clearWait()
+		// A question the build agent raised about the commit is answered by trying the
+		// commit again, as its prompt says, not by paying for another agent run.
+		r.cur.CommitOnly = option.Then == decision.Retry && req.Stage == build &&
+			(req.Class == decision.Question || req.Class == decision.Conflict)
+	}
+	if err := r.save(); err != nil {
+		return Result{}, err
+	}
+	return r.run(ctx)
+}
+
+// maxAnswerRunes bounds the words a person's answer adds to every later prompt.
+const maxAnswerRunes = 4000

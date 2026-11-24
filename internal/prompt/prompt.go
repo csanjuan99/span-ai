@@ -22,18 +22,34 @@ type Input struct {
 	Acceptance   []string
 	Browser      bool
 	Lessons      string
+	// DecisionPath is where the build agent writes a decision request. Empty means the stage
+	// has no such channel.
+	DecisionPath string
+	// Decisions are what people decided for this run, with who and when. They outrank the brief.
+	Decisions string
+	// Rules is the repository's AGENTS.md, which frame compares the story against.
+	Rules string
 }
 
 // Frame asks for verifiable claims and forbids invented requirements.
 func Frame(in Input) string {
 	return preamble(in) + `
 Read the story in the language it is written. Carry what it already decides into this JSON.
-{"claims":[],"assumptions":[],"questions":[],"acceptance":[],"outOfScope":false}
+{"claims":[],"assumptions":[],"questions":[],"acceptance":[],"conflicts":[],"outOfScope":false}
 claims lists each thing the story says must be true when the work is done, one entry each, in the story's words. A story that asks for anything has at least one claim, so never leave it empty.
 acceptance lists each criterion the story already states, one entry, in the story's words.
-A question is allowed only when the story cannot be implemented without inventing a requirement.
+` + conflictLine(in) + `A question is allowed only when the story cannot be implemented without inventing a requirement.
 Do not invent a criterion the story does not state.
 Do not edit files. Do not push, merge, or deploy.
+`
+}
+
+// conflictLine asks frame for conflicts only when there are repository rules to compare with.
+func conflictLine(in Input) string {
+	if in.Rules == "" {
+		return ""
+	}
+	return `conflicts lists each place where the story asks for something the repository rules above forbid, as {"story":"what the story asks","rule":"what the rule says","ref":"AGENTS.md:line"}. Leave it empty when there is none. Do not invent one, and do not resolve one yourself.
 `
 }
 
@@ -48,6 +64,11 @@ func Build(in Input) string {
 	if in.Browser {
 		extra.WriteString("This repo is checked in a browser. Test user-visible behavior. Prefer getByRole. Use web-first expect assertions. Keep each test isolated. Record a trace on the first retry, not on every test.\n")
 		extra.WriteString("Authoring aid, not the gate: @playwright/mcp --caps=testing. The gate is the qa command.\n")
+	}
+	if in.DecisionPath != "" {
+		fmt.Fprintf(&extra, `If the brief asks for something a rule of this repository forbids (AGENTS.md, a hook, CI), or you cannot go on without a person deciding, do not choose one side silently and do not stop with a question in the chat. Write this JSON to %s and stop: {"class":"spec-conflict","title":"","happened":"","evidence":[{"ref":"path:line","excerpt":""}],"options":[{"id":"","label":"","consequence":"","reversible":true,"then":"build"}],"recommendation":""}
+Give 2 to 4 options. "then" is build (work again with the person's words), retry (try the commit again after the person changed the repository) or stop. Quote both sides of a conflict in the evidence. Never offer to skip a hook or a check.
+`, in.DecisionPath)
 	}
 	return preamble(in) + fmt.Sprintf(`
 ODD is mandatory. You are running Gentle AI Organic Driven Development.
@@ -79,6 +100,12 @@ func preamble(in Input) string {
 		fmt.Fprintf(&b, "Standards:\n%s\n", in.Standards)
 	}
 	fmt.Fprintf(&b, "Brief:\n%s\n", in.Brief)
+	if in.Decisions != "" {
+		b.WriteString(in.Decisions)
+	}
+	if in.Rules != "" {
+		fmt.Fprintf(&b, "Repository rules (AGENTS.md), enforced by the repository:\n%s\n", in.Rules)
+	}
 	if in.Instructions != "" {
 		fmt.Fprintf(&b, "Stage instructions:\n%s\n", in.Instructions)
 	}

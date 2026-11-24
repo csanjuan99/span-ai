@@ -15,7 +15,7 @@ import (
 // control matches the requests that change a run on a person's say-so. It names the run
 // and the action, so one wrapper journals all of them and a new control route only needs its
 // name added here.
-var control = regexp.MustCompile(`^/spans/([^/]+)/(answer|story|agent|stop|rewind|pause|resume|approve|relaunch|instructions(?:/[^/]+)?|conflict/(?:choose|hint|abort))$`)
+var control = regexp.MustCompile(`^/spans/([^/]+)/(answer|decide|story|agent|stop|rewind|pause|resume|approve|relaunch|instructions(?:/[^/]+)?|conflict/(?:choose|hint|abort))$`)
 
 // keptFields are the form fields whose value is short and fixed in meaning. Anything else a
 // person typed (a note, an answer, an instruction) is journaled as its length only.
@@ -27,11 +27,13 @@ type statusWriter struct {
 	status int
 }
 
+// WriteHeader remembers the status before passing it on.
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Write counts an implicit 200 when no header was written first.
 func (w *statusWriter) Write(raw []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK

@@ -419,7 +419,7 @@ manifest:
 ```
 
 `open: hold` or `merge: hold` pauses before that effect, and only a person releases it: the page shows **Approve merge** (or **Approve open**, or **Approve promote to <env>**) instead of a retry, because a retry reaches the same hold. The approval is bound to the commit the page showed, so a new commit is held again, and it is spent only when the stage advances. Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
-`open: hold` or `merge: hold` pauses before that effect. `conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts). Each promote environment has its own `auto` or `hold`. A failed environment stops the ladder. The next environment does not run.
+`conflict` is how a merge conflict is resolved: `hold` (the default, unlike the other stages) waits for a person; `auto` applies low-risk options on its own. See [When the merge conflicts](#when-the-merge-conflicts).
 
 `prove`, `qa` and `promote` commands are argv words, not a shell line. `go test ./...` is valid. `go test ./... | wc`, redirects, parentheses, backticks, `;`, `|`, and `&` are not executed. The stage holds.
 
@@ -666,6 +666,33 @@ Two stops run before the cap:
 `repair.maxAttempts` is how many times a failure may send the span back to build, from 1 to 8, default 3. The next failure after that holds and keeps the reports. A restart from a stage clears the count. It also reads the commit the branch is on when the run continues, so edits you committed by hand are what prove, QA and inspect check, and a restart before open forgets the old change link (open reuses a live change on the branch). A restart never resets the branch or the working tree: the attempt stays in git.
 
 Inspect is separate. A blocking finding archives build and prove for that iteration and returns to build, and build is given the finding: the next prompt starts with "Inspect sent this change back" and its reason, until inspect passes. Two returns can correct the change. The third holds with `inspect cap:` and the finding. Resuming a run held there is a request for one more round: build gets the finding again and the count starts over, so each extra round needs a person to ask for it. To fix it by hand instead, change the files and use Rewind to restart at prove, which runs inspect again.
+
+### When the repository refuses the commit, and decisions
+
+Span commits the build with the repository's own hooks on. A refusal is a blocker of class `commit-rejected`, not a plain hold. The hook's output, without terminal colors, is kept on the run and goes into the next build prompt, so the agent sees what the hook said. The second refusal with the same output means another build would end the same way: Span stops spending agent runs and opens a **decision**. Span never skips a hook, and no option of a decision offers to.
+
+A decision is a question with the evidence quoted, two to four options that each say what Span does next, a recommended one, and a box for your own words. Answer it on the run's page. An option does one of three things: `build` runs the build again with your words as guidance, `retry` tries the commit again without running the agent (you changed the rule or the hook in the repository), `stop` ends the run. While a decision is open, `Resume` does nothing and the page offers the decision instead; a restart from a stage clears it.
+
+The build agent can raise a decision too. When the brief asks for something a rule of the repository forbids, or it cannot go on without you, the prompt tells it to write the request to `.span/runs/<id>/decision.json` and stop, instead of choosing a side or asking in the chat. Span reads the file once, checks it, and holds with `decision needed`. A request it cannot show (fewer than two options, an action Span does not offer) holds with the reason, and the agent gets no commit made for it. Your answer is written to `answers.md` and stays in the prompt of every later build.
+
+### What you decided stays decided
+
+Everything a person decides or writes goes to `.span/runs/<id>/decisions.jsonl`, one line each, and the file only grows. An answer that steers the build (`build` options) is a **decision**: it is added to the prompt of every stage, frame and inspect included, as `[D3] <when>, at <stage>, on "<title>": <your words>`, and it outranks the story where they differ. It never outranks a rule the repository enforces. A later decision on the same problem supersedes the earlier one, and both stay in the file. Each version of a note you save for a stage is logged too, so a second note no longer erases the first; the stage's own file still holds the latest and is what the prompt reads.
+
+The story is read again from Jira on `Reload`, and a decision is not part of the story, so it survives. When the story that comes back differs from the one the decisions were taken against, Span does not apply them silently or drop them: the next frame or build opens a decision that quotes each one and asks whether they still hold. `They still hold` anchors them to the new story, `Drop them` retires them (they stay in the log), `Stop` ends the run. Reading the story again and getting the same text asks nothing.
+
+### Gates before the build: rules and plan
+
+Frame is given the repository's `AGENTS.md` (the first 8,000 bytes) and asked to list each place where the story asks for something a rule forbids. It does not resolve one. Span opens a decision that quotes both sides, recommends following the rule because the rule is enforced and the story is not, and offers `Follow the story, I will change the rule` and `Stop`. Your answer is a decision in the log, so it reaches every later prompt, and the same conflict is not asked again for that version of the story, however frame words it next time. A repository without `AGENTS.md` skips this.
+
+`stages.plan` decides whether the plan frame proposes waits for you before anything is built:
+
+```yaml
+stages:
+  plan: conditional   # auto (default), conditional, hold
+```
+
+`auto` never waits. `hold` always waits. `conditional` waits only when the story weighs `deep`. The plan comes as a decision: the claims and assumptions quoted, `Build this plan`, `Revise it with my words` and `Stop`. Approving does not run frame again, so the plan you read is the plan that is built. Revising runs frame with your words and puts the new plan back for review. `open` and `merge` keep their own `auto` or `hold`; `merge` still defaults to `auto`, so set `merge: hold` where a person must release it.
 
 ### Failures the base commit already had
 

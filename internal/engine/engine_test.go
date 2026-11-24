@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"span/internal/agent"
+	"span/internal/decision"
 	"span/internal/handoff"
 	"span/internal/policy"
 	"span/internal/prove"
@@ -33,6 +34,13 @@ type fakeAgents struct {
 	buildHang bool
 	wanted    []string
 	selectErr error
+	// buildHook sees the build prompt before the build writes its document, the way an
+	// agent reads what it was told.
+	buildHook func(prompt string)
+	// frames counts frame calls; conflicts is what frame reports every time it runs.
+	frames      int
+	assumptions []string
+	conflicts   []decision.Clash
 }
 
 func (f *fakeAgents) Select(want string) (agent.Selection, error) {
@@ -44,6 +52,7 @@ func (f *fakeAgents) Select(want string) (agent.Selection, error) {
 }
 
 func (f *fakeAgents) Frame(_ context.Context, _, _ string, text string) (FrameDoc, error) {
+	f.frames++
 	f.prompts = append(f.prompts, text)
 	if f.frameErr != nil {
 		return FrameDoc{}, f.frameErr
@@ -56,12 +65,15 @@ func (f *fakeAgents) Frame(_ context.Context, _, _ string, text string) (FrameDo
 		f.questions = nil
 		return FrameDoc{Questions: questions, Acceptance: f.acceptance}, nil
 	}
-	return FrameDoc{Claims: []string{"charge the card"}, Acceptance: f.acceptance}, nil
+	return FrameDoc{Claims: []string{"charge the card"}, Assumptions: f.assumptions, Acceptance: f.acceptance, Conflicts: f.conflicts}, nil
 }
 
 func (f *fakeAgents) Build(ctx context.Context, _, workspace, text string) error {
 	f.builds++
 	f.prompts = append(f.prompts, text)
+	if f.buildHook != nil {
+		f.buildHook(text)
+	}
 	if f.buildHang {
 		<-ctx.Done()
 		return ctx.Err()
@@ -101,6 +113,8 @@ type fakeSource struct {
 	sha       string
 	// messages are the commit messages, in order.
 	messages []string
+	// commitErr makes Commit fail the way a rejecting pre-commit hook does.
+	commitErr error
 }
 
 func (s *fakeSource) Head(context.Context) (string, error) { return s.sha, nil }
@@ -108,6 +122,9 @@ func (s *fakeSource) Dirty(context.Context) (bool, error)  { return s.dirty, nil
 func (s *fakeSource) Commit(_ context.Context, message string) (string, error) {
 	s.commits++
 	s.messages = append(s.messages, message)
+	if s.commitErr != nil {
+		return "", s.commitErr
+	}
 	s.sha = "abc123"
 	s.dirty = s.stayDirty
 	return s.sha, nil

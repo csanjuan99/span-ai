@@ -39,25 +39,7 @@ func Rewind(root, id, stage string) error {
 		// The checkout is in the middle of a merge; another stage would commit it half done.
 		return errors.New("this run is resolving a merge conflict; abort the conflict before restarting from a stage")
 	}
-	cur.Stage = stage
-	cur.Iteration++
-	cur.Hold = false
-	cur.Stop = false
-	cur.Done = false
-	cur.Questions = nil
-	cur.Repairs = nil
-	cur.WideSHA = ""
-	cur.AgentBlock = nil
-	cur.InspectBlocks = 0
-	cur.InspectFeedback = ""
-	cur.Rewound = true
-	// The change belongs to the attempt that opened it. A restart before open will open the
-	// change again, and open reuses a live one on the branch, so the old link only misleads.
-	if stageIndex(stage) < stageIndex(open) {
-		cur.ChangeURL = ""
-		cur.Pending = nil
-	}
-	cur.Reason = "restarted at " + stage + " by a person"
+	applyRewind(&cur, stage)
 	return writeCursorFile(dir, cur)
 }
 
@@ -97,4 +79,30 @@ func writeCursorFile(dir string, cur Cursor) error {
 		return err
 	}
 	return writeAtomic(filepath.Join(dir, "cursor.json"), append(raw, '\n'))
+}
+
+// applyRewind points a cursor at stage for a fresh attempt: the holds, the questions, the
+// repair ledger and the blocker belong to the attempt being left behind.
+func applyRewind(cur *Cursor, stage string) {
+	cur.Stage = stage
+	cur.Iteration++
+	cur.Hold = false
+	cur.Stop = false
+	cur.Done = false
+	cur.Questions = nil
+	cur.Repairs = nil
+	cur.WideSHA = ""
+	cur.AgentBlock = nil
+	cur.Blocker = nil
+	cur.Decision = nil
+	cur.InspectBlocks = 0
+	cur.InspectFeedback = ""
+	cur.Rewound = true
+	// The change belongs to the attempt that opened it. A restart before open will open the
+	// change again, and open reuses a live one on the branch, so the old link only misleads.
+	if stageIndex(stage) < stageIndex(open) {
+		cur.ChangeURL = ""
+		cur.Pending = nil
+	}
+	cur.Reason = "restarted at " + stage + " by a person"
 }

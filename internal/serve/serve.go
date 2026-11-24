@@ -20,11 +20,13 @@ import (
 
 	"span/internal/agent"
 	"span/internal/branch"
+	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
 	"span/internal/launch"
 	"span/internal/live"
+	"span/internal/overlay"
 	"span/internal/policy"
 	"span/internal/runlock"
 	"span/internal/scope"
@@ -59,8 +61,10 @@ type Launch func(ctx context.Context, req setup.Request) (Outcome, error)
 // Signal is how a person continues a run from the page.
 type Signal struct {
 	Answers []engine.Answer
-	Reload  bool
-	Resume  bool
+	// Decision answers the run's open decision request.
+	Decision *decision.Answer
+	Reload   bool
+	Resume   bool
 }
 
 // Wake continues a waiting or paused run. A nil wake leaves those routes absent.
@@ -250,6 +254,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	})
 	mux.HandleFunc("POST /spans/{id}/answer", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, false, false)
+	})
+	mux.HandleFunc("POST /spans/{id}/decide", func(w http.ResponseWriter, r *http.Request) {
+		decideRun(wake, root, r.PathValue("id"), w, r)
 	})
 	mux.HandleFunc("POST /spans/{id}/story", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, true, false)
@@ -517,19 +524,66 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 		signal.Answers = body.Answers
 	}
 	if resume {
+		if snap.Cursor.Decision != nil {
+			writeConflict(w, "this run is waiting for a decision")
+			return
+		}
 		if engine.Waiting(snap.Cursor) {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is waiting for an answer"})
+			writeConflict(w, "this run is waiting for an answer")
 			return
 		}
 		if snap.Cursor.Stop || snap.Cursor.Done || !snap.Cursor.Hold {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is not paused"})
+			writeConflict(w, "this run is not paused")
 			return
 		}
 	} else if !engine.Waiting(snap.Cursor) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is not waiting"})
+		writeConflict(w, "this run is not waiting")
 		return
 	}
 	if err := wake(r.Context(), id, signal); err != nil {
+		writeBusy(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+}
+
+// writeConflict answers a request the run's state cannot take, with the reason.
+func writeConflict(w http.ResponseWriter, message string) {
+	writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": message})
+}
+
+// decideRun answers the decision a run is waiting on. An answer that names no option of
+// that decision is refused before anything is woken.
+func decideRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request) {
+	if wake == nil || !safe(id) {
+		http.NotFound(w, r)
+		return
+	}
+	snap, err := engine.Load(root, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	req := snap.Cursor.Decision
+	if req == nil {
+		writeConflict(w, "this run has no open decision")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	if err := r.ParseForm(); err != nil {
+		writeErr(w, err)
+		return
+	}
+	answer := decision.Answer{ID: r.PostForm.Get("decision"), Option: r.PostForm.Get("option"), Text: r.PostForm.Get("text")}
+	if answer.ID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "message": "an answer names the decision it is for"})
+		return
+	}
+	if _, err := req.Choose(answer); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid", "message": err.Error()})
+		return
+	}
+	if err := wake(r.Context(), id, Signal{Decision: &answer}); err != nil {
 		writeBusy(w, err)
 		return
 	}
@@ -552,7 +606,7 @@ func approveStage(wake Wake, root, id string, w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := engine.Approve(root, id, r.PostForm.Get("stage"), r.PostForm.Get("environment")); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": err.Error()})
+		writeConflict(w, err.Error())
 		return
 	}
 	if err := wake(r.Context(), id, Signal{Resume: true}); err != nil {
@@ -573,19 +627,19 @@ func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, 
 		return
 	}
 	if snap.Cursor.Stop || snap.Cursor.Done {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run will not continue"})
+		writeConflict(w, "this run will not continue")
 		return
 	}
 	if engine.Waiting(snap.Cursor) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is waiting for an answer"})
+		writeConflict(w, "this run is waiting for an answer")
 		return
 	}
 	if snap.Cursor.Hold {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "this run is paused"})
+		writeConflict(w, "this run is paused")
 		return
 	}
 	if _, ok := hub.Flight(id); ok {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": "an agent is already running"})
+		writeConflict(w, "an agent is already running")
 		return
 	}
 	if err := wake(r.Context(), id, Signal{Resume: true}); err != nil {
@@ -597,7 +651,7 @@ func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, 
 
 func writeBusy(w http.ResponseWriter, err error) {
 	if errors.Is(err, live.ErrBusy) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "invalid", "message": err.Error()})
+		writeConflict(w, err.Error())
 		return
 	}
 	writeErr(w, err)
@@ -690,7 +744,33 @@ func saveInstruction(root, id, stage string, raw []byte) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, stage+".md"), raw, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, stage+".md"), raw, 0o644); err != nil {
+		return err
+	}
+	return logNote(filepath.Join(root, id), stage, string(raw))
+}
+
+// logNote keeps every version of a note in the run's decision log. The stage's file holds
+// only the latest, so without this a second note would erase the first for good. A version
+// equal to the last one saved for the stage adds nothing.
+func logNote(runDir, stage, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	entries, err := overlay.Read(runDir)
+	if err != nil {
+		return err
+	}
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].Kind == overlay.Note && entries[i].Stage == stage && entries[i].Option == "" {
+			if entries[i].Text == text {
+				return nil
+			}
+			break
+		}
+	}
+	_, err = overlay.Append(runDir, overlay.Entry{Kind: overlay.Note, Stage: stage, Title: "note for " + stage, Text: text})
+	return err
 }
 
 func instructionBody(r *http.Request) ([]byte, error) {

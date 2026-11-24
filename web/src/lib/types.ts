@@ -32,6 +32,32 @@ export interface Statement {
   cap?: number
 }
 
+/** One quoted source of a decision: a file and line, or the output of a check. */
+export interface DecisionEvidence {
+  ref: string
+  excerpt: string
+}
+
+/** One answer to a decision, with what Span does when it is chosen. */
+export interface DecisionOption {
+  id: string
+  label: string
+  consequence: string
+  reversible: boolean
+}
+
+/** A question the run cannot go on without. */
+export interface DecisionRequest {
+  id: string
+  class: string
+  stage: string
+  title: string
+  happened: string
+  evidence: DecisionEvidence[]
+  options: DecisionOption[]
+  recommendation: string
+}
+
 /** Where the run is standing. */
 export interface Cursor {
   id: string
@@ -55,6 +81,8 @@ export interface Cursor {
   agentBlock?: AgentBlock | null
   /** The merge conflict the merge stage is resolving. Absent when there is none. */
   conflict?: Conflict
+  /** The decision the run waits on. While it is open, only an answer moves the run. */
+  decision?: DecisionRequest
 }
 
 /**
