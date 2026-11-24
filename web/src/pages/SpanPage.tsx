@@ -254,44 +254,51 @@ export function SpanPage() {
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
         {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
       </header>
+      {/*
+        One column on a narrow screen, in the order the design draws it: what needs the person, the
+        proof, what is safe, the tabs, then the controls. From lg up the first and last pairs split
+        into a main column and a side column; `contents` lets the order classes reach the grid.
+      */}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <div className="flex min-w-0 flex-col gap-6">
-          {needs !== null ? (
-            <NeedsYou needs={needs} where={where}>
-              {agentBlock !== null ? (
-                <section className="flex flex-col gap-1" aria-label="Agent blocked">
-                  <h2 className="text-base font-medium">{agentBlock.title}</h2>
-                  <p className="text-pretty text-sm">{agentBlock.detail}</p>
-                  <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
-                </section>
-              ) : null}
-              {approval !== null ? (
-                <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
-              ) : null}
-              {showFailure ? <FailureCard failure={failure} /> : null}
-              {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
-              {conflict === undefined && conflictKind === "choose" ? (
-                <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
-              ) : null}
-              {waiting ? (
-                <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
-              ) : null}
-              {cursor?.decision !== undefined && !waiting ? (
-                <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
-              ) : null}
-              {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
-                <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
-              ) : null}
-              {state.agent?.relaunch ? (
-                <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
-                  Relaunch
-                </Button>
-              ) : null}
-              {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
-            </NeedsYou>
-          ) : null}
-          {proof !== null ? <ProofSummary proof={proof} /> : null}
-          <Tabs defaultValue="ledger">
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
+          <div className="order-1 flex min-w-0 flex-col gap-6 lg:order-none">
+            {needs !== null ? (
+              <NeedsYou needs={needs} where={where}>
+                {agentBlock !== null ? (
+                  <section className="flex flex-col gap-1" aria-label="Agent blocked">
+                    <h2 className="text-base font-medium">{agentBlock.title}</h2>
+                    <p className="text-pretty text-sm">{agentBlock.detail}</p>
+                    <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
+                  </section>
+                ) : null}
+                {approval !== null ? (
+                  <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
+                ) : null}
+                {showFailure ? <FailureCard failure={failure} /> : null}
+                {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
+                {conflict === undefined && conflictKind === "choose" ? (
+                  <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
+                ) : null}
+                {waiting ? (
+                  <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
+                ) : null}
+                {cursor?.decision !== undefined && !waiting ? (
+                  <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
+                ) : null}
+                {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
+                  <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
+                ) : null}
+                {state.agent?.relaunch ? (
+                  <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
+                    Relaunch
+                  </Button>
+                ) : null}
+                {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
+              </NeedsYou>
+            ) : null}
+            {proof !== null ? <ProofSummary proof={proof} /> : null}
+          </div>
+          <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList>
               <TabsTrigger value="ledger">Ledger</TabsTrigger>
               <TabsTrigger value="implementation">Implementation</TabsTrigger>
@@ -326,9 +333,9 @@ export function SpanPage() {
             </TabsContent>
           </Tabs>
         </div>
-        <aside className="flex min-w-0 flex-col gap-4" aria-label="About this run">
-          {kept !== null ? <SafeAndKept kept={kept} /> : null}
-          <RunControls>
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
+          {kept !== null ? <SafeAndKept kept={kept} className="order-2 lg:order-none" /> : null}
+          <RunControls className="order-4 lg:order-none">
             <StageAgent id={id} current={cursor?.stage ?? ""} choices={state.span?.stageAgents} />
             {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
               <InstructionNote
@@ -363,7 +370,7 @@ export function SpanPage() {
               </div>
             ) : null}
           </RunControls>
-        </aside>
+        </div>
       </div>
     </Shell>
   )

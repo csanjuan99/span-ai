@@ -27,7 +27,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T3 | S4 | inline | Run controls and "Safe and kept" aside | done, see git log |
 | T4 | S5 | inline | Proof summary from `buildReport` | done, see git log |
 | T5 | S5 | deferred | Backend: test counts from the prove gate (own feature) | |
-| T6 | S7 | inline | Mobile layout | |
+| T6 | S7 | inline | Mobile layout, in the order the design draws it | done, see git log |
 
 ## Log
 
@@ -36,3 +36,5 @@ L1. User request, verbatim: "Es que hay que entender que la UX y UI es nueva y n
 L2. 2026-11-24: foundation committed as 3787bc6 (tokens, Geist, ThemeProvider mounted, DESIGN.md and PRODUCT.md rewritten). Design canvas: https://claude.ai/artifact/QeGKGXsth2t4gtvvDgFdoT (v8, states S1 to S9). Baseline: 41 test files, 263 tests, tsc clean.
 
 L3. Inventory result: only three items need the backend (test counts, a "note and resume" action, a prediction of files a retry will touch). The third is dropped. "Open the other run" on a busy checkout also needs the holder run id exposed.
+
+L4. 2026-11-24: for mobile I proposed Run controls before the tabs. The user said the design link is the source of truth. The mobile artboards order the blocks Stages, Needs you, Proof of work, Safe and kept, Run detail (tabs), Run controls, so the page follows that and the proposal is dropped. The design also shows a "Running · Nothing needed from you" card with "Pause after this stage" while a run goes on its own; the page draws no block in that case yet.

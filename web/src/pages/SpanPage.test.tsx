@@ -199,3 +199,18 @@ describe("the proof at the top of the page", () => {
     expect(screen.queryByRole("region", { name: "Proof of work" })).toBeNull()
   })
 })
+
+describe("the order on a narrow screen", () => {
+  it("puts what is safe before the tabs and the controls after them, as the design draws it", () => {
+    state = held({ stage: "build" }, [{ stage: "intake", iteration: 1, verdict: "advance", reason: "", commands: [] }])
+    page()
+    const classes = (name: string) => screen.getByRole("region", { name }).className
+    expect(classes("Safe and kept")).toContain("order-2")
+    expect(screen.getByRole("tablist").closest("[data-slot='tabs']")?.className).toContain("order-3")
+    expect(classes("Run controls")).toContain("order-4")
+    state = held({ stage: "frame", reason: "open questions: 1", questions: ["What is the limit?"] })
+    cleanup()
+    page()
+    expect(screen.getByRole("region", { name: "Needs you" }).parentElement?.className).toContain("order-1")
+  })
+})
