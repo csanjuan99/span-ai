@@ -181,3 +181,21 @@ describe("the side of the page", () => {
     expect(block.textContent).toContain("This run will not continue.")
   })
 })
+
+describe("the proof at the top of the page", () => {
+  const patch = "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
+
+  it("shows the proof once the diff is known", () => {
+    state = { ...held({ stage: "prove" }), implementation: { stat: " pay.go | 1 +\n", patch, truncated: false } }
+    page()
+    const proof = screen.getByRole("region", { name: "Proof of work" })
+    expect(proof.textContent).toContain("1 file")
+    expect(proof.textContent).toContain("+1")
+  })
+
+  it("draws nothing before there is a diff to read", () => {
+    state = held({ stage: "frame" })
+    page()
+    expect(screen.queryByRole("region", { name: "Proof of work" })).toBeNull()
+  })
+})

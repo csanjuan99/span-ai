@@ -1,13 +1,15 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
 import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
 import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
+import { proofOf } from "@/lib/proof"
 import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
 import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
@@ -21,6 +23,7 @@ import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
 import { Ledger } from "@/components/ledger/Ledger"
 import { NeedsYou } from "@/components/needs-you/NeedsYou"
+import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
 import { RunControls } from "@/components/run-controls/RunControls"
@@ -200,6 +203,24 @@ export function SpanPage() {
   const relaunch = () =>
     act(() => relaunchRun(id), { log: "relaunch", say: "The run is starting again.", failed: "the run did not start" })
 
+  // Reading the whole patch is the costly part, and the page renders again on every transcript
+  // frame, so the change is rebuilt only when the diff, the statements or the feature change.
+  const change = useMemo(
+    () =>
+      state.span === null
+        ? null
+        : changeOf({
+            stat: state.implementation?.stat ?? "",
+            patch: state.implementation?.patch ?? "",
+            truncated: state.implementation?.truncated ?? false,
+            statements: state.span.statements,
+            cursor: state.span.cursor,
+            feature: featureState.feature,
+          }),
+    [state.implementation, state.span, featureState.feature],
+  )
+  // Before the diff is known the proof would only say "nothing yet", so the panel waits.
+  const proof = change === null || state.implementation === null ? null : proofOf(change.report, change.files)
   const kept = keptWork({
     statements: state.span?.statements ?? [],
     branch: cursor?.branch ?? "",
@@ -269,6 +290,7 @@ export function SpanPage() {
               {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
             </NeedsYou>
           ) : null}
+          {proof !== null ? <ProofSummary proof={proof} /> : null}
           <Tabs defaultValue="ledger">
             <TabsList>
               <TabsTrigger value="ledger">Ledger</TabsTrigger>
@@ -279,10 +301,9 @@ export function SpanPage() {
               <Ledger statements={state.span?.statements ?? []} />
             </TabsContent>
             <TabsContent value="implementation">
-              {state.span !== null ? (
+              {state.span !== null && change !== null ? (
                 <Implementation
-                  stat={state.implementation?.stat ?? ""}
-                  patch={state.implementation?.patch ?? ""}
+                  change={change}
                   truncated={state.implementation?.truncated ?? false}
                   transcript={state.transcript}
                   run={{

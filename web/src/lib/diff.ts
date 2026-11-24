@@ -138,3 +138,25 @@ export function splitPath(path: string): { dir: string; name: string } {
   const at = path.lastIndexOf("/")
   return at < 0 ? { dir: "", name: path } : { dir: path.slice(0, at + 1), name: path.slice(at + 1) }
 }
+
+/** Files the stat lists that the patch did not reach, because the patch was cut. */
+function missingFromPatch(stat: string, shown: DiffFile[]): DiffFile[] {
+  const known = new Set(shown.map((file) => file.path))
+  return parseStat(stat)
+    .filter((row) => !known.has(row.path))
+    .map((row) => ({
+      path: row.path,
+      oldPath: row.path,
+      status: "modified" as const,
+      binary: false,
+      added: row.plus,
+      removed: row.minus,
+      hunks: [],
+    }))
+}
+
+/** Every file of the change: the ones the patch holds, then the ones only the stat names. */
+export function filesOf(stat: string, patch: string): DiffFile[] {
+  const parsed = parseDiff(patch)
+  return [...parsed, ...missingFromPatch(stat, parsed)]
+}

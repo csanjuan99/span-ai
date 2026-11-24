@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { parseDiff, parseStat, splitPath, totals } from "@/lib/diff"
+import { filesOf, parseDiff, parseStat, splitPath, totals } from "@/lib/diff"
 
 const patch = [
   "diff --git a/pay.go b/pay.go",
@@ -63,5 +63,20 @@ describe("stat helpers", () => {
     expect(totals([{ added: 2, removed: 1 }, { added: 1, removed: 0 }])).toEqual({ files: 2, added: 3, removed: 1 })
     expect(splitPath("a/b/c.go")).toEqual({ dir: "a/b/", name: "c.go" })
     expect(splitPath("c.go")).toEqual({ dir: "", name: "c.go" })
+  })
+})
+
+describe("filesOf", () => {
+  const patch = "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
+
+  it("holds the files of the patch, then the ones only the stat names", () => {
+    const files = filesOf(" pay.go | 1 +\n big.go | 40 ++++++++++++++++++++++++++++++++++++++++\n", patch)
+    expect(files.map((file) => file.path)).toEqual(["pay.go", "big.go"])
+    expect(files[1]?.hunks).toEqual([])
+    expect(files[1]?.status).toBe("modified")
+  })
+
+  it("is empty when there is neither a patch nor a stat", () => {
+    expect(filesOf("", "")).toEqual([])
   })
 })
