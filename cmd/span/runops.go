@@ -14,6 +14,8 @@ import (
 	"span/internal/adapt"
 	"span/internal/agent"
 	"span/internal/engine"
+	"span/internal/jira"
+	"span/internal/runlock"
 	"span/internal/serve"
 )
 
@@ -29,6 +31,7 @@ const runopsUsage = `usage: ./span runs list|show|implementation|feature|accepta
        ./span stage-agent <run> <stage> <agent|any> [--json]
        ./span approve <run> <stage> [--environment name] [--no-resume] [--json]
        ./span answer <run> --answer "question=text"... | --file answers.json [--json]
+       ./span story <run> [--json]
        ./span delete <run> --yes [--json]
        (all take --spans .span/runs; exit 0 done, 1 refused or failed, 2 usage; stop also 3 run finished, 4 run not found)`
 
@@ -42,6 +45,7 @@ func stageAgentCmd(args []string) int { return stageAgentMain(args, os.Stdout, o
 func approveCmd(args []string) int    { return approveMain(args, os.Stdout, os.Stderr) }
 func answerCmd(args []string) int     { return answerMain(args, os.Stdout, os.Stderr) }
 func deleteCmd(args []string) int     { return deleteMain(args, os.Stdout, os.Stderr) }
+func storyCmd(args []string) int      { return storyMain(args, os.Stdout, os.Stderr) }
 
 // usageError prints the usage and answers the exit code of a wrong call.
 func usageError(errw io.Writer) int {
@@ -447,6 +451,79 @@ func answerMain(args []string, out, errw io.Writer) int {
 		return 1
 	}
 	done := outcome{ID: id, Action: "answer", Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
+	return reportOutcome(out, errw, v.asJSON, done)
+}
+
+// readStory reads the story the run came from out of Jira again, with the login saved for the
+// run's folder. A variable so a test can run the verb without a Jira site.
+var readStory = func(ctx context.Context, spans, id string) (string, error) {
+	snap, err := engine.Load(spans, id)
+	if err != nil {
+		return "", err
+	}
+	key := snap.Cursor.Issue
+	if key == "" {
+		raw, err := os.ReadFile(filepath.Join(spans, id, "brief.md"))
+		if err != nil {
+			return "", err
+		}
+		key = engine.IssueKey(string(raw))
+	}
+	account, err := jira.Load(snap.Cursor.Workspace)
+	if err != nil {
+		return "", err
+	}
+	story, err := (jira.Client{Account: account}).Issue(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	return story.Brief, nil
+}
+
+// reloadRun replaces the brief of a waiting run with the story and runs it again, in this
+// process and holding the run's lock. A variable so a test can observe it without an agent.
+var reloadRun = func(ctx context.Context, spans, id, brief string) (engine.Result, error) {
+	opt, _, err := existingRunOptions(spans, id)
+	if err != nil {
+		return engine.Result{}, err
+	}
+	if holder, busy := engine.RunBusy(spans, id); busy {
+		return engine.Result{}, &runlock.BusyError{Scope: runlock.Run, Holder: holder}
+	}
+	return engine.Reload(ctx, opt, id, brief)
+}
+
+// storyMain is the page's "Read the story again": it fetches the Jira story with the folder's
+// login, replaces the brief and runs the waiting run again. Like the route, it only applies
+// to a run that waits.
+func storyMain(args []string, out, errw io.Writer) int {
+	fs, v := verbSet("story", errw, false)
+	pos, ok := parseVerb(fs, args)
+	if !ok || len(pos) != 1 {
+		return usageError(errw)
+	}
+	id := pos[0]
+	snap, found := loadRun(errw, v, id)
+	if !found {
+		return 1
+	}
+	if !engine.Waiting(snap.Cursor) {
+		fmt.Fprintln(errw, "this run is not waiting")
+		return 1
+	}
+	ctx, stop := interruptContext()
+	defer stop()
+	brief, err := readStory(ctx, v.spans, id)
+	if err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	res, err := reloadRun(ctx, v.spans, id, brief)
+	if err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	done := outcome{ID: id, Action: "story", Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
 	return reportOutcome(out, errw, v.asJSON, done)
 }
 

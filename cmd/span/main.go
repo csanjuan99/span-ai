@@ -86,6 +86,8 @@ func main() {
 		os.Exit(answerCmd(os.Args[2:]))
 	case "delete":
 		os.Exit(deleteCmd(os.Args[2:]))
+	case "story":
+		os.Exit(storyCmd(os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -275,23 +277,9 @@ func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 		opt.Watch = hub
 		var brief string
 		if wakeup.Reload {
-			key := snap.Cursor.Issue
-			if key == "" {
-				raw, readErr := os.ReadFile(filepath.Join(spans, id, "brief.md"))
-				if readErr != nil {
-					return readErr
-				}
-				key = engine.IssueKey(string(raw))
-			}
-			account, err := jira.Load(snap.Cursor.Workspace)
-			if err != nil {
+			if brief, err = readStory(ctx, spans, id); err != nil {
 				return err
 			}
-			story, err := (jira.Client{Account: account}).Issue(ctx, key)
-			if err != nil {
-				return err
-			}
-			brief = story.Brief
 		}
 		if err := hub.Admit(id, snap.Cursor.Stage); err != nil {
 			return err
@@ -992,7 +980,7 @@ const usageText = `./span repos [--path .]
 ./span decision show|choose <run> ...
 ./span implementation <run> --files|--diff <path>|--viewed <path>|--commits|--commit <sha>|--reasoning|--check|--audit [--json]   (./span implementation for each flag)
 ./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
-./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
+./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|story|delete <run> ...   (./span runs for each verb's flags)
 ./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
 ./span start precheck|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--json]
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]

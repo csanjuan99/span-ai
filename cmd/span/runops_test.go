@@ -283,3 +283,34 @@ func TestStopAsksTheProcessDrivingTheRunToCancelItsStage(t *testing.T) {
 		t.Errorf("a finished run refuses a stop with exit 3, got %d", code)
 	}
 }
+
+func TestStoryReadsTheJiraStoryAgainAndContinuesAWaitingRun(t *testing.T) {
+	var reloaded string
+	previousRead, previousReload := readStory, reloadRun
+	readStory = func(_ context.Context, _, _ string) (string, error) { return "the story as Jira has it now", nil }
+	reloadRun = func(_ context.Context, _, _, brief string) (engine.Result, error) {
+		reloaded = brief
+		return engine.Result{Stage: "frame", Verdict: "advance", Reason: "read again"}, nil
+	}
+	t.Cleanup(func() { readStory, reloadRun = previousRead, previousReload })
+	story := func(a []string, o, e *bytes.Buffer) int { return storyMain(a, o, e) }
+
+	waiting := opsRun(t, engine.Cursor{Stage: "frame", Hold: true, Questions: []string{"Which export format?"}})
+	code, out, errs := call(story, "run-1", "--json", "--spans", waiting)
+	var got outcome
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil || got.Action != "story" || !got.Resumed || got.Stage != "frame" || errs != "" {
+		t.Fatalf("exit %d: %s %s", code, out, errs)
+	}
+	if reloaded != "the story as Jira has it now" {
+		t.Errorf("the brief handed to the run is %q", reloaded)
+	}
+	if code, _, _ := call(story, "run-1", "--spans", opsRun(t, engine.Cursor{Stage: "build"})); code != 1 {
+		t.Errorf("a run that is not waiting is refused like the route's 409, got %d", code)
+	}
+	if code, _, _ := call(story, "nope", "--spans", waiting); code != 1 {
+		t.Errorf("a missing run exits 1, got %d", code)
+	}
+	if code, _, _ := call(story, "--spans", waiting); code != 2 {
+		t.Errorf("no run is a usage error, got %d", code)
+	}
+}

@@ -1539,6 +1539,7 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | Agent for a stage (`any` clears it) | `POST /spans/<id>/agent` | `./span stage-agent <run> <stage> <agent\|any>` |
 | Approve a stage that holds | `POST /spans/<id>/approve` | `./span approve <run> <stage> [--environment name] [--no-resume]` |
 | Answer the questions of a waiting run | `POST /spans/<id>/answer` | `./span answer <run> --answer "question=text"... \| --file answers.json` |
+| Read the Jira story again (a run that waits) | `POST /spans/<id>/story` | `./span story <run> [--json]` |
 | Continue a paused run, or a relaunch | `POST /spans/<id>/resume`, `/relaunch` | `./span resume <run>` |
 | Delete a run | `POST /spans/<id>/delete` | `./span delete <run> --yes` |
 | Decision panel | `GET /spans/<id>`, `POST /spans/<id>/decide` | `./span decision show\|choose` |
@@ -1548,9 +1549,7 @@ What a verb reads is what the route answers, field for field: `--json` prints th
 
 The log of a command. A statement stores the path of each command's log (`iter/1/logs/prove-1.log`) and `lines`, how many lines the command printed, so the page can say "5 of 142 lines" over the last lines it shows. `./span log` and the route read the same file with the same limits: a clean relative `.log` path under `iter/`, resolved inside the run, a regular file, and the last 512 KiB (`truncated: true` when it was longer; the plain output then says so on stderr).
 
-One page action has no verb, and why:
-
-- **Read the Jira story again** (`POST /spans/<id>/story`) needs the server's Jira login and rebuilds the brief; run `./span quickstart --issue <key>` for a new run from the current story.
+`./span story <run>` is **Read the story again**: it reads the story out of Jira with the login saved for the run's folder, replaces the brief and runs the waiting run again in this process, like the other verbs that wake a run. It exits `1` when the run is not waiting (the route's `409`), when no Jira login is saved or when Jira refuses. To start a new run from the current story, use `./span quickstart --issue <key>`.
 
 #### Stop from the CLI
 
