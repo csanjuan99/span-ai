@@ -495,6 +495,12 @@ export function Desk() {
             turn an idea into a sealed story before the run
           </span>
         </p>
+        <p className="mt-1 text-sm">
+          <Link className="text-primary underline-offset-4 hover:underline" to="/settings">
+            Settings
+          </Link>{" "}
+          <span className="text-muted-foreground">the agent, checks, approvals and appearance</span>
+        </p>
       </header>
       {listNote !== "" ? (
         <p className="text-sm text-pretty text-destructive">{listNote}</p>

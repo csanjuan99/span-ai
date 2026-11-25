@@ -7,6 +7,7 @@ import { StartUp } from "@/components/startup/StartUp"
 import { ErrorBoundary } from "@/components/error-boundary/ErrorBoundary"
 import { Desk } from "@/pages/Desk"
 import { Metrics } from "@/pages/Metrics"
+import { ProjectSettings } from "@/pages/ProjectSettings"
 import { ShapeSession } from "@/pages/ShapeSession"
 import { Shaping } from "@/pages/Shaping"
 import { SpanPage } from "@/pages/SpanPage"
@@ -28,6 +29,14 @@ export function App() {
           element={
             <Guarded>
               <Desk />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <Guarded>
+              <ProjectSettings />
             </Guarded>
           }
         />

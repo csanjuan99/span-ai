@@ -27,6 +27,7 @@ import {
   type AgentState,
   type BranchChoice,
   type AgentStatus,
+  type ProjectConfig,
   type SpanHead,
   type ShapeExample,
   type ShapeJira,
@@ -898,4 +899,35 @@ export async function createShapeIssue(id: string, workspace: string, project: s
     request.board = Number(board.trim())
   }
   return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/jira`, request))
+}
+
+/** What span.yaml means when a key is absent. The settings page marks anything else as changed. */
+export const configDefaults = {
+  stages: { open: "auto", merge: "auto", promote: "auto", plan: "auto", conflict: "hold" },
+  repair: 3,
+} as const
+
+/** Reads the `/config` reply. Anything missing takes the default span.yaml would give. */
+export function projectConfig(value: unknown): ProjectConfig {
+  const body = isRecord(value) ? value : {}
+  const stages = isRecord(body.stages) ? body.stages : {}
+  const prove = isRecord(body.prove) ? body.prove : {}
+  return {
+    folder: text(body.folder),
+    exists: flag(body.exists),
+    reason: text(body.reason),
+    base: text(body.base),
+    stages: {
+      open: text(stages.open) || configDefaults.stages.open,
+      merge: text(stages.merge) || configDefaults.stages.merge,
+      promote: text(stages.promote) || configDefaults.stages.promote,
+      plan: text(stages.plan) || configDefaults.stages.plan,
+      conflict: text(stages.conflict) || configDefaults.stages.conflict,
+    },
+    prove: { focused: stringList(prove.focused), fast: stringList(prove.fast), acceptance: stringList(prove.acceptance) },
+    qa: text(body.qa),
+    repair: typeof body.repair === "number" ? body.repair : configDefaults.repair,
+    blockStatus: text(body.blockStatus),
+    stageTimeout: text(body.stageTimeout),
+  }
 }

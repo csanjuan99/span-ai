@@ -425,3 +425,19 @@ export interface ShapePreview {
   summary: string
   description: string
 }
+
+/** span.yaml as the settings page reads it, with the defaults filled in. */
+export interface ProjectConfig {
+  folder: string
+  /** False when there is no span.yaml, or it does not load; `reason` says which. */
+  exists: boolean
+  reason: string
+  /** The branch new runs start from. Empty keeps the defaults: dev, or master for a hotfix. */
+  base: string
+  stages: { open: string; merge: string; promote: string; plan: string; conflict: string }
+  prove: { focused: string[]; fast: string[]; acceptance: string[] }
+  qa: string
+  repair: number
+  blockStatus: string
+  stageTimeout: string
+}

@@ -6,6 +6,7 @@ import {
   approveStage,
   basePlaceholder,
   branchChoice,
+  projectConfig,
   branchLine,
   chooseConflict,
   conflictOf,
@@ -447,5 +448,32 @@ describe("snapshot test counts", () => {
   it("leaves the counts out for a check that printed none", () => {
     const [plain] = read([{ command: "go build ./...", exitCode: 0 }])
     expect(plain?.tests).toBeUndefined()
+  })
+})
+
+describe("projectConfig", () => {
+  it("fills the defaults when the project has no policy", () => {
+    const config = projectConfig({})
+    expect(config.exists).toBe(false)
+    expect(config.stages.conflict).toBe("hold")
+    expect(config.stages.merge).toBe("auto")
+    expect(config.repair).toBe(3)
+    expect(config.prove.fast).toEqual([])
+  })
+
+  it("reads what the server sent and ignores what is not text", () => {
+    const config = projectConfig({
+      folder: "/work/api",
+      exists: true,
+      base: "dev",
+      stages: { merge: "hold" },
+      prove: { fast: ["go test ./...", 7] },
+      qa: "npm test",
+      repair: 5,
+    })
+    expect(config.stages.merge).toBe("hold")
+    expect(config.prove.fast).toEqual(["go test ./..."])
+    expect(config.repair).toBe(5)
+    expect(config.qa).toBe("npm test")
   })
 })
