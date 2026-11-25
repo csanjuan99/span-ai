@@ -3,6 +3,7 @@ import type { ReactNode } from "react"
 
 import { DiffTotals } from "@/components/diff-totals/DiffTotals"
 import { levelTone } from "@/components/implementation/report/tone"
+import { diffCopy, testsCopy, verdictCopy, type RunPosition } from "@/lib/proof-copy"
 import type { Proof } from "@/lib/proof"
 
 function Cell({
@@ -28,7 +29,7 @@ function Cell({
 }
 
 /** The proof of the run at a glance: how risky, how big, and what the checks said. */
-export function ProofSummary({ proof }: { proof: Proof }) {
+export function ProofSummary({ proof, run }: { proof: Proof; run?: RunPosition }) {
   const tone = levelTone[proof.verdict.level]
   const { diff, checks } = proof
   const allPassed = checks.total > 0 && checks.passed === checks.total
@@ -45,13 +46,21 @@ export function ProofSummary({ proof }: { proof: Proof }) {
         : [commandsLine, `inspect ${checks.inspect}`]
             .filter((part) => part !== "")
             .join(" · ")
+  // With the run's position the panel speaks as the design does: "Held at prove", "Frame paused".
+  const position = run === undefined ? null : verdictCopy(run, proof)
+  const diffWords = run === undefined ? null : diffCopy(run, proof)
+  const notRun = run === undefined ? null : testsCopy(run, proof)
   return (
     <section
       aria-label="Proof of work"
       className="overflow-hidden rounded-[14px] border border-border bg-card shadow-sm"
     >
       <dl className="grid sm:grid-cols-3">
-        {diff.files === 0 ? (
+        {position !== null ? (
+          <Cell label="Verdict" caption={position.caption}>
+            {position.title}
+          </Cell>
+        ) : diff.files === 0 ? (
           <Cell
             label="Verdict"
             caption="There is no diff to read for this run, so it was not assessed."
@@ -63,18 +72,27 @@ export function ProofSummary({ proof }: { proof: Proof }) {
             <span className={tone.text}>{tone.label} risk</span>
           </Cell>
         )}
-        <Cell label="Diff" caption={diff.kinds}>
-          <DiffTotals
-            files={diff.files}
-            added={diff.added}
-            removed={diff.removed}
-          />
+        <Cell
+          label={diffWords?.label ?? "Diff"}
+          caption={diffWords?.caption ?? diff.kinds}
+        >
+          {diff.files === 0 && diffWords !== null ? (
+            "No code yet"
+          ) : (
+            <DiffTotals
+              files={diff.files}
+              added={diff.added}
+              removed={diff.removed}
+            />
+          )}
         </Cell>
         <Cell
-          label={checks.tests === null ? "Checks" : "Tests"}
-          caption={caption}
+          label={checks.tests === null && notRun === null ? "Checks" : "Tests"}
+          caption={notRun?.caption ?? caption}
         >
-          {checks.tests === null ? (
+          {notRun !== null ? (
+            <span className="text-muted-foreground">{notRun.value}</span>
+          ) : checks.tests === null ? (
             <span className={cn(checks.total > 0 && !allPassed && "text-fail")}>
               {checks.total === 0
                 ? "none ran"

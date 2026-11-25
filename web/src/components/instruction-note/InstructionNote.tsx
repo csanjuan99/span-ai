@@ -1,7 +1,9 @@
 "use client"
 
+import { MessageSquareIcon } from "lucide-react"
 import type { FormEvent } from "react"
 
+import { ControlBlock, ControlRow } from "@/components/run-controls/ControlRow"
 import { stages } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -19,22 +21,23 @@ export function InstructionNote(props: {
   onBody: (body: string) => void
   onSave: (event: FormEvent<HTMLFormElement>) => void
   onOpen: () => void
+  /** True when the run is held, so the note is read on resume. */
+  hold?: boolean
   /** Saves the note and resumes the run in one step. Only given when the run can resume. */
   onSaveAndResume?: () => void
 }) {
   if (!props.open) {
     return (
-      <div className="flex flex-col gap-2">
-        <p className="text-pretty text-sm text-muted-foreground">
-          A stage reads a note when it starts. The stage already running does not see a note saved now.
-        </p>
-        <Button type="button" variant="secondary" className="self-start" onClick={props.onOpen}>
-          Leave a note for a stage
-        </Button>
-      </div>
+      <ControlRow
+        icon={MessageSquareIcon}
+        title={`Leave a note for ${props.selected}`}
+        caption={props.hold ? "Resume reads this note when this stage starts again." : "The agent reads it on its next run of this stage."}
+        onClick={props.onOpen}
+      />
     )
   }
   return (
+    <ControlBlock>
     <form className="flex flex-col gap-3" onSubmit={props.onSave}>
       <Label htmlFor="instruction-stage">Instruction</Label>
       <p className="text-pretty text-sm text-muted-foreground">{props.timing}</p>
@@ -71,5 +74,6 @@ export function InstructionNote(props: {
         {props.note !== "" ? <p className="text-pretty text-sm">{props.note}</p> : null}
       </div>
     </form>
+    </ControlBlock>
   )
 }

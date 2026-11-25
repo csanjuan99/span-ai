@@ -15,6 +15,8 @@ export interface StatementCommand {
   output?: string
   /** Run-relative path to the full output. */
   logPath?: string
+  /** How many lines the command printed in all; the output above is only the end of them. */
+  lines?: number
   fingerprint?: string
   tests?: TestCounts
 }
@@ -52,6 +54,11 @@ export interface DecisionOption {
   label: string
   consequence: string
   reversible: boolean
+  /** What the option does next: build, retry or stop. */
+  then?: string
+  /** The trade in a few words, when the agent gave one. */
+  gain?: string
+  cost?: string
 }
 
 /** A question the run cannot go on without. */
@@ -303,6 +310,16 @@ export interface ImplementationView {
   truncated: boolean
   /** Commits the branch added to its base; 0 when the server did not count. */
   commits: number
+  /** Those commits, oldest first. Absent from an older server. */
+  commitLog?: CommitEntry[]
+}
+
+/** One commit of the branch. */
+export interface CommitEntry {
+  sha: string
+  subject: string
+  /** Commit time, RFC 3339. */
+  time: string
 }
 
 /** One socket frame. The span field replaces the page on reconnect. */
@@ -362,7 +379,7 @@ export const shapeSourceKinds = ["prompt", "answer", "code", "context"] as const
 export const shapeQuestionStates = ["open", "answered", "assumed"] as const
 
 /** The states of one product-context proposal. */
-export const shapeProposalStates = ["proposed", "accepted"] as const
+export const shapeProposalStates = ["proposed", "accepted", "skipped"] as const
 
 /** The states of a shaping session. */
 export const shapeStates = ["interviewing", "ready", "split", "sealed"] as const
@@ -394,6 +411,8 @@ export interface ShapeQuestion {
   assume: string
   status: (typeof shapeQuestionStates)[number]
   answer: string
+  /** A1, A2...: the id of the answer, once the question is answered or assumed. */
+  answerId?: string
 }
 
 export interface ShapeSplit {
@@ -414,6 +433,29 @@ export interface ShapeJira {
   status: string
 }
 
+/** Why an interview turn stopped. */
+export const shapeFailureKinds = ["usage_limit", "repo_changed", "error"] as const
+
+/** The failure the server saved on a session after a turn stopped. */
+export interface ShapeFailure {
+  /** When it happened, RFC 3339. */
+  at: string
+  /** The agent that was running. Empty when the session used the default. */
+  agent: string
+  kind: (typeof shapeFailureKinds)[number]
+  message: string
+}
+
+/** The filters of the session list, as the server reads them. Empty fields do not filter. */
+export interface ShapeFilter {
+  status?: (typeof shapeStates)[number] | ""
+  query?: string
+  repo?: string
+  agent?: string
+  sort?: "activity" | "created"
+  archived?: "include" | "only" | ""
+}
+
 /** One shaping session, as the server keeps it. */
 export interface ShapeSession {
   id: string
@@ -429,6 +471,47 @@ export interface ShapeSession {
   story: string
   digest: string
   jira: ShapeJira | null
+  /** The interview agent the session asked for. Empty means the project default. */
+  agent?: string
+  /** The model the session asked for. Empty means the default of the agent. */
+  model?: string
+  /** The short name, such as SES-AB12CD. */
+  ref?: string
+  /** The story heading, else the first line of the idea. */
+  title?: string
+  openQuestions?: number
+  /** The Jira key of the created issue, else the one the session started from. */
+  jiraKey?: string
+  /** The last change, RFC 3339. */
+  updatedAt?: string
+  archived?: boolean
+  /** Why the last turn stopped. Null when it did not. */
+  failure?: ShapeFailure | null
+  /** The session this one was split from, or forked from once it was sealed. */
+  parent?: string
+  /** The sessions an accepted split created, in the order of the split. */
+  children?: string[]
+  /** The person chose to keep the story whole. */
+  splitKept?: boolean
+  /** When the story was sealed, RFC 3339. */
+  sealedAt?: string
+  /** When the first turn ran, RFC 3339. */
+  startedAt?: string
+  /** The session this one was merged into; this one stays readable. */
+  mergedInto?: string
+}
+
+/** The lines around a `path:line` source, read from the session's repository as it is now. */
+export interface ShapeSnippet {
+  path: string
+  line: number
+  lines: { n: number; text: string; hit: boolean }[]
+}
+
+/** What accepting product-context notes would add to the file, with a line of context. */
+export interface ShapeContextDiff {
+  path: string
+  lines: { n: number; kind: "ctx" | "add"; text: string }[]
 }
 
 /** What creating the story in Jira would do, shown before anything is created. */

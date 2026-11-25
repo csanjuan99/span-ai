@@ -3,6 +3,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
 
+/** The first allowed value equal to the input, or the fallback. Narrows without a cast. */
+export function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  return allowed.find((item) => item === value) ?? fallback
+}
+
 /** The message of a thrown error, or the fallback when something else was thrown. */
 export function reasonText(reason: unknown, fallback: string): string {
   return reason instanceof Error ? reason.message : fallback

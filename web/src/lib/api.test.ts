@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  implementationView,
   abortConflict,
   agentChoice,
   approveStage,
+  getRunLog,
   basePlaceholder,
   branchChoice,
   configForm,
@@ -769,5 +771,44 @@ describe("snapshot agent block", () => {
     expect(
       snapshot({ cursor: { id: "a" }, statements: [] }).cursor.agentBlock
     ).toBeUndefined()
+  })
+})
+
+describe("implementationView commit log", () => {
+  it("reads the commits the server listed, oldest first", () => {
+    const view = implementationView({
+      stat: "",
+      patch: "",
+      truncated: false,
+      commits: 2,
+      commitLog: [
+        { sha: "a".repeat(40), subject: "feat: add the retry loop", time: "2026-11-25T10:00:00Z" },
+        { sha: "b".repeat(40), subject: "test: cover it", time: "2026-11-25T10:05:00Z" },
+        "not a commit",
+      ],
+    })
+    expect((view.commitLog ?? []).map((commit) => commit.subject)).toEqual(["feat: add the retry loop", "test: cover it"])
+  })
+
+  it("reads no list as an empty one", () => {
+    expect(implementationView({ stat: "", patch: "", truncated: false }).commitLog).toEqual([])
+  })
+})
+
+describe("getRunLog", () => {
+  it("asks for the log by its run-relative path and reads the view", async () => {
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ path: "iter/1/logs/prove-1.log", text: "a\nb\n", lines: 2, truncated: true }),
+          { status: 200 }
+        )
+      )
+    )
+    vi.stubGlobal("fetch", fetchSpy)
+    const log = await getRunLog("span-1", "iter/1/logs/prove-1.log")
+    const call = fetchSpy.mock.calls[0] as unknown as [string]
+    expect(call[0]).toBe("/spans/span-1/log?path=iter%2F1%2Flogs%2Fprove-1.log")
+    expect(log).toEqual({ path: "iter/1/logs/prove-1.log", text: "a\nb\n", lines: 2, truncated: true })
   })
 })

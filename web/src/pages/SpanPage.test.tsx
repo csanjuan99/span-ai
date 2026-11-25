@@ -30,6 +30,7 @@ vi.mock("@/lib/api", async (original) => {
   }
 })
 
+import { getRunContext } from "@/lib/help"
 import { SpanPage } from "@/pages/SpanPage"
 
 function cursor(over: Partial<Cursor>): Cursor {
@@ -244,10 +245,15 @@ describe("the proof at the top of the page", () => {
     expect(proof.textContent).toContain("+1")
   })
 
-  it("draws nothing before there is a diff to read", () => {
-    state = held({ stage: "frame" })
+  it("says where the run stands before there is a diff to read", () => {
+    state = held({ stage: "frame", questions: ["Which queue?"] })
     page()
-    expect(screen.queryByRole("region", { name: "Proof of work" })).toBeNull()
+    const text = screen.getByRole("region", {
+      name: "Proof of work",
+    }).textContent
+    expect(text).toContain("Frame paused")
+    expect(text).toContain("frame does not touch the repo")
+    expect(text).toContain("prove comes after frame")
   })
 })
 
@@ -439,8 +445,12 @@ describe("a checkout another run holds", () => {
 
 describe("a note and a resume in one click", () => {
   const writeNote = () => {
-    // A held run already shows the form; one that goes on keeps it closed behind a button.
-    screen.queryByRole("button", { name: "Leave a note for a stage" })?.click()
+    // The form opens from the note row, as the design draws it.
+    fireEvent.click(
+      screen.getAllByRole("button", {
+        name: /^Leave a note for/,
+      })[0] as HTMLElement
+    )
     fireEvent.change(screen.getByLabelText("Instruction body"), {
       target: { value: "Keep the backoff at 2x." },
     })
@@ -490,7 +500,9 @@ describe("a note and a resume in one click", () => {
     }
     page()
     fireEvent.click(
-      screen.getByRole("button", { name: "Leave a note for a stage" })
+      screen.getAllByRole("button", {
+        name: /^Leave a note for/,
+      })[0] as HTMLElement
     )
     expect(
       screen.getByRole("button", { name: "Save instruction" })
@@ -513,6 +525,40 @@ describe("what a finished run shows on the page", () => {
     expect(
       screen.getByRole("region", { name: "Files changed" }).textContent
     ).toContain("pay.go")
+  })
+
+  it("switches to the Implementation tab from Open full diff", () => {
+    state = {
+      ...held({ done: true, hold: false, reason: "" }, [advance("merge")]),
+      implementation: diff,
+    }
+    page()
+    fireEvent.click(screen.getByText("Open full diff"))
+    expect(
+      screen
+        .getByRole("tab", { name: "Implementation" })
+        .getAttribute("aria-selected")
+    ).toBe("true")
+  })
+
+  it("shows the commits of the branch above the diff", () => {
+    state = {
+      ...held({ done: true, hold: false, reason: "" }, [advance("merge")]),
+      implementation: {
+        ...diff,
+        commitLog: [
+          {
+            sha: "abc1234",
+            subject: "feat: retry with backoff",
+            time: "14:31",
+          },
+        ],
+      },
+    }
+    page()
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Implementation" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Commits" }))
+    expect(screen.getByText("feat: retry with backoff")).toBeTruthy()
   })
 
   it("does not list them while the run is going", () => {
@@ -543,14 +589,15 @@ describe("a finished run leaves its controls behind", () => {
     ).toBeNull()
   })
 
-  it("says a run with no diff was not assessed instead of calling it low risk", () => {
+  it("says a held run with no diff is held at its stage instead of calling it low risk", () => {
     state = {
       ...held({ stage: "prove" }),
       implementation: { stat: "", patch: "", truncated: false, commits: 0 },
     }
     page()
     const proof = screen.getByRole("region", { name: "Proof of work" })
-    expect(proof.textContent).toContain("Not assessed")
+    expect(proof.textContent).toContain("Held at prove")
+    expect(proof.textContent).toContain("No code yet")
     expect(proof.textContent).not.toContain("low risk")
   })
 })
@@ -565,7 +612,9 @@ describe("a run that cannot be shown yet", () => {
   it("says the run is not on this desk", () => {
     state = { ...held({}), span: null, problem: "notfound" }
     page()
-    expect(screen.getByText("span-1 is not on this desk")).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "Run span-1 is not on this desk" })
+    ).toBeTruthy()
     expect(screen.queryByRole("status", { name: "Loading run" })).toBeNull()
   })
 
@@ -618,8 +667,126 @@ describe("a finished run whose diff is gone", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Implementation" }))
     expect(screen.getByRole("region", { name: "No diff to read" })).toBeTruthy()
     const card = screen.getByRole("region", { name: "No diff to read" })
-    expect(within(card).getByRole("link", { name: "Open PR #8" }).getAttribute("href")).toBe(
-      "https://github.com/a/b/pull/8"
+    expect(
+      within(card)
+        .getByRole("link", { name: "Open PR #8" })
+        .getAttribute("href")
+    ).toBe("https://github.com/a/b/pull/8")
+  })
+})
+
+describe("the ways out of a failed check", () => {
+  const failed = () =>
+    held({ stage: "prove", reason: "prove failed: 2 tests (exit 1)" }, [
+      advance("build"),
+      {
+        stage: "prove",
+        iteration: 1,
+        verdict: "hold",
+        reason: "prove failed: 2 tests (exit 1)",
+        commands: [{ command: "go test ./...", exitCode: 1, output: "FAIL" }],
+      },
+    ])
+
+  it("says what a note does and offers the restart at build as a danger action", () => {
+    state = failed()
+    page()
+    expect(
+      screen.getByText(/Save an instruction for prove, then resume/)
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/The attempt so far stays on disk as its own iteration/)
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Restart from build…" }))
+    expect(
+      screen.getByRole("button", { name: "Start again at build" })
+    ).toBeTruthy()
+  })
+
+  it("keeps the restart row collapsed until it is asked for", () => {
+    state = failed()
+    page()
+    expect(
+      screen.queryByRole("button", { name: "Start again at build" })
+    ).toBeNull()
+    expect(
+      screen.getByRole("button", { name: /^Restart from a stage…/ })
+    ).toBeTruthy()
+  })
+})
+
+describe("a finished run whose build was never sealed", () => {
+  it("says so, and reads the proof as not sealed, only when the ledger shows it", () => {
+    state = held({ done: true, hold: false, reason: "" }, [
+      advance("intake"),
+      advance("frame"),
+    ])
+    page()
+    expect(
+      screen.getByRole("region", { name: "Build never sealed" })
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("region", { name: "Proof of work" }).textContent
+    ).toContain("Not sealed")
+  })
+
+  it("draws no such card when build was sealed", () => {
+    state = held({ done: true, hold: false, reason: "" }, [
+      advance("build"),
+      advance("merge"),
+    ])
+    page()
+    expect(
+      screen.queryByRole("region", { name: "Build never sealed" })
+    ).toBeNull()
+  })
+})
+
+describe("the run's actions in the command palette", () => {
+  const ids = () => getRunContext()?.commands.map((command) => command.id) ?? []
+
+  it("offers resume, note and restart on a held run, and reading actions always", () => {
+    state = held({ stage: "prove" })
+    page()
+    expect(ids()).toEqual(
+      expect.arrayContaining([
+        "resume",
+        "note",
+        "rewind",
+        "transcript",
+        "diff",
+        "copy-summary",
+      ])
     )
+    expect(ids()).not.toContain("stop")
+  })
+
+  it("resumes the run when its command runs", async () => {
+    state = held({ stage: "prove" })
+    resumeRun.mockResolvedValue(undefined)
+    page()
+    getRunContext()
+      ?.commands.find((command) => command.id === "resume")
+      ?.run()
+    await waitFor(() => expect(resumeRun).toHaveBeenCalledOnce())
+  })
+
+  it("offers only the reading actions once the run is done", () => {
+    state = held({ done: true, hold: false, reason: "" }, [advance("build")])
+    page()
+    expect(ids()).toEqual(["transcript", "diff", "copy-summary"])
+  })
+
+  it("copies the summary as markdown", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } })
+    state = held({ done: true, hold: false, reason: "" }, [advance("build")])
+    page()
+    getRunContext()
+      ?.commands.find((command) => command.id === "copy-summary")
+      ?.run()
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
+    expect(String(writeText.mock.calls[0]?.[0])).toContain("#")
+    vi.unstubAllGlobals()
   })
 })

@@ -1,9 +1,10 @@
-import { isRecord, rows, text } from "@/lib/guards"
+import { isRecord, oneOf, rows, text } from "@/lib/guards"
 import {
   conflictActions,
   conflictKinds,
   conflictRisks,
   conflictStates,
+  shapeFailureKinds,
   shapeProposalStates,
   shapeQuestionStates,
   shapeSourceKinds,
@@ -32,19 +33,24 @@ import {
   type ConfigSaved,
   type ConfigEffect,
   type ConfigPreviewReply,
+  type CommitEntry,
   type ProjectConfig,
   type FolderListing,
   type AgentBlock,
   type FolderProbe,
   type JiraCheck,
   type SpanHead,
+  type ShapeContextDiff,
   type ShapeExample,
+  type ShapeFailure,
+  type ShapeFilter,
   type ShapeJira,
   type ShapePreview,
   type ShapeProposal,
   type ShapeQuestion,
   type ShapeRule,
   type ShapeSession,
+  type ShapeSnippet,
   type ShapeSource,
   type ShapeSplit,
 } from "@/lib/types"
@@ -69,11 +75,11 @@ export interface Started {
   notes: string
 }
 
-function count(value: unknown): number {
+export function count(value: unknown): number {
   return typeof value === "number" ? value : 0
 }
 
-function flag(value: unknown): boolean {
+export function flag(value: unknown): boolean {
   return value === true
 }
 
@@ -161,6 +167,7 @@ function command(value: unknown): StatementCommand {
   const error = text(value.error)
   const output = text(value.output)
   const logPath = text(value.logPath)
+  const lines = count(value.lines)
   const tests = isRecord(value.tests)
     ? {
         passed: count(value.tests.passed),
@@ -174,6 +181,7 @@ function command(value: unknown): StatementCommand {
     ...(error === "" ? {} : { error }),
     ...(output === "" ? {} : { output }),
     ...(logPath === "" ? {} : { logPath }),
+    ...(lines === 0 ? {} : { lines }),
     ...(tests === undefined ? {} : { tests }),
   }
 }
@@ -197,15 +205,6 @@ function statement(value: unknown): Statement {
     commands,
     digest: text(value.digest),
   }
-}
-
-/** The first allowed value equal to the input, or the fallback. Narrows without a cast. */
-function oneOf<T extends string>(
-  value: unknown,
-  allowed: readonly T[],
-  fallback: T
-): T {
-  return allowed.find((item) => item === value) ?? fallback
 }
 
 function conflictOption(value: unknown): ConflictOption | undefined {
@@ -331,6 +330,9 @@ export function decisionOf(value: unknown): DecisionRequest | undefined {
         label: text(option.label),
         consequence: text(option.consequence),
         reversible: flag(option.reversible),
+        then: text(option.then),
+        gain: text(option.gain),
+        cost: text(option.cost),
       }))
     : []
   const usable = options.filter(
@@ -465,7 +467,19 @@ export function implementationView(value: unknown): ImplementationView {
     patch: text(value.patch),
     truncated: flag(value.truncated),
     commits: count(value.commits),
+    commitLog: commitLogOf(value.commitLog),
   }
+}
+
+function commitLogOf(value: unknown): CommitEntry[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter(isRecord).map((item) => ({
+    sha: text(item.sha),
+    subject: text(item.subject),
+    time: text(item.time),
+  }))
 }
 
 /** Reads one live frame. Throws on a non-object; the socket handler treats that as noise. */
@@ -948,8 +962,26 @@ export class ApiError extends Error {
   }
 }
 
-async function shapeRequest(
-  method: "GET" | "POST",
+/** A GET to a /shapes route that answers a file, such as an export; returns its text. */
+export async function shapeFile(url: string): Promise<string> {
+  const response = await fetch(url, {
+    headers: withAuth(new Headers({ Accept: "*/*" })),
+  })
+  refuseUnauthorized(response)
+  const raw = await response.text()
+  if (response.ok) {
+    return raw
+  }
+  const payload = errorBody(raw)
+  throw new ApiError(
+    isRecord(payload) ? text(payload.error) : "",
+    messageOf(payload)
+  )
+}
+
+/** One JSON request to a /shapes route; a refusal throws an ApiError with the server's code. */
+export async function shapeRequest(
+  method: "GET" | "POST" | "DELETE",
   url: string,
   body?: unknown
 ): Promise<unknown> {
@@ -993,6 +1025,18 @@ function shapeJira(value: unknown): ShapeJira | null {
   }
 }
 
+function shapeFailure(value: unknown): ShapeFailure | null {
+  if (!isRecord(value) || text(value.message) === "") {
+    return null
+  }
+  return {
+    at: text(value.at),
+    agent: text(value.agent),
+    kind: oneOf(value.kind, shapeFailureKinds, "error"),
+    message: text(value.message),
+  }
+}
+
 /** Reads one shaping session. The reply is untrusted input, so every part has a safe default. */
 export function shapeSession(value: unknown): ShapeSession {
   const body = isRecord(value) ? value : {}
@@ -1015,6 +1059,7 @@ export function shapeSession(value: unknown): ShapeSession {
     assume: text(row.assume),
     status: oneOf(row.status, shapeQuestionStates, "open"),
     answer: text(row.answer),
+    answerId: text(row.answerId),
   }))
   const split: ShapeSplit[] = rows(body.split).map((row) => ({
     story: text(row.story),
@@ -1040,6 +1085,48 @@ export function shapeSession(value: unknown): ShapeSession {
     story: text(body.story),
     digest: text(body.digest),
     jira: shapeJira(body.jira),
+    agent: text(body.agent),
+    model: text(body.model),
+    ref: text(body.ref),
+    title: text(body.title),
+    openQuestions: count(body.openQuestions),
+    jiraKey: text(body.jiraKey),
+    updatedAt: text(body.updatedAt),
+    archived: body.archived === true,
+    failure: shapeFailure(body.failure),
+    parent: text(body.parent),
+    children: stringList(body.children),
+    splitKept: body.splitKept === true,
+    sealedAt: text(body.sealedAt),
+    startedAt: text(rows(body.turns)[0]?.at),
+    mergedInto: text(body.mergedInto),
+  }
+}
+
+/** Reads the lines around a source reference. */
+export function shapeSnippet(value: unknown): ShapeSnippet {
+  const body = isRecord(value) ? value : {}
+  return {
+    path: text(body.path),
+    line: count(body.line),
+    lines: rows(body.lines).map((row) => ({
+      n: count(row.n),
+      text: text(row.text),
+      hit: row.hit === true,
+    })),
+  }
+}
+
+/** Reads the preview of a context change. */
+export function shapeContextDiff(value: unknown): ShapeContextDiff {
+  const body = isRecord(value) ? value : {}
+  return {
+    path: text(body.path),
+    lines: rows(body.lines).map((row) => ({
+      n: count(row.n),
+      kind: row.kind === "add" ? "add" : "ctx",
+      text: text(row.text),
+    })),
   }
 }
 
@@ -1056,12 +1143,26 @@ export function shapePreview(value: unknown): ShapePreview {
   }
 }
 
-/** The sessions of one workspace, newest as the server orders them. */
-export async function listShapes(workspace: string): Promise<ShapeSession[]> {
-  const body = await shapeRequest(
-    "GET",
-    `/shapes?workspace=${encodeURIComponent(workspace)}`
-  )
+/** The sessions of one workspace, filtered and ordered by the server. */
+export async function listShapes(
+  workspace: string,
+  filter: ShapeFilter = {}
+): Promise<ShapeSession[]> {
+  const query = new URLSearchParams({ workspace })
+  const names: [string, string | undefined][] = [
+    ["status", filter.status],
+    ["q", filter.query],
+    ["repo", filter.repo],
+    ["agent", filter.agent],
+    ["sort", filter.sort],
+    ["archived", filter.archived],
+  ]
+  for (const [name, value] of names) {
+    if (value !== undefined && value !== "") {
+      query.set(name, value)
+    }
+  }
+  const body = await shapeRequest("GET", `/shapes?${query.toString()}`)
   return Array.isArray(body) ? body.map(shapeSession) : []
 }
 
@@ -1083,6 +1184,8 @@ export async function createShape(input: {
   workspace: string
   repo?: string
   idea: string
+  /** A Jira issue key to start from; the idea is then extra context. */
+  issue?: string
   agent?: string
   model?: string
 }): Promise<ShapeSession> {
@@ -1105,17 +1208,73 @@ export async function answerShape(
   )
 }
 
-/** Accepts the product-context proposals the person ticked. */
-export async function acceptShapeContext(
+/** Settles product-context notes: written when accepted, dropped when skipped, brought back when restored. */
+export async function settleShapeContext(
   id: string,
   workspace: string,
-  accept: string[]
+  change: { accept?: string[]; skip?: string[]; restore?: string[] }
 ): Promise<ShapeSession> {
   return shapeSession(
     await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/context`, {
       workspace,
-      accept,
+      ...change,
     })
+  )
+}
+
+/** The lines accepting these notes would add to the product context. Nothing is written. */
+export async function previewShapeContext(
+  id: string,
+  workspace: string,
+  accept: string[]
+): Promise<ShapeContextDiff> {
+  const query = new URLSearchParams({ workspace, accept: accept.join(",") })
+  return shapeContextDiff(
+    await shapeRequest(
+      "GET",
+      `/shapes/${encodeURIComponent(id)}/context/preview?${query.toString()}`
+    )
+  )
+}
+
+/** Splits the story into linked sessions, or keeps it whole (the agent runs a turn). */
+export async function decideShapeSplit(
+  id: string,
+  workspace: string,
+  decision: "split" | "keep"
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/split`, {
+      workspace,
+      decision,
+    })
+  )
+}
+
+/** Starts a new session from a sealed one; the sealed one stays. */
+export async function forkShape(
+  id: string,
+  workspace: string
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/fork`, {
+      workspace,
+    })
+  )
+}
+
+/** The code around a `path:line` source of the session. */
+export async function getShapeSource(
+  id: string,
+  workspace: string,
+  ref: string
+): Promise<ShapeSnippet> {
+  const query = new URLSearchParams({ workspace, ref })
+  return shapeSnippet(
+    await shapeRequest(
+      "GET",
+      `/shapes/${encodeURIComponent(id)}/source?${query.toString()}`
+    )
   )
 }
 
@@ -1329,4 +1488,84 @@ export async function saveJiraAccount(
   account: { url: string; email: string; token: string }
 ): Promise<unknown> {
   return postForm("/jira/account", new URLSearchParams({ project, ...account }))
+}
+
+/** The full output of one command of a run, as `/spans/{id}/log` serves it. */
+export interface RunLog {
+  path: string
+  text: string
+  lines: number
+  /** The log was longer than the server reads; `text` is its end. */
+  truncated: boolean
+}
+
+/** Reads the log a statement's `logPath` points at. */
+export async function getRunLog(id: string, path: string): Promise<RunLog> {
+  const body = await getJSON(
+    `/spans/${encodeURIComponent(id)}/log?path=${encodeURIComponent(path)}`
+  )
+  const view = isRecord(body) ? body : {}
+  return {
+    path: text(view.path),
+    text: text(view.text),
+    lines: count(view.lines),
+    truncated: flag(view.truncated),
+  }
+}
+
+/** Runs the next turn of a stopped interview, on another agent or model when given. */
+export async function resumeShape(
+  id: string,
+  workspace: string,
+  agent = "",
+  model = ""
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/resume`, {
+      workspace,
+      agent,
+      model,
+    })
+  )
+}
+
+/** Changes the agent and model of a session; no turn runs. */
+export async function setShapeAgent(
+  id: string,
+  workspace: string,
+  agent: string,
+  model: string
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/agent`, {
+      workspace,
+      agent,
+      model,
+    })
+  )
+}
+
+/** Hides a session from the default list, or shows it again with `archived` false. */
+export async function archiveShape(
+  id: string,
+  workspace: string,
+  archived = true
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/archive`, {
+      workspace,
+      archived,
+    })
+  )
+}
+
+/** Deletes a session that is not sealed. */
+export async function deleteShape(
+  id: string,
+  workspace: string
+): Promise<void> {
+  await shapeRequest(
+    "DELETE",
+    `/shapes/${encodeURIComponent(id)}?workspace=${encodeURIComponent(workspace)}`
+  )
 }

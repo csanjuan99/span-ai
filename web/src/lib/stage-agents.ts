@@ -1,5 +1,7 @@
 /** The stages that call a model. The rest run commands. */
-export const agentStages = ["frame", "build", "inspect"] as const
+import { agentStages } from "@/lib/types"
+
+export { agentStages }
 
 export function usesAgent(stage: string): boolean {
   return (agentStages as readonly string[]).includes(stage)
@@ -11,12 +13,17 @@ export function defaultAgentStage(current: string): string {
 }
 
 /** The chosen CLI for a stage, or an empty string when the policy decides. */
-export function agentForStage(stage: string, choices: Record<string, string> | undefined): string {
+export function agentForStage(
+  stage: string,
+  choices: Record<string, string> | undefined
+): string {
   return choices?.[stage] ?? ""
 }
 
 /** One sentence per stage so the choice is readable without opening the picker. */
-export function stageAgentLine(choices: Record<string, string> | undefined): string {
+export function stageAgentLine(
+  choices: Record<string, string> | undefined
+): string {
   if (!choices) {
     return ""
   }
@@ -24,4 +31,9 @@ export function stageAgentLine(choices: Record<string, string> | undefined): str
     .map((stage) => (choices[stage] ? `${stage} uses ${choices[stage]}` : ""))
     .filter((part) => part !== "")
   return parts.join(", ")
+}
+
+/** Where "Restart from…" starts by default: frame and build restart at themselves, every check after them at build. */
+export function restartStage(current: string): string {
+  return current === "frame" || current === "build" ? current : "build"
 }

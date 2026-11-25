@@ -1,5 +1,16 @@
-import { duration } from "@/lib/metrics"
 import type { Statement } from "@/lib/types"
+
+/** A stage's time the way the rail words it: 46s, 14m, 1h 05m. Minutes are rounded, as the design draws them. */
+export function stageSpan(seconds: number): string {
+  const whole = Math.round(seconds)
+  if (whole < 60) {
+    return `${whole}s`
+  }
+  if (whole < 3600) {
+    return `${Math.round(whole / 60)}m`
+  }
+  return `${Math.floor(whole / 3600)}h ${String(Math.round((whole % 3600) / 60)).padStart(2, "0")}m`
+}
 
 /**
  * How long each sealed stage took, read from the stamps the engine already records: a stage
@@ -16,7 +27,7 @@ export function stageDurations(statements: Statement[]): Record<string, string> 
     }
     const seconds = (at - previous) / 1000
     if (item.verdict === "advance" && !Number.isNaN(previous) && seconds > 0) {
-      result[item.stage] = duration(seconds)
+      result[item.stage] = stageSpan(seconds)
     }
     previous = at
   }

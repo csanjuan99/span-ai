@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { stageDurations } from "@/lib/stage-times"
+import { stageDurations, stageSpan } from "@/lib/stage-times"
 import type { Statement } from "@/lib/types"
 
 function statement(stage: string, time: string, verdict = "advance"): Statement {
@@ -14,8 +14,8 @@ describe("stageDurations", () => {
       statement("frame", "2026-11-24T14:25:00Z"),
       statement("build", "2026-11-24T14:31:30Z"),
     ])
-    expect(result.frame).toBe("15m 00s")
-    expect(result.build).toBe("6m 30s")
+    expect(result.frame).toBe("15m")
+    expect(result.build).toBe("7m")
   })
 
   it("leaves the first stage without a duration, since nothing came before it", () => {
@@ -39,6 +39,15 @@ describe("stageDurations", () => {
       statement("prove", "2026-11-24T14:12:00Z", "hold"),
       statement("build", "2026-11-24T14:20:00Z"),
     ])
-    expect(result.build).toBe("8m 00s")
+    expect(result.build).toBe("8m")
+  })
+})
+
+describe("stageSpan", () => {
+  it("words a stage's time as the rail does, rounding minutes", () => {
+    expect(stageSpan(46)).toBe("46s")
+    expect(stageSpan(564)).toBe("9m")
+    expect(stageSpan(120)).toBe("2m")
+    expect(stageSpan(3900)).toBe("1h 05m")
   })
 })

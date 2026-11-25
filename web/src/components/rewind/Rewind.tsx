@@ -1,7 +1,9 @@
 "use client"
 
+import { Undo2Icon } from "lucide-react"
 import { useState } from "react"
 
+import { ControlBlock, ControlRow } from "@/components/run-controls/ControlRow"
 import { rewindRun } from "@/lib/api"
 import { stages } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -16,8 +18,34 @@ const restartable = stages.filter((name) => name !== "intake")
  * Restart the run at a stage, with the instruction that stage reads when it starts.
  * A new iteration keeps the earlier attempt on disk, and the repair budget starts fresh.
  */
-export function Rewind({ id, current, blocked = "" }: { id: string; current: string; blocked?: string }) {
-  const [stage, setStage] = useState(() => (current === "" || current === "intake" ? "build" : current))
+export function Rewind({
+  id,
+  current,
+  blocked = "",
+  startOpen = true,
+  requested = "",
+}: {
+  id: string
+  current: string
+  blocked?: string
+  /** False shows one row that opens the form; the run page uses it. */
+  startOpen?: boolean
+  /** A stage the page asks to restart at, for example from the failure's "Restart from build…". */
+  requested?: string
+}) {
+  const [open, setOpen] = useState(startOpen || requested !== "")
+  const [stage, setStage] = useState(() =>
+    requested !== "" ? requested : current === "" || current === "intake" ? "build" : current,
+  )
+  // A request that arrives later opens the form on that stage; adjusted while rendering, not in an effect.
+  const [seen, setSeen] = useState(requested)
+  if (seen !== requested) {
+    setSeen(requested)
+    if (requested !== "") {
+      setOpen(true)
+      setStage(requested)
+    }
+  }
   const [note, setNote] = useState("")
   const [message, setMessage] = useState("")
   const [busy, setBusy] = useState(false)
@@ -35,8 +63,19 @@ export function Rewind({ id, current, blocked = "" }: { id: string; current: str
     }
   }
 
+  if (!open) {
+    return (
+      <ControlRow
+        icon={Undo2Icon}
+        title="Restart from a stage…"
+        caption="Start again at the stage that has to change. The attempt so far stays on disk."
+        onClick={() => setOpen(true)}
+      />
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-2">
+    <ControlBlock>
       <Label htmlFor="rewind-stage">Restart from a stage</Label>
       <p className="text-pretty text-sm text-muted-foreground">
         When what the branch produced is not what the handoff asked for, start again at the stage that has to change.
@@ -69,6 +108,6 @@ export function Rewind({ id, current, blocked = "" }: { id: string; current: str
         {message !== "" ? <p className="text-pretty text-sm">{message}</p> : null}
         {blocked !== "" ? <p className="text-pretty text-sm text-muted-foreground">{blocked}</p> : null}
       </div>
-    </div>
+    </ControlBlock>
   )
 }
