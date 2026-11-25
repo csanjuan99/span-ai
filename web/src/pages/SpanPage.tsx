@@ -3,10 +3,28 @@
 import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
-import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
+import {
+  answerRun,
+  approveStage,
+  branchLine,
+  decideRun,
+  pauseRun,
+  readStory,
+  relaunchRun,
+  resumeRun,
+  saveInstruction,
+  stopRun,
+} from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
-import { activeFailure, approvalOf, attemptLine, holdAction, holderOf, isCheckoutBusy } from "@/lib/failure"
+import {
+  activeFailure,
+  approvalOf,
+  attemptLine,
+  holdAction,
+  holderOf,
+  isCheckoutBusy,
+} from "@/lib/failure"
 import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
@@ -82,9 +100,19 @@ export function SpanPage() {
   const [stage, setStage] = useState("")
   const selected =
     stage ||
-    noteStage({ current, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) }) ||
+    noteStage({
+      current,
+      hold: Boolean(cursor?.hold),
+      stop: Boolean(cursor?.stop),
+    }) ||
     noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
-  const verdict = cursor?.done ? "done" : cursor?.stop ? "stop" : cursor?.hold ? "hold" : "running"
+  const verdict = cursor?.done
+    ? "done"
+    : cursor?.stop
+      ? "stop"
+      : cursor?.hold
+        ? "hold"
+        : "running"
   const line =
     state.agent?.summary === "not running"
       ? "No agent is running this stage. Relaunch starts it again."
@@ -103,15 +131,20 @@ export function SpanPage() {
       frames: state.frames,
       actions: state.actions,
     }),
-    agentLine(state.agent, state.agentAt),
+    agentLine(state.agent, state.agentAt)
   )
-  const sealed = (state.span?.statements ?? []).filter((item) => item.verdict === "advance").map((item) => item.stage)
+  const sealed = (state.span?.statements ?? [])
+    .filter((item) => item.verdict === "advance")
+    .map((item) => item.stage)
   const socket = state.connected ? "socket open" : "socket closed"
   const notice = useConnectionNotice(state.connected)
   const lastSeen = clockOf(state.frames.at(-1)?.at ?? state.agentAt)
   const questions = waitingQuestions(cursor ?? null)
   const waiting = questions.length > 0
-  const agentBlock = agentBlockLine(cursor?.agentBlock, { stage: cursor?.stage ?? "", sealed })
+  const agentBlock = agentBlockLine(cursor?.agentBlock, {
+    stage: cursor?.stage ?? "",
+    sealed,
+  })
   const failure = activeFailure({
     statements: state.span?.statements ?? [],
     cursor: cursor ?? null,
@@ -137,7 +170,8 @@ export function SpanPage() {
   const approval = waiting ? null : approvalOf(cursor ?? null)
   // The failing statement stays on disk through a busy checkout, an approval and a conflict,
   // but none of those wait on the fix, so the failed check only shows when nothing else does.
-  const showFailure = failure !== null && !busy && approval === null && conflictKind === null
+  const showFailure =
+    failure !== null && !busy && approval === null && conflictKind === null
   const needs = needsYou({
     agentBlocked: agentBlock !== null,
     questions: waiting,
@@ -153,7 +187,10 @@ export function SpanPage() {
   })
   // While the agent works and nothing asks for a person, the page says so instead of staying blank.
   const running =
-    needs === null && cursor !== undefined && !cursor.done && state.agent?.running === true
+    needs === null &&
+    cursor !== undefined &&
+    !cursor.done &&
+    state.agent?.running === true
       ? runningOf({
           stage: cursor.stage,
           agent: state.agent.name,
@@ -175,13 +212,22 @@ export function SpanPage() {
         })
       : null
   // The ledger is the only clock the page has: a hold began when the last statement was written.
-  const lastStamp = [...(state.span?.statements ?? [])].reverse().find((item) => item.time)?.time ?? ""
+  const lastStamp =
+    [...(state.span?.statements ?? [])].reverse().find((item) => item.time)
+      ?.time ?? ""
   const since =
     cursor?.done === true
       ? ""
-      : sinceLine(waiting ? "waiting since" : cursor?.stop ? "stopped" : "held", lastStamp, new Date())
+      : sinceLine(
+          waiting ? "waiting since" : cursor?.stop ? "stopped" : "held",
+          lastStamp,
+          new Date()
+        )
   const attempt = failure === null ? "" : attemptLine(failure)
-  const where = needs?.kind === "failed" && attempt !== "" ? `${current} · ${attempt}` : current
+  const where =
+    needs?.kind === "failed" && attempt !== ""
+      ? `${current} · ${attempt}`
+      : current
 
   /**
    * Runs one action the page offers and says what happened. Every action reports its failure
@@ -189,7 +235,11 @@ export function SpanPage() {
    */
   async function act(
     request: () => Promise<unknown>,
-    outcome: { log: string; say: string | ((result: unknown) => string); failed: string },
+    outcome: {
+      log: string
+      say: string | ((result: unknown) => string)
+      failed: string
+    }
   ): Promise<boolean> {
     setNote("")
     try {
@@ -197,7 +247,9 @@ export function SpanPage() {
       if (outcome.log !== "") {
         state.note(outcome.log)
       }
-      setNote(typeof outcome.say === "function" ? outcome.say(result) : outcome.say)
+      setNote(
+        typeof outcome.say === "function" ? outcome.say(result) : outcome.say
+      )
       return true
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : outcome.failed)
@@ -205,7 +257,8 @@ export function SpanPage() {
     }
   }
 
-  const asked = (what: string) => (why: unknown) => (typeof why === "string" && why !== "" ? why : `${what} requested.`)
+  const asked = (what: string) => (why: unknown) =>
+    typeof why === "string" && why !== "" ? why : `${what} requested.`
 
   const saveNote = () =>
     act(() => saveInstruction(id, selected, body), {
@@ -253,7 +306,11 @@ export function SpanPage() {
     })
 
   const resume = () =>
-    act(() => resumeRun(id), { log: "resume", say: "The run is continuing.", failed: "the run did not continue" })
+    act(() => resumeRun(id), {
+      log: "resume",
+      say: "The run is continuing.",
+      failed: "the run did not continue",
+    })
 
   async function approve() {
     if (approval === null) {
@@ -266,12 +323,26 @@ export function SpanPage() {
     })
   }
 
-  const pause = () => act(() => pauseRun(id), { log: "pause", say: asked("Pause"), failed: "the pause was not requested" })
+  const pause = () =>
+    act(() => pauseRun(id), {
+      log: "pause",
+      say: asked("Pause"),
+      failed: "the pause was not requested",
+    })
 
-  const stop = () => act(() => stopRun(id), { log: "stop", say: asked("Stop"), failed: "the run was not stopped" })
+  const stop = () =>
+    act(() => stopRun(id), {
+      log: "stop",
+      say: asked("Stop"),
+      failed: "the run was not stopped",
+    })
 
   const relaunch = () =>
-    act(() => relaunchRun(id), { log: "relaunch", say: "The run is starting again.", failed: "the run did not start" })
+    act(() => relaunchRun(id), {
+      log: "relaunch",
+      say: "The run is starting again.",
+      failed: "the run did not start",
+    })
 
   // Reading the whole patch is the costly part, and the page renders again on every transcript
   // frame, so the change is rebuilt only when the diff, the statements or the feature change.
@@ -287,10 +358,13 @@ export function SpanPage() {
             cursor: state.span.cursor,
             feature: featureState.feature,
           }),
-    [state.implementation, state.span, featureState.feature],
+    [state.implementation, state.span, featureState.feature]
   )
   // Before the diff is known the proof would only say "nothing yet", so the panel waits.
-  const proof = change === null || state.implementation === null ? null : proofOf(change.report, change.files)
+  const proof =
+    change === null || state.implementation === null
+      ? null
+      : proofOf(change.report, change.files)
   const kept = keptWork({
     statements: state.span?.statements ?? [],
     branch: cursor?.branch ?? "",
@@ -300,32 +374,60 @@ export function SpanPage() {
   })
   // The engine refuses to restart a stage while the checkout is in the middle of a merge.
   const restartBlocked =
-    conflict !== undefined || conflictKind !== null ? "Unavailable while a merge conflict is open. Abort the merge first." : ""
+    conflict !== undefined || conflictKind !== null
+      ? "Unavailable while a merge conflict is open. Abort the merge first."
+      : ""
 
   if (state.span === null) {
     return (
-      <Shell path={`~/spans/${id}`} status={state.problem ?? "loading"} lines={lines}>
-        <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/">
+      <Shell
+        path={`~/spans/${id}`}
+        status={state.problem ?? "loading"}
+        lines={lines}
+      >
+        <Link
+          className="text-sm text-primary underline-offset-4 hover:underline"
+          to="/"
+        >
           $ desk
         </Link>
-        {state.problem !== null ? <PageProblem problem={state.problem} id={id} /> : <RunSkeleton />}
+        {state.problem !== null ? (
+          <PageProblem problem={state.problem} id={id} />
+        ) : (
+          <RunSkeleton />
+        )}
       </Shell>
     )
   }
 
   return (
-    <Shell path={`~/spans/${id}`} status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`} lines={lines}>
+    <Shell
+      path={`~/spans/${id}`}
+      status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`}
+      lines={lines}
+    >
       <header className="flex flex-col gap-3">
-        <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/">
+        <Link
+          className="text-sm text-primary underline-offset-4 hover:underline"
+          to="/"
+        >
           $ desk
         </Link>
-        <h1 className="text-balance text-xl tabular-nums" title={id}>
+        <h1 className="text-xl text-balance tabular-nums" title={id}>
           <span className="text-primary">$ </span>
           {state.span?.label || id}
         </h1>
         {cursor !== undefined && branchLine(cursor) !== "" ? (
-          <p className="text-pretty text-sm text-muted-foreground">{branchLine(cursor)}</p>
+          <p className="text-sm text-pretty text-muted-foreground">
+            {branchLine(cursor)}
+          </p>
         ) : null}
+        <Link
+          className="self-start text-sm text-primary underline-offset-4 hover:underline"
+          to={`/spans/${id}/summary`}
+        >
+          Summary to share
+        </Link>
         <StageRail
           stage={cursor?.stage ?? ""}
           verdict={verdict}
@@ -334,10 +436,16 @@ export function SpanPage() {
         />
         <p className="text-pretty">{tidy(line)}</p>
         {since !== "" && (cursor?.hold || cursor?.stop) ? (
-          <p className="text-pretty text-sm tabular-nums text-muted-foreground">{since}</p>
+          <p className="text-sm text-pretty text-muted-foreground tabular-nums">
+            {since}
+          </p>
         ) : null}
-        {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
-        {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
+        {note !== "" ? (
+          <p className="text-sm text-pretty text-hold">{note}</p>
+        ) : null}
+        {state.error !== "" ? (
+          <p className="text-sm text-pretty text-destructive">{state.error}</p>
+        ) : null}
         <ConnectionBanner notice={notice} lastSeen={lastSeen} />
       </header>
       {/*
@@ -354,44 +462,95 @@ export function SpanPage() {
                   <AgentBlocked line={agentBlock} />
                 ) : null}
                 {approval !== null ? (
-                  <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />
+                  <ActionWithHint
+                    label={approval.label}
+                    hint={approval.hint}
+                    onClick={() => void approve()}
+                  />
                 ) : null}
                 {showFailure ? <FailureCard failure={failure} /> : null}
-                {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
+                {conflict !== undefined ? (
+                  <ConflictPanel
+                    key={proposalKey(conflict)}
+                    id={id}
+                    conflict={conflict}
+                  />
+                ) : null}
                 {conflict === undefined && conflictKind === "choose" ? (
-                  <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
+                  <p className="text-sm text-pretty text-muted-foreground">
+                    The options for this conflict are on their way.
+                  </p>
                 ) : null}
                 {waiting ? (
-                  <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
+                  <Waiting
+                    key={questions.join("\n")}
+                    questions={questions}
+                    note={note}
+                    onAnswer={answer}
+                    onReload={reloadStory}
+                  />
                 ) : null}
                 {cursor?.decision !== undefined && !waiting ? (
-                  <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
+                  <Decision
+                    key={cursor.decision.id}
+                    request={cursor.decision}
+                    note={note}
+                    onDecide={decide}
+                  />
                 ) : null}
-                {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
-                  <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
+                {!waiting &&
+                cursor?.decision === undefined &&
+                approval === null &&
+                canAct &&
+                action !== null ? (
+                  <ActionWithHint
+                    label={action.label}
+                    hint={action.hint}
+                    onClick={() => void resume()}
+                  />
                 ) : null}
                 {holder !== "" ? (
-                  <Link className="self-start text-sm text-primary underline-offset-4 hover:underline" to={`/spans/${holder}`}>
+                  <Link
+                    className="self-start text-sm text-primary underline-offset-4 hover:underline"
+                    to={`/spans/${holder}`}
+                  >
                     Open the other run
                   </Link>
                 ) : null}
                 {state.agent?.relaunch ? (
-                  <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="self-start"
+                    onClick={() => void relaunch()}
+                  >
                     Relaunch
                   </Button>
                 ) : null}
-                {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
+                {cursor?.stop && !waiting ? (
+                  <p className="text-sm text-pretty">
+                    This run will not continue.
+                  </p>
+                ) : null}
               </NeedsYou>
             ) : null}
             {done !== null ? <DoneCard done={done} /> : null}
-            {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
+            {running !== null ? (
+              <RunningCard running={running} onPause={() => void pause()} />
+            ) : null}
             {proof !== null ? <ProofSummary proof={proof} /> : null}
-            {done !== null && change !== null ? <FilesChanged files={change.files} /> : null}
+            {done !== null && change !== null ? (
+              <FilesChanged files={change.files} />
+            ) : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList className="h-auto w-full gap-1 rounded-2xl p-1">
               {tabs.map((tab) => (
-                <TabsTrigger key={tab.value} value={tab.value} className={tabClass}>
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className={tabClass}
+                >
                   {tab.label}
                 </TabsTrigger>
               ))}
@@ -400,18 +559,28 @@ export function SpanPage() {
               <LedgerSummary statements={state.span?.statements ?? []} />
               <details className="group rounded-xl border border-border">
                 <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm text-muted-foreground select-none">
-                  <span>All records · {state.span?.statements.length ?? 0}</span>
-                  <span className="ml-auto text-xs">evidence, commits and commands</span>
+                  <span>
+                    All records · {state.span?.statements.length ?? 0}
+                  </span>
+                  <span className="ml-auto text-xs">
+                    evidence, commits and commands
+                  </span>
                 </summary>
                 <div className="px-4 pb-4">
                   <Ledger statements={state.span?.statements ?? []} />
                 </div>
               </details>
-              <RawOutput transcript={state.transcript} statements={state.span?.statements ?? []} />
+              <RawOutput
+                transcript={state.transcript}
+                statements={state.span?.statements ?? []}
+              />
               {done !== null && change !== null ? (
                 <FinishedRecord
                   risks={change.report.risks}
-                  details={runDetails(state.span?.statements ?? [], state.span?.stageAgents)}
+                  details={runDetails(
+                    state.span?.statements ?? [],
+                    state.span?.stageAgents
+                  )}
                 />
               ) : null}
             </TabsContent>
@@ -456,42 +625,70 @@ export function SpanPage() {
           </Tabs>
         </div>
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
-          {kept !== null ? <SafeAndKept kept={kept} className="order-2 lg:order-none" /> : null}
+          {kept !== null ? (
+            <SafeAndKept kept={kept} className="order-2 lg:order-none" />
+          ) : null}
           {cursor?.done ? null : (
             <RunControls className="order-4 lg:order-none">
-              <StageAgent id={id} current={cursor?.stage ?? ""} choices={state.span?.stageAgents} />
+              <StageAgent
+                id={id}
+                current={cursor?.stage ?? ""}
+                choices={state.span?.stageAgents}
+              />
               {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
                 <InstructionNote
                   open={paused || showNote}
                   selected={selected}
-                  timing={instructionTiming({ current, selected, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) })}
+                  timing={instructionTiming({
+                    current,
+                    selected,
+                    hold: Boolean(cursor?.hold),
+                    stop: Boolean(cursor?.stop),
+                  })}
                   body={body}
                   note={note}
                   onSelect={setStage}
                   onBody={setBody}
                   onSave={(event) => void save(event)}
-                  onSaveAndResume={canAct && !cursor?.done ? () => void saveAndResume() : undefined}
+                  onSaveAndResume={
+                    canAct && !cursor?.done
+                      ? () => void saveAndResume()
+                      : undefined
+                  }
                   onOpen={() => {
                     setStage(selected)
                     setShowNote(true)
                   }}
                 />
               ) : null}
-              <Rewind id={id} current={cursor?.stage ?? ""} blocked={restartBlocked} />
+              <Rewind
+                id={id}
+                current={cursor?.stage ?? ""}
+                blocked={restartBlocked}
+              />
               {!paused && !cursor?.done && !idle ? (
                 <div className="flex flex-col gap-2">
                   <div className="flex flex-wrap gap-2">
                     {running === null ? (
-                      <Button type="button" variant="secondary" onClick={() => void pause()}>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void pause()}
+                      >
                         Pause after this stage
                       </Button>
                     ) : null}
-                    <Button type="button" variant="secondary" onClick={() => void stop()}>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void stop()}
+                    >
                       Stop now
                     </Button>
                   </div>
-                  <p className="text-pretty text-sm text-muted-foreground">
-                    The stage that is running finishes. The run holds before the next one, so you can choose the agent for it.
+                  <p className="text-sm text-pretty text-muted-foreground">
+                    The stage that is running finishes. The run holds before the
+                    next one, so you can choose the agent for it.
                   </p>
                 </div>
               ) : null}

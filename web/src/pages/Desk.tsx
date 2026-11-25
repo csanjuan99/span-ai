@@ -1,9 +1,11 @@
 "use client"
 
 import { EmptyDesk, sampleBrief } from "@/components/desk/EmptyDesk"
+import { Toasts } from "@/components/notify/Toasts"
+import { useNotifications } from "@/hooks/use-notifications"
 import { RunsDesk } from "@/components/desk/RunsDesk"
 import { useEffect, useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router"
+import { Link, useLocation, useNavigate } from "react-router"
 
 import {
   agentList,
@@ -112,17 +114,24 @@ function storyOf(value: unknown): { key: string; brief: string } {
 /** Every control the desk had, now as the front page. A run opens the span page. */
 export function Desk() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [workspace, setWorkspace] = useState(".")
   const [repos, setRepos] = useState<Repo[]>([])
   const [session, setSession] = useState<JiraSession>(noSession)
   const [stories, setStories] = useState<StoryHit[]>([])
   const [issue, setIssue] = useState("")
-  const [story, setStory] = useState("")
+  // The welcome page sends a person here with the sample brief already in the box.
+  const [story, setStory] = useState(() =>
+    (location.state as { sample?: boolean } | null)?.sample === true
+      ? sampleBrief.text
+      : ""
+  )
   const [kind, setKind] = useState("infer")
   const [base, setBase] = useState("")
   const [branches, setBranches] = useState<BranchChoice>(noBranches)
   const [spans, setSpans] = useState<SpanHead[]>([])
   const [listed, setListed] = useState(false)
+  const notifications = useNotifications(spans)
   const [starting, setStarting] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const [url, setUrl] = useState("")
@@ -496,10 +505,15 @@ export function Desk() {
           </span>
         </p>
         <p className="mt-1 text-sm">
-          <Link className="text-primary underline-offset-4 hover:underline" to="/settings">
+          <Link
+            className="text-primary underline-offset-4 hover:underline"
+            to="/settings"
+          >
             Settings
           </Link>{" "}
-          <span className="text-muted-foreground">the agent, checks, approvals and appearance</span>
+          <span className="text-muted-foreground">
+            the agent, checks, approvals and appearance
+          </span>
         </p>
       </header>
       {listNote !== "" ? (
@@ -714,6 +728,12 @@ export function Desk() {
           </form>
         </>
       ) : null}
+      <Toasts
+        toasts={notifications.toasts}
+        onOpen={(runId) => navigate(`/spans/${runId}`)}
+        onDismiss={notifications.dismiss}
+        onHold={notifications.hold}
+      />
       <Settings
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
