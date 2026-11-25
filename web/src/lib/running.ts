@@ -11,6 +11,8 @@ const names: Record<string, string> = {
 
 /** What the page says while a run goes on by itself: who works, what comes next, where. */
 export interface Running {
+  /** The agent CLI that works, as the engine names it. */
+  agent: string
   title: string
   /** The last line the agent wrote, or empty. */
   now: string
@@ -29,16 +31,30 @@ function cap(text: string): string {
  * guarantees: the order of the stages. Which stage asks for an approval depends on the run's
  * modes, which the page is not given, so the card does not name one.
  */
-export function runningOf(input: { stage: string; agent: string; branch: string; workspace: string; transcript: string[] }): Running {
+export function runningOf(input: {
+  stage: string
+  agent: string
+  branch: string
+  workspace: string
+  transcript: string[]
+}): Running {
   const index = stages.findIndex((stage) => stage === input.stage)
   const following = index >= 0 ? stages[index + 1] : undefined
   const folder = input.workspace.split("/").filter(Boolean).pop() ?? ""
-  const now = [...input.transcript].reverse().find((line) => line.trim() !== "") ?? ""
+  const now =
+    [...input.transcript].reverse().find((line) => line.trim() !== "") ?? ""
   return {
+    agent: input.agent,
     title: `${names[input.agent] ?? "The agent"} is working in ${input.stage}.`,
     now: now.trim(),
-    next: following === undefined ? `${cap(input.stage)} seals and the run is done.` : `${cap(input.stage)} seals, then ${following} runs on its own.`,
+    next:
+      following === undefined
+        ? `${cap(input.stage)} seals and the run is done.`
+        : `${cap(input.stage)} seals, then ${following} runs on its own.`,
     where: [folder, input.branch].filter((part) => part !== "").join(" · "),
-    pause: following === undefined ? "" : `The run holds after ${input.stage} seals and before ${following} starts. Nothing is lost.`,
+    pause:
+      following === undefined
+        ? ""
+        : `The run holds after ${input.stage} seals and before ${following} starts. Nothing is lost.`,
   }
 }

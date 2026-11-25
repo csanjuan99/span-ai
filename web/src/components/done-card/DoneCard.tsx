@@ -6,13 +6,21 @@ import type { Done } from "@/lib/done"
 /** Shown once the run is over: what finished, where the work went, and how to open it. */
 export function DoneCard({ done }: { done: Done }) {
   return (
-    <StatusBlock label="Done" tone="pass" icon={CircleCheck} title={`Done · ${done.title}`} where="">
-      <p className="text-pretty text-base font-medium">{done.landed}</p>
+    <StatusBlock
+      label="Done"
+      tone="pass"
+      icon={CircleCheck}
+      title="Done"
+      where={done.title}
+    >
+      <p className="text-base font-medium text-pretty">{done.landed}</p>
       <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
         {done.branch !== "" ? (
           <>
             <dt className="text-muted-foreground">Branch</dt>
-            <dd className="min-w-0 break-words font-mono text-xs">{done.branch}</dd>
+            <dd className="min-w-0 font-mono text-xs break-words">
+              {done.branch}
+            </dd>
           </>
         ) : null}
         {done.issue !== "" ? (

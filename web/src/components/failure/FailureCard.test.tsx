@@ -20,10 +20,11 @@ const failure = {
 afterEach(cleanup)
 
 describe("FailureCard", () => {
-  it("shows the command, its output, the attempt, and where the full log is", () => {
+  it("shows the reason, the command with its exit code, its output, and where the full log is", () => {
     render(<FailureCard failure={failure} />)
-    expect(screen.getByText("go test ./... · exit 1")).toBeTruthy()
-    expect(screen.getByText("attempt 2 of 3")).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "go test ./... exited 1" })).toBeTruthy()
+    expect(screen.getByText("go test ./...")).toBeTruthy()
+    expect(screen.getByText("exit 1")).toBeTruthy()
     expect(screen.getByLabelText("Command output").textContent).toContain("expected 2 to be 3")
     expect(screen.getByText("iter/2/logs/prove-1.log")).toBeTruthy()
     expect(screen.queryByText(/not attributable/)).toBeNull()
@@ -34,8 +35,8 @@ describe("FailureCard", () => {
     expect(screen.getByText(/not attributable to the change/)).toBeTruthy()
   })
 
-  it("hides the counter when no cap was recorded", () => {
-    render(<FailureCard failure={{ ...failure, cap: 0 }} />)
-    expect(screen.queryByText(/attempt/)).toBeNull()
+  it("draws no command block when the failure names no command", () => {
+    render(<FailureCard failure={{ ...failure, command: null }} />)
+    expect(screen.queryByText("Failing output")).toBeNull()
   })
 })

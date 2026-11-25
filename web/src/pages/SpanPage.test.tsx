@@ -157,7 +157,7 @@ describe("the block that holds what the run waits on", () => {
     })
     page()
     const block = screen.getByRole("region", { name: "Needs you" })
-    expect(block.textContent).toContain("Waiting for your answers")
+    expect(block.textContent).toContain("Waiting · 1 question")
     expect(block.textContent).toContain("What is the retry limit?")
     expect(
       screen.getByRole("button", { name: "Answer and continue" })
@@ -168,7 +168,7 @@ describe("the block that holds what the run waits on", () => {
     state = held({ stage: "frame", reason: "decision needed", decision })
     page()
     const block = screen.getByRole("region", { name: "Needs you" })
-    expect(block.textContent).toContain("Decision needed")
+    expect(block.textContent).toContain("Decision · 1 open")
     expect(block.textContent).toContain(
       "Where should delivery attempts be recorded?"
     )
@@ -538,7 +538,7 @@ describe("a finished run leaves its controls behind", () => {
     page()
     expect(
       screen
-        .getByRole("list", { name: "Stages" })
+        .getByRole("region", { name: "Stages" })
         .querySelector("[aria-current]")
     ).toBeNull()
   })

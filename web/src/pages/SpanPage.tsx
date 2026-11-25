@@ -2,11 +2,11 @@
 
 import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
+import { RotateCcw } from "lucide-react"
 
 import {
   answerRun,
   approveStage,
-  branchLine,
   decideRun,
   pauseRun,
   readStory,
@@ -30,12 +30,10 @@ import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
 import { proofOf } from "@/lib/proof"
 import { runDetails } from "@/lib/run-details"
-import { tidy } from "@/lib/tidy"
-import { sinceLine } from "@/lib/since"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
-import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
-import { agentLine, clockOf, timelineLines, withAgent } from "@/lib/timeline"
+import { instructionTiming, noteStage } from "@/lib/stage-copy"
+import { clockOf } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
 import { useSpan } from "@/hooks/use-span"
 import { ConflictPanel } from "@/components/conflict/ConflictPanel"
@@ -66,10 +64,14 @@ import { SafeAndKept } from "@/components/safe-and-kept/SafeAndKept"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
 import { Shell } from "@/components/shell/Shell"
 import { StageRail } from "@/components/stage-rail/StageRail"
+import { RunHeader } from "@/components/run-header/RunHeader"
+import { Consequences } from "@/components/status-block/Consequences"
+import { Lede } from "@/components/status-block/Lede"
+import { metaTime, type RunState } from "@/lib/run-header"
+import { stages } from "@/lib/types"
 import { stageDurations } from "@/lib/stage-times"
 import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
-import { ActionWithHint } from "@/components/action-with-hint/ActionWithHint"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -106,33 +108,13 @@ export function SpanPage() {
       stop: Boolean(cursor?.stop),
     }) ||
     noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
-  const verdict = cursor?.done
+  const verdict: RunState = cursor?.done
     ? "done"
     : cursor?.stop
       ? "stop"
       : cursor?.hold
         ? "hold"
         : "running"
-  const line =
-    state.agent?.summary === "not running"
-      ? "No agent is running this stage. Relaunch starts it again."
-      : stageLine({
-          stage: cursor?.stage ?? "intake",
-          reason: cursor?.reason ?? "",
-          hold: cursor?.hold ?? false,
-          stop: cursor?.stop ?? false,
-          done: cursor?.done ?? false,
-        })
-
-  const lines = withAgent(
-    timelineLines({
-      statements: state.span?.statements ?? [],
-      gate: state.span?.gate,
-      frames: state.frames,
-      actions: state.actions,
-    }),
-    agentLine(state.agent, state.agentAt)
-  )
   const sealed = (state.span?.statements ?? [])
     .filter((item) => item.verdict === "advance")
     .map((item) => item.stage)
@@ -215,19 +197,57 @@ export function SpanPage() {
   const lastStamp =
     [...(state.span?.statements ?? [])].reverse().find((item) => item.time)
       ?.time ?? ""
-  const since =
-    cursor?.done === true
-      ? ""
-      : sinceLine(
-          waiting ? "waiting since" : cursor?.stop ? "stopped" : "held",
-          lastStamp,
-          new Date()
-        )
   const attempt = failure === null ? "" : attemptLine(failure)
+  const stageNumber =
+    Math.max(stages.indexOf(current as (typeof stages)[number]), 0) + 1
   const where =
     needs?.kind === "failed" && attempt !== ""
-      ? `${current} · ${attempt}`
-      : current
+      ? `${current} · ${attempt}${failure?.command ? ` · exit ${failure.command.exitCode}` : ""}`
+      : needs?.kind === "questions"
+        ? `${current} · ${questions.length} open`
+        : needs?.kind === "busy"
+          ? `${current} · checkout in use`
+          : needs?.kind === "agent-blocked"
+            ? `${current} · ${cursor?.agentBlock?.agent ?? ""}`.replace(
+                / · $/,
+                ""
+              )
+            : `${current} · stage ${stageNumber} of ${stages.length}`
+  const bandTitle =
+    needs === null
+      ? ""
+      : needs.kind === "questions"
+        ? `Waiting · ${questions.length} ${questions.length === 1 ? "question" : "questions"}`
+        : needs.kind === "decision"
+          ? "Decision · 1 open"
+          : needs.kind === "conflict" && cursor?.conflict !== undefined
+            ? `Conflict · ${cursor.conflict.groups.length} ${cursor.conflict.groups.length === 1 ? "group" : "groups"}`
+            : needs.label
+  // Where nothing else explains the hold, say it in a heading and a line.
+  const lede =
+    needs?.kind === "approval" && approval !== null
+      ? {
+          title: `Approve ${approval.stage} to ${approval.stage === "merge" ? "merge this change" : "go on"}`,
+          body: approval.hint,
+        }
+      : needs?.kind === "busy"
+        ? {
+            title: "Another run is editing this checkout",
+            body: "This run has not touched the checkout, so nothing is lost. Let the other run finish or stop it, then resume this one.",
+          }
+        : needs?.kind === "held" || needs?.kind === "idle"
+          ? {
+              title:
+                needs.kind === "idle"
+                  ? "Nothing is running this span"
+                  : "This run is paused",
+              body: cursor?.reason ?? "",
+            }
+          : null
+  const headState: RunState =
+    needs?.kind === "questions" || needs?.kind === "decision"
+      ? "waiting"
+      : verdict
 
   /**
    * Runs one action the page offers and says what happened. Every action reports its failure
@@ -378,19 +398,116 @@ export function SpanPage() {
       ? "Unavailable while a merge conflict is open. Abort the merge first."
       : ""
 
+  // The right column of the block that waits on a person: what the action does, then the action.
+  const next = stages[stages.indexOf(current as (typeof stages)[number]) + 1]
+  const primary =
+    needs === null
+      ? null
+      : approval !== null
+        ? {
+            label: approval.label,
+            hint: approval.hint,
+            run: () => void approve(),
+          }
+        : !waiting &&
+            cursor?.decision === undefined &&
+            canAct &&
+            action !== null &&
+            needs.kind !== "agent-blocked"
+          ? { label: action.label, hint: action.hint, run: () => void resume() }
+          : null
+  const asideTitle =
+    needs?.kind === "failed"
+      ? "If you fix and retry"
+      : needs?.kind === "approval"
+        ? "If you approve"
+        : needs?.kind === "busy"
+          ? "When the other run ends"
+          : "If you resume"
+  const aside =
+    primary === null || state.span === null ? undefined : (
+      <>
+        <Consequences
+          title={asideTitle}
+          icon={RotateCcw}
+          rows={[
+            { label: "Does", body: primary.hint },
+            {
+              label: "Where",
+              body: (
+                <span className="font-mono text-xs break-all">
+                  {[state.span.repo, cursor?.branch]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              ),
+            },
+            ...(kept !== null
+              ? [
+                  {
+                    label: "Kept",
+                    body: `${kept.sealed} ${kept.sealed === 1 ? "stage" : "stages"} sealed${kept.commits > 0 ? ` · ${kept.commits} ${kept.commits === 1 ? "commit" : "commits"}` : ""}`,
+                  },
+                ]
+              : []),
+            ...(needs?.kind === "failed" && next !== undefined
+              ? [
+                  {
+                    label: "Next",
+                    body: `${current} runs again. If it passes, the run moves to ${next}.`,
+                  },
+                ]
+              : []),
+          ]}
+        />
+        <Button type="button" className="h-10 w-full" onClick={primary.run}>
+          {primary.label}
+        </Button>
+        {holder !== "" ? (
+          <Link
+            className="self-start text-sm text-primary underline-offset-4 hover:underline"
+            to={`/spans/${holder}`}
+          >
+            Open the other run
+          </Link>
+        ) : null}
+        {state.agent?.relaunch ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full"
+            onClick={() => void relaunch()}
+          >
+            Relaunch
+          </Button>
+        ) : null}
+        {!cursor?.stop &&
+        !waiting &&
+        cursor?.decision === undefined &&
+        approval === null ? (
+          <div className="flex flex-col gap-2 pt-1">
+            <span className="text-xs font-medium tracking-wide text-muted-foreground">
+              Other ways out
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 w-full"
+              onClick={() => {
+                setStage(selected)
+                setShowNote(true)
+              }}
+            >
+              Leave a note for {selected}
+            </Button>
+          </div>
+        ) : null}
+      </>
+    )
+
   if (state.span === null) {
     return (
-      <Shell
-        path={`~/spans/${id}`}
-        status={state.problem ?? "loading"}
-        lines={lines}
-      >
-        <Link
-          className="text-sm text-primary underline-offset-4 hover:underline"
-          to="/"
-        >
-          $ desk
-        </Link>
+      <Shell path={`~/spans/${id}`} status={state.problem ?? "loading"}>
         {state.problem !== null ? (
           <PageProblem problem={state.problem} id={id} />
         ) : (
@@ -404,42 +521,29 @@ export function SpanPage() {
     <Shell
       path={`~/spans/${id}`}
       status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`}
-      lines={lines}
     >
-      <header className="flex flex-col gap-3">
-        <Link
-          className="text-sm text-primary underline-offset-4 hover:underline"
-          to="/"
-        >
-          $ desk
-        </Link>
-        <h1 className="text-xl text-balance tabular-nums" title={id}>
-          <span className="text-primary">$ </span>
-          {state.span?.label || id}
-        </h1>
-        {cursor !== undefined && branchLine(cursor) !== "" ? (
-          <p className="text-sm text-pretty text-muted-foreground">
-            {branchLine(cursor)}
-          </p>
-        ) : null}
-        <Link
-          className="self-start text-sm text-primary underline-offset-4 hover:underline"
-          to={`/spans/${id}/summary`}
-        >
-          Summary to share
-        </Link>
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6">
+        <RunHeader
+          chip={cursor?.issue || id}
+          state={headState}
+          conflict={needs?.kind === "conflict"}
+          title={state.span?.title || state.span?.label || id}
+          repo={state.span?.repo ?? ""}
+          branch={cursor?.branch ?? ""}
+          time={metaTime({
+            state: headState,
+            startedAt: cursor?.startedAt ?? "",
+            lastStamp,
+            now: new Date(),
+          })}
+          summaryTo={`/spans/${id}/summary`}
+        />
         <StageRail
           stage={cursor?.stage ?? ""}
-          verdict={verdict}
+          verdict={headState === "waiting" ? "waiting" : verdict}
           sealed={sealed}
           durations={stageDurations(state.span?.statements ?? [])}
         />
-        <p className="text-pretty">{tidy(line)}</p>
-        {since !== "" && (cursor?.hold || cursor?.stop) ? (
-          <p className="text-sm text-pretty text-muted-foreground tabular-nums">
-            {since}
-          </p>
-        ) : null}
         {note !== "" ? (
           <p className="text-sm text-pretty text-hold">{note}</p>
         ) : null}
@@ -447,253 +551,230 @@ export function SpanPage() {
           <p className="text-sm text-pretty text-destructive">{state.error}</p>
         ) : null}
         <ConnectionBanner notice={notice} lastSeen={lastSeen} />
-      </header>
-      {/*
+        {/*
         One column on a narrow screen, in the order the design draws it: what needs the person, the
         proof, what is safe, the tabs, then the controls. From lg up the first and last pairs split
         into a main column and a side column; `contents` lets the order classes reach the grid.
       */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
-          <div className="order-1 flex min-w-0 flex-col gap-6 lg:order-none">
-            {needs !== null ? (
-              <NeedsYou needs={needs} where={where}>
-                {agentBlock !== null ? (
-                  <AgentBlocked line={agentBlock} />
-                ) : null}
-                {approval !== null ? (
-                  <ActionWithHint
-                    label={approval.label}
-                    hint={approval.hint}
-                    onClick={() => void approve()}
-                  />
-                ) : null}
-                {showFailure ? <FailureCard failure={failure} /> : null}
-                {conflict !== undefined ? (
-                  <ConflictPanel
-                    key={proposalKey(conflict)}
-                    id={id}
-                    conflict={conflict}
-                  />
-                ) : null}
-                {conflict === undefined && conflictKind === "choose" ? (
-                  <p className="text-sm text-pretty text-muted-foreground">
-                    The options for this conflict are on their way.
-                  </p>
-                ) : null}
-                {waiting ? (
-                  <Waiting
-                    key={questions.join("\n")}
-                    questions={questions}
-                    note={note}
-                    onAnswer={answer}
-                    onReload={reloadStory}
-                  />
-                ) : null}
-                {cursor?.decision !== undefined && !waiting ? (
-                  <Decision
-                    key={cursor.decision.id}
-                    request={cursor.decision}
-                    note={note}
-                    onDecide={decide}
-                  />
-                ) : null}
-                {!waiting &&
-                cursor?.decision === undefined &&
-                approval === null &&
-                canAct &&
-                action !== null ? (
-                  <ActionWithHint
-                    label={action.label}
-                    hint={action.hint}
-                    onClick={() => void resume()}
-                  />
-                ) : null}
-                {holder !== "" ? (
-                  <Link
-                    className="self-start text-sm text-primary underline-offset-4 hover:underline"
-                    to={`/spans/${holder}`}
-                  >
-                    Open the other run
-                  </Link>
-                ) : null}
-                {state.agent?.relaunch ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="self-start"
-                    onClick={() => void relaunch()}
-                  >
-                    Relaunch
-                  </Button>
-                ) : null}
-                {cursor?.stop && !waiting ? (
-                  <p className="text-sm text-pretty">
-                    This run will not continue.
-                  </p>
-                ) : null}
-              </NeedsYou>
-            ) : null}
-            {done !== null ? <DoneCard done={done} /> : null}
-            {running !== null ? (
-              <RunningCard running={running} onPause={() => void pause()} />
-            ) : null}
-            {proof !== null ? <ProofSummary proof={proof} /> : null}
-            {done !== null && change !== null ? (
-              <FilesChanged files={change.files} />
-            ) : null}
-          </div>
-          <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
-            <TabsList className="h-auto w-full gap-1 rounded-2xl p-1">
-              {tabs.map((tab) => (
-                <TabsTrigger
-                  key={tab.value}
-                  value={tab.value}
-                  className={tabClass}
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start">
+          <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
+            <div className="order-1 flex min-w-0 flex-col gap-6 lg:order-none">
+              {needs !== null ? (
+                <NeedsYou
+                  needs={needs}
+                  title={bandTitle}
+                  where={where}
+                  aside={aside}
                 >
-                  {tab.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-            <TabsContent value="ledger" className="flex flex-col gap-6">
-              <LedgerSummary statements={state.span?.statements ?? []} />
-              <details className="group rounded-xl border border-border">
-                <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm text-muted-foreground select-none">
-                  <span>
-                    All records · {state.span?.statements.length ?? 0}
-                  </span>
-                  <span className="ml-auto text-xs">
-                    evidence, commits and commands
-                  </span>
-                </summary>
-                <div className="px-4 pb-4">
-                  <Ledger statements={state.span?.statements ?? []} />
-                </div>
-              </details>
-              <RawOutput
-                transcript={state.transcript}
-                statements={state.span?.statements ?? []}
-              />
-              {done !== null && change !== null ? (
-                <FinishedRecord
-                  risks={change.report.risks}
-                  details={runDetails(
-                    state.span?.statements ?? [],
-                    state.span?.stageAgents
-                  )}
-                />
-              ) : null}
-            </TabsContent>
-            <TabsContent value="implementation">
-              {done !== null && change !== null && change.files.length === 0 ? (
-                <ProblemCard
-                  label="No diff to read"
-                  tone="info"
-                  title="This run finished, and its diff is gone"
-                  cause="The branch was merged without a merge commit, or deleted, and Span did not keep the patch."
-                  kept={`${done.landed}. The change itself is still in your repository.`}
-                  next="Open the change to read what shipped. Proof and test results are still in the ledger."
-                >
-                  {done.change !== null ? (
-                    <a className={buttonVariants()} href={done.change.href}>
-                      {done.change.label}
-                    </a>
+                  {agentBlock !== null ? (
+                    <AgentBlocked line={agentBlock} />
                   ) : null}
-                </ProblemCard>
-              ) : state.span !== null && change !== null ? (
-                <Implementation
-                  change={change}
-                  truncated={state.implementation?.truncated ?? false}
-                  run={{
-                    cursor: state.span.cursor,
-                    statements: state.span.statements,
-                    agents: state.span.stageAgents ?? {},
-                    feature: featureState.feature,
-                    journal: journalState,
-                  }}
-                />
+                  {lede !== null ? (
+                    <Lede title={lede.title} body={lede.body} />
+                  ) : null}
+                  {showFailure ? <FailureCard failure={failure} /> : null}
+                  {conflict !== undefined ? (
+                    <ConflictPanel
+                      key={proposalKey(conflict)}
+                      id={id}
+                      conflict={conflict}
+                    />
+                  ) : null}
+                  {conflict === undefined && conflictKind === "choose" ? (
+                    <p className="text-sm text-pretty text-muted-foreground">
+                      The options for this conflict are on their way.
+                    </p>
+                  ) : null}
+                  {waiting ? (
+                    <Waiting
+                      key={questions.join("\n")}
+                      questions={questions}
+                      note={note}
+                      onAnswer={answer}
+                      onReload={reloadStory}
+                    />
+                  ) : null}
+                  {cursor?.decision !== undefined && !waiting ? (
+                    <Decision
+                      key={cursor.decision.id}
+                      request={cursor.decision}
+                      note={note}
+                      onDecide={decide}
+                    />
+                  ) : null}
+                  {cursor?.stop && !waiting ? (
+                    <p className="text-sm text-pretty">
+                      This run will not continue.
+                    </p>
+                  ) : null}
+                </NeedsYou>
               ) : null}
-            </TabsContent>
-            <TabsContent value="qa">
-              <QACases
-                skipped={state.acceptance?.skipped ?? false}
-                lines={state.acceptance?.lines ?? []}
-                command={state.acceptance?.command ?? ""}
-                exitCode={state.acceptance?.exitCode ?? 0}
-              />
-            </TabsContent>
-          </Tabs>
-        </div>
-        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
-          {kept !== null ? (
-            <SafeAndKept kept={kept} className="order-2 lg:order-none" />
-          ) : null}
-          {cursor?.done ? null : (
-            <RunControls className="order-4 lg:order-none">
-              <StageAgent
-                id={id}
-                current={cursor?.stage ?? ""}
-                choices={state.span?.stageAgents}
-              />
-              {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
-                <InstructionNote
-                  open={paused || showNote}
-                  selected={selected}
-                  timing={instructionTiming({
-                    current,
-                    selected,
-                    hold: Boolean(cursor?.hold),
-                    stop: Boolean(cursor?.stop),
-                  })}
-                  body={body}
-                  note={note}
-                  onSelect={setStage}
-                  onBody={setBody}
-                  onSave={(event) => void save(event)}
-                  onSaveAndResume={
-                    canAct && !cursor?.done
-                      ? () => void saveAndResume()
-                      : undefined
-                  }
-                  onOpen={() => {
-                    setStage(selected)
-                    setShowNote(true)
-                  }}
-                />
+              {done !== null ? <DoneCard done={done} /> : null}
+              {running !== null ? (
+                <RunningCard running={running} onPause={() => void pause()} />
               ) : null}
-              <Rewind
-                id={id}
-                current={cursor?.stage ?? ""}
-                blocked={restartBlocked}
-              />
-              {!paused && !cursor?.done && !idle ? (
-                <div className="flex flex-col gap-2">
-                  <div className="flex flex-wrap gap-2">
-                    {running === null ? (
+              {proof !== null ? <ProofSummary proof={proof} /> : null}
+              {done !== null && change !== null ? (
+                <FilesChanged files={change.files} />
+              ) : null}
+            </div>
+            <Tabs
+              defaultValue="ledger"
+              className="order-3 min-w-0 gap-0 overflow-hidden rounded-[14px] border border-border bg-card shadow-sm lg:order-none [&>[role=tabpanel]]:p-4"
+            >
+              <TabsList className="m-3 mb-0 h-auto w-auto gap-1 rounded-[14px] p-1">
+                {tabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className={tabClass}
+                  >
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+              <TabsContent value="ledger" className="flex flex-col gap-6">
+                <LedgerSummary statements={state.span?.statements ?? []} />
+                <details className="group rounded-xl border border-border">
+                  <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm text-muted-foreground select-none">
+                    <span>
+                      All records · {state.span?.statements.length ?? 0}
+                    </span>
+                    <span className="ml-auto text-xs">
+                      evidence, commits and commands
+                    </span>
+                  </summary>
+                  <div className="px-4 pb-4">
+                    <Ledger statements={state.span?.statements ?? []} />
+                  </div>
+                </details>
+                <RawOutput
+                  transcript={state.transcript}
+                  statements={state.span?.statements ?? []}
+                />
+                {done !== null && change !== null ? (
+                  <FinishedRecord
+                    risks={change.report.risks}
+                    details={runDetails(
+                      state.span?.statements ?? [],
+                      state.span?.stageAgents
+                    )}
+                  />
+                ) : null}
+              </TabsContent>
+              <TabsContent value="implementation">
+                {done !== null &&
+                change !== null &&
+                change.files.length === 0 ? (
+                  <ProblemCard
+                    label="No diff to read"
+                    tone="info"
+                    title="This run finished, and its diff is gone"
+                    cause="The branch was merged without a merge commit, or deleted, and Span did not keep the patch."
+                    kept={`${done.landed}. The change itself is still in your repository.`}
+                    next="Open the change to read what shipped. Proof and test results are still in the ledger."
+                  >
+                    {done.change !== null ? (
+                      <a className={buttonVariants()} href={done.change.href}>
+                        {done.change.label}
+                      </a>
+                    ) : null}
+                  </ProblemCard>
+                ) : state.span !== null && change !== null ? (
+                  <Implementation
+                    change={change}
+                    truncated={state.implementation?.truncated ?? false}
+                    run={{
+                      cursor: state.span.cursor,
+                      statements: state.span.statements,
+                      agents: state.span.stageAgents ?? {},
+                      feature: featureState.feature,
+                      journal: journalState,
+                    }}
+                  />
+                ) : null}
+              </TabsContent>
+              <TabsContent value="qa">
+                <QACases
+                  skipped={state.acceptance?.skipped ?? false}
+                  lines={state.acceptance?.lines ?? []}
+                  command={state.acceptance?.command ?? ""}
+                  exitCode={state.acceptance?.exitCode ?? 0}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
+          <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
+            {kept !== null ? (
+              <SafeAndKept kept={kept} className="order-2 lg:order-none" />
+            ) : null}
+            {cursor?.done ? null : (
+              <RunControls className="order-4 lg:order-none">
+                <StageAgent
+                  id={id}
+                  current={cursor?.stage ?? ""}
+                  choices={state.span?.stageAgents}
+                />
+                {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
+                  <InstructionNote
+                    open={paused || showNote}
+                    selected={selected}
+                    timing={instructionTiming({
+                      current,
+                      selected,
+                      hold: Boolean(cursor?.hold),
+                      stop: Boolean(cursor?.stop),
+                    })}
+                    body={body}
+                    note={note}
+                    onSelect={setStage}
+                    onBody={setBody}
+                    onSave={(event) => void save(event)}
+                    onSaveAndResume={
+                      canAct && !cursor?.done
+                        ? () => void saveAndResume()
+                        : undefined
+                    }
+                    onOpen={() => {
+                      setStage(selected)
+                      setShowNote(true)
+                    }}
+                  />
+                ) : null}
+                <Rewind
+                  id={id}
+                  current={cursor?.stage ?? ""}
+                  blocked={restartBlocked}
+                />
+                {!paused && !cursor?.done && !idle ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap gap-2">
+                      {running === null ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => void pause()}
+                        >
+                          Pause after this stage
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="secondary"
-                        onClick={() => void pause()}
+                        onClick={() => void stop()}
                       >
-                        Pause after this stage
+                        Stop now
                       </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => void stop()}
-                    >
-                      Stop now
-                    </Button>
+                    </div>
+                    <p className="text-sm text-pretty text-muted-foreground">
+                      The stage that is running finishes. The run holds before
+                      the next one, so you can choose the agent for it.
+                    </p>
                   </div>
-                  <p className="text-sm text-pretty text-muted-foreground">
-                    The stage that is running finishes. The run holds before the
-                    next one, so you can choose the agent for it.
-                  </p>
-                </div>
-              ) : null}
-            </RunControls>
-          )}
+                ) : null}
+              </RunControls>
+            )}
+          </div>
         </div>
       </div>
     </Shell>
