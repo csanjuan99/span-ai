@@ -283,6 +283,8 @@ export interface Snapshot {
   title?: string
   /** The folder the run writes in. */
   repo?: string
+  /** A pause waits for the next stage boundary: the run still goes on and holds there. */
+  pauseRequested?: boolean
 }
 
 /** One acceptance case with the declaration that names it. */

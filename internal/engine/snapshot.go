@@ -31,6 +31,10 @@ func Load(root, id string) (Snapshot, error) {
 		snap.Cursor.Hold = true
 		snap.Cursor.Reason = interruptedReason
 	}
+	if !snap.Cursor.Hold && !snap.Cursor.Stop && !snap.Cursor.Done {
+		_, err := os.Stat(filepath.Join(dir, pauseFile))
+		snap.PauseRequested = err == nil
+	}
 	snap.Label = Label(snap.Cursor)
 	snap.Title = titleOf(dir, snap.Cursor.Issue)
 	snap.Repo = RepoName(snap.Cursor.Workspace)

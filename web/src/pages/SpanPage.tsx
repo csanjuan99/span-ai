@@ -113,6 +113,8 @@ export function SpanPage() {
   // A stage the failure card asked to restart at; the controls open their restart form on it.
   const [restartAt, setRestartAt] = useState("")
   const [tab, setTab] = useState("ledger")
+  // The stage that was in flight when this page asked for a pause the server accepted.
+  const [pausedIn, setPausedIn] = useState("")
   const [body, setBody] = useState("")
   const [note, setNote] = useState("")
   const cursor = state.span?.cursor
@@ -414,12 +416,24 @@ export function SpanPage() {
     }
   }
 
-  const pause = () =>
-    act(() => pauseRun(id), {
-      log: "pause",
-      say: asked("Pause"),
-      failed: "the pause was not requested",
-    })
+  const pause = async () => {
+    let paused = false
+    const ok = await act(
+      async () => {
+        const answer = await pauseRun(id)
+        paused = answer.paused
+        return answer.reason
+      },
+      {
+        log: "pause",
+        say: asked("Pause"),
+        failed: "the pause was not requested",
+      }
+    )
+    if (ok && paused) {
+      setPausedIn(cursor?.stage ?? "")
+    }
+  }
 
   const stop = () =>
     act(() => stopRun(id), {
@@ -708,6 +722,9 @@ export function SpanPage() {
             )
           },
           diff: () => setTab("implementation"),
+          ledger: () => setTab("ledger"),
+          implementation: () => setTab("implementation"),
+          qa: () => setTab("qa"),
           copySummary: () => void copySummary(),
         }
   useRunCommands(
@@ -857,7 +874,14 @@ export function SpanPage() {
               ) : null}
               {done !== null ? <DoneCard done={done} /> : null}
               {running !== null ? (
-                <RunningCard running={running} onPause={() => void pause()} />
+                <RunningCard
+                  running={running}
+                  pausePending={
+                    span?.pauseRequested === true ||
+                    (pausedIn !== "" && pausedIn === cursor?.stage)
+                  }
+                  onPause={() => void pause()}
+                />
               ) : null}
               {neverSealed ? (
                 <UnsealedCard

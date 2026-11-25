@@ -319,6 +319,11 @@ describe("conflictOf", () => {
     })
   })
 
+  it("reads a pending pause on the snapshot, absent by default", () => {
+    expect(snapshot({ cursor: { id: "s" }, pauseRequested: true }).pauseRequested).toBe(true)
+    expect(snapshot({ cursor: { id: "s" } }).pauseRequested).toBeUndefined()
+  })
+
   it("reads the conflict on the cursor and on the live frame", () => {
     const span = snapshot({
       cursor: { id: "s", conflict: conflictBody() },

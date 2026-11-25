@@ -427,6 +427,7 @@ export function snapshot(value: unknown): Snapshot {
     gate: gate(value.gate),
     title: text(value.title),
     repo: text(value.repo),
+    ...(value.pauseRequested === true ? { pauseRequested: true } : {}),
   }
 }
 
@@ -901,14 +902,20 @@ export async function setStageAgent(
   )
 }
 
-/** Ask the run to hold before the next stage starts. Answers why it did or did not. */
-export async function pauseRun(id: string): Promise<string> {
+/** What the server says to a pause request: whether the run will hold, and why or why not. */
+export interface PauseAnswer {
+  paused: boolean
+  reason: string
+}
+
+/** Ask the run to hold before the next stage starts. Answers whether it will, and why. */
+export async function pauseRun(id: string): Promise<PauseAnswer> {
   const body = await postForm(
     `/spans/${encodeURIComponent(id)}/pause`,
     new URLSearchParams()
   )
   const record = isRecord(body) ? body : {}
-  return text(record.reason)
+  return { paused: record.paused === true, reason: text(record.reason) }
 }
 
 /** Restart the run at a stage. The note is what that stage reads when it starts. */
