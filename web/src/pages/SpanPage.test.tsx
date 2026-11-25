@@ -352,3 +352,21 @@ describe("a note and a resume in one click", () => {
     expect(screen.queryByRole("button", { name: "Save and resume" })).toBeNull()
   })
 })
+
+describe("what a finished run shows on the page", () => {
+  const patch = "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
+  const diff = { stat: " pay.go | 1 +\n", patch, truncated: false, commits: 1 }
+
+  it("lists the files changed once the run is done", () => {
+    state = { ...held({ done: true, hold: false, reason: "" }, [advance("merge")]), implementation: diff }
+    page()
+    expect(screen.getByRole("region", { name: "Files changed" }).textContent).toContain("pay.go")
+  })
+
+  it("does not list them while the run is going", () => {
+    state = { ...held({ stage: "prove" }), implementation: diff }
+    page()
+    expect(screen.queryByRole("region", { name: "Files changed" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "Run details" })).toBeNull()
+  })
+})

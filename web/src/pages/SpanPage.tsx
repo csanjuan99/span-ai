@@ -11,6 +11,7 @@ import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
 import { proofOf } from "@/lib/proof"
+import { runDetails } from "@/lib/run-details"
 import { sinceLine } from "@/lib/since"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
@@ -30,6 +31,8 @@ import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
+import { FilesChanged } from "@/components/files-changed/FilesChanged"
+import { FinishedRecord } from "@/components/finished-record/FinishedRecord"
 import { DoneCard } from "@/components/done-card/DoneCard"
 import { RunningCard } from "@/components/running-card/RunningCard"
 import { RunControls } from "@/components/run-controls/RunControls"
@@ -356,6 +359,7 @@ export function SpanPage() {
             {done !== null ? <DoneCard done={done} /> : null}
             {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
             {proof !== null ? <ProofSummary proof={proof} /> : null}
+            {done !== null && change !== null ? <FilesChanged files={change.files} /> : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList>
@@ -366,6 +370,12 @@ export function SpanPage() {
             <TabsContent value="ledger" className="flex flex-col gap-6">
               <Ledger statements={state.span?.statements ?? []} />
               <RawOutput transcript={state.transcript} statements={state.span?.statements ?? []} />
+              {done !== null && change !== null ? (
+                <FinishedRecord
+                  risks={change.report.risks}
+                  details={runDetails(state.span?.statements ?? [], state.span?.stageAgents)}
+                />
+              ) : null}
             </TabsContent>
             <TabsContent value="implementation">
               {state.span !== null && change !== null ? (
