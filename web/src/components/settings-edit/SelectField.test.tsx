@@ -22,4 +22,18 @@ describe("SelectField", () => {
     })
     expect(onChange).toHaveBeenCalledWith("reduced")
   })
+
+  it("is 44px tall on a phone and 32px from a tablet up", () => {
+    render(
+      <SelectField
+        label="Agent"
+        value=""
+        options={[{ value: "", label: "Auto" }]}
+        onChange={() => undefined}
+      />
+    )
+    const classes = screen.getByRole("combobox", { name: "Agent" }).className
+    expect(classes).toContain("h-8")
+    expect(classes).toContain("max-sm:h-11")
+  })
 })

@@ -2,7 +2,15 @@
 
 import { useState } from "react"
 import { Link } from "react-router"
-import { BotIcon } from "lucide-react"
+import {
+  BotIcon,
+  CheckIcon,
+  CircleHelpIcon,
+  LockIcon,
+  PauseIcon,
+  SplitIcon,
+  type LucideIcon,
+} from "lucide-react"
 import { touchArea } from "@/lib/button-class"
 import { cn } from "@/lib/utils"
 
@@ -16,21 +24,24 @@ import type { BoardCard, BoardColumn } from "@/lib/shape-flows"
 import { countText, headingText } from "@/components/shaping/styles"
 
 /** What a card says about where its session stands. */
-function badge(card: BoardCard): { tone: Tone; label: string } | null {
+function badge(
+  card: BoardCard
+): { tone: Tone; label: string; icon: LucideIcon } | null {
   switch (card.status) {
     case "interviewing":
       return card.openQuestions > 0
         ? {
             tone: "acc",
+            icon: CircleHelpIcon,
             label: `${card.openQuestions} ${card.openQuestions === 1 ? "question" : "questions"} open`,
           }
         : null
     case "ready":
-      return { tone: "hold", label: "Ready" }
+      return { tone: "hold", icon: PauseIcon, label: "Ready" }
     case "split":
-      return { tone: "hold", label: "Split" }
+      return { tone: "hold", icon: SplitIcon, label: "Split" }
     default:
-      return { tone: "pass", label: "Sealed" }
+      return { tone: "pass", icon: LockIcon, label: "Sealed" }
   }
 }
 
@@ -83,11 +94,13 @@ function Card({
           <IdChip>{card.ref}</IdChip>
           {state === null ? null : (
             <Pill tone={state.tone} small>
+              <state.icon aria-hidden="true" className="size-3.5" />
               {state.label}
             </Pill>
           )}
           {chosen ? (
             <Pill tone="acc" small>
+              <CheckIcon aria-hidden="true" className="size-3.5" />
               Selected
             </Pill>
           ) : null}
@@ -126,10 +139,7 @@ function StatusColumn({
   onToggle: (id: string) => void
 }) {
   return (
-    <section
-      aria-label={column.name}
-      className="flex min-w-0 flex-col gap-2"
-    >
+    <section aria-label={column.name} className="flex min-w-0 flex-col gap-2">
       <div className="flex items-center gap-2">
         <h2 className={headingText}>{column.name}</h2>
         <span className={countText}>{column.count}</span>
@@ -174,8 +184,7 @@ export function BoardColumns({
 }) {
   const narrow = useNarrow()
   const [status, setStatus] = useState(columns[0]?.key ?? "")
-  const current =
-    columns.find((column) => column.key === status) ?? columns[0]
+  const current = columns.find((column) => column.key === status) ?? columns[0]
   if (narrow && current !== undefined) {
     return (
       <div className="flex flex-col gap-3">

@@ -76,4 +76,21 @@ describe("board columns", () => {
     expect(screen.getByText("Nothing here.")).toBeTruthy()
     expect(screen.queryByLabelText("Select SES-A")).toBeNull()
   })
+
+  it("draws an icon in the state pill and in Selected", () => {
+    render(
+      <MemoryRouter>
+        <BoardColumns
+          columns={columns}
+          workspace="."
+          chosen={new Set(["a1"])}
+          onToggle={() => undefined}
+        />
+      </MemoryRouter>
+    )
+    for (const text of ["1 question open", "Selected"]) {
+      const pill = screen.getByText(text)
+      expect(pill.querySelector("svg[aria-hidden='true']")).not.toBeNull()
+    }
+  })
 })

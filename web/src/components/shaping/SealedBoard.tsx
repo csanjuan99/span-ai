@@ -154,7 +154,7 @@ export function SealedBoard({
             label="digest"
             value={digest}
             icon={<CopyIcon aria-hidden="true" className="size-3" />}
-            className="h-6 self-start border-input bg-card px-2 py-0 font-sans font-medium text-foreground"
+            className="h-6 self-start rounded-[6px] border-input bg-card px-2 py-0 font-sans font-medium text-foreground"
           >
             Copy digest
           </CopyChip>
