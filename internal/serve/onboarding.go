@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,8 +44,8 @@ type folderList struct {
 // maxFolders caps one listing so a folder with thousands of entries stays usable.
 const maxFolders = 300
 
-// jiraCheck is the answer to testing a Jira account: ok, unauthorized, unreachable or invalid.
-type jiraCheck struct {
+// JiraCheck is the answer to testing a Jira account: ok, unauthorized, unreachable or invalid.
+type JiraCheck struct {
 	Status  string `json:"status"`
 	Message string `json:"message,omitempty"`
 }
@@ -157,13 +156,13 @@ func handleFolders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
-// checkJira asks the site whether it accepts the account. A blank token falls back to the one
-// already saved for the project. Nothing is written.
-func checkJira(ctx context.Context, project string, form url.Values) jiraCheck {
+// CheckJira asks the site whether it accepts the account. A blank token falls back to the one
+// already saved for the project. Nothing is written. The page and `span jira check` call it.
+func CheckJira(ctx context.Context, project, site, email, token string) JiraCheck {
 	account := jira.Account{
-		BaseURL: strings.TrimRight(strings.TrimSpace(form.Get("url")), "/"),
-		Email:   strings.TrimSpace(form.Get("email")),
-		Token:   strings.TrimSpace(form.Get("token")),
+		BaseURL: strings.TrimRight(strings.TrimSpace(site), "/"),
+		Email:   strings.TrimSpace(email),
+		Token:   strings.TrimSpace(token),
 	}
 	if account.Token == "" {
 		if saved, err := jira.Load(project); err == nil {
@@ -171,19 +170,19 @@ func checkJira(ctx context.Context, project string, form url.Values) jiraCheck {
 		}
 	}
 	if !strings.Contains(account.BaseURL, "://") || account.Token == "" {
-		return jiraCheck{Status: "invalid", Message: "Enter the Jira site and an API token."}
+		return JiraCheck{Status: "invalid", Message: "Enter the Jira site and an API token."}
 	}
 	_, err := (jira.Client{Account: account}).Search(ctx, "created >= -1d ORDER BY created DESC")
 	var failure *jira.Error
 	switch {
 	case err == nil:
-		return jiraCheck{Status: "ok"}
+		return JiraCheck{Status: "ok"}
 	case errors.As(err, &failure) && failure.Code == "unauthorized":
-		return jiraCheck{Status: "unauthorized", Message: "Jira did not accept this token. It is wrong or was revoked."}
+		return JiraCheck{Status: "unauthorized", Message: "Jira did not accept this token. It is wrong or was revoked."}
 	case errors.As(err, &failure) && failure.Code == "unreachable":
-		return jiraCheck{Status: "unreachable", Message: "The site did not answer."}
+		return JiraCheck{Status: "unreachable", Message: "The site did not answer."}
 	default:
-		return jiraCheck{Status: "invalid", Message: err.Error()}
+		return JiraCheck{Status: "invalid", Message: err.Error()}
 	}
 }
 
@@ -193,5 +192,5 @@ func handleJiraCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, checkJira(r.Context(), r.PostForm.Get("project"), r.PostForm))
+	writeJSON(w, http.StatusOK, CheckJira(r.Context(), r.PostForm.Get("project"), r.PostForm.Get("url"), r.PostForm.Get("email"), r.PostForm.Get("token")))
 }

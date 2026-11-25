@@ -111,13 +111,13 @@ func jiraStub(t *testing.T, status int) string {
 	return srv.URL
 }
 
-func postJiraCheck(t *testing.T, form url.Values) jiraCheck {
+func postJiraCheck(t *testing.T, form url.Values) JiraCheck {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/jira/check", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	Handler(t.TempDir(), "").ServeHTTP(rec, req)
-	var body jiraCheck
+	var body JiraCheck
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("%v (%s)", err, rec.Body.String())
 	}

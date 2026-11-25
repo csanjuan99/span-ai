@@ -677,7 +677,7 @@ func reposCmd(args []string) int {
 }
 
 // jiraUsage is what `span jira` prints when it is called without a known verb.
-const jiraUsage = "usage: ./span jira configure|status|logout|issue|search [--project .] [--json]"
+const jiraUsage = "usage: ./span jira configure|check|status|logout|issue|search [--project .] [--json]"
 
 func jiraCmd(args []string) int { return jiraMain(args, os.Stdout, os.Stderr) }
 
@@ -755,6 +755,32 @@ func jiraMain(args []string, out, errw io.Writer) int {
 			return emit(out, errw, view)
 		}
 		fmt.Fprintf(out, "saved %s\n", project)
+		return 0
+	case "check":
+		var site, email, token string
+		call, code := jiraVerb("jira check", args[1:], errw, 0, jiraUsage, func(fs *flag.FlagSet) {
+			fs.StringVar(&site, "url", "", "jira site, such as https://example.atlassian.net")
+			fs.StringVar(&email, "email", "", "atlassian account email; empty uses a bearer token")
+			fs.StringVar(&token, "token", "", "api token; empty tests the one already saved")
+		})
+		if code != 0 {
+			return code
+		}
+		// The same check the page's Test button runs: nothing is saved. Exit 0 only when Jira
+		// accepts the account, so a script can chain it before `configure`.
+		result := serve.CheckJira(context.Background(), call.project, site, email, token)
+		if call.asJSON {
+			if emit(out, errw, result) != 0 {
+				return 1
+			}
+		} else if result.Message != "" {
+			fmt.Fprintf(out, "%s: %s\n", result.Status, result.Message)
+		} else {
+			fmt.Fprintln(out, result.Status)
+		}
+		if result.Status != "ok" {
+			return 1
+		}
 		return 0
 	case "issue":
 		call, code := jiraVerb("jira issue", args[1:], errw, 1, "usage: ./span jira issue [--project .] [--json] AET-1234", nil)
@@ -956,6 +982,7 @@ func printResult(result engine.Result, err error) int {
 // usageText is the top-level help. Every verb main accepts is named here.
 const usageText = `./span repos [--path .]
 ./span jira configure --project . --url https://example.atlassian.net --email you@example.com --token <token> [--json]
+./span jira check [--project .] [--url https://example.atlassian.net] [--email you@example.com] [--token <token>] [--json]
 ./span jira status [--project .] [--json]
 ./span jira logout [--project .] [--json]
 ./span jira issue [--project .] [--json] AET-1234

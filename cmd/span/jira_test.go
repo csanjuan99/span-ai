@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -44,5 +47,58 @@ func TestJiraJSONMatchesTheAccountRouteAndFlagsFollowTheKey(t *testing.T) {
 	code, out, errw = jiraCall("logout", "--json", "--project", dir)
 	if code != 0 || json.Unmarshal([]byte(out), &view) != nil || view.Configured {
 		t.Fatalf("logout %d %s %s", code, out, errw)
+	}
+}
+
+func fakeJiraSite(t *testing.T, status int) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/3/search/jql" {
+			http.NotFound(w, r)
+			return
+		}
+		if status != http.StatusOK {
+			http.Error(w, "no", status)
+			return
+		}
+		fmt.Fprint(w, `{"issues":[]}`)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+func TestJiraCheckAsksTheSiteWithoutSavingAndExitsByTheStatus(t *testing.T) {
+	dir := t.TempDir()
+	site := fakeJiraSite(t, http.StatusOK)
+	code, out, errw := jiraCall("check", "--project", dir, "--url", site, "--email", "a@b.c", "--token", "t", "--json")
+	var got struct{ Status, Message string }
+	if code != 0 || json.Unmarshal([]byte(out), &got) != nil || got.Status != "ok" || errw != "" {
+		t.Fatalf("an accepted account exits 0 with status ok: %d %s %s", code, out, errw)
+	}
+	if code, out, _ = jiraCall("status", "--project", dir, "--json"); code != 0 || strings.Contains(out, `"configured": true`) {
+		t.Fatalf("a check saves nothing: %d %s", code, out)
+	}
+	code, out, _ = jiraCall("check", "--project", dir, "--url", fakeJiraSite(t, http.StatusUnauthorized), "--token", "bad", "--json")
+	if code != 1 || json.Unmarshal([]byte(out), &got) != nil || got.Status != "unauthorized" {
+		t.Fatalf("a refused token exits 1 with status unauthorized: %d %s", code, out)
+	}
+	code, out, _ = jiraCall("check", "--project", dir, "--url", site, "--json")
+	if code != 1 || json.Unmarshal([]byte(out), &got) != nil || got.Status != "invalid" {
+		t.Fatalf("no token is invalid: %d %s", code, out)
+	}
+	if code, _, _ = jiraCall("check", "--project", dir, "extra"); code != 2 {
+		t.Fatalf("an extra argument is a usage error, got %d", code)
+	}
+}
+
+func TestJiraCheckWithoutATokenTestsTheSavedOne(t *testing.T) {
+	dir := t.TempDir()
+	site := fakeJiraSite(t, http.StatusOK)
+	if code, out, errw := jiraCall("configure", "--project", dir, "--url", site, "--token", "saved", "--json"); code != 0 {
+		t.Fatalf("configure %d %s %s", code, out, errw)
+	}
+	code, out, _ := jiraCall("check", "--project", dir, "--url", site, "--json")
+	if code != 0 || !strings.Contains(out, `"ok"`) {
+		t.Fatalf("the saved token is tested: %d %s", code, out)
 	}
 }
