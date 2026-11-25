@@ -21,7 +21,14 @@ export function RanWithList({ events }: { events: JournalEvent[] }) {
             <dt className="w-16 shrink-0 text-muted-foreground">{row.stage}</dt>
             <dd className="min-w-0 break-all">
               {row.agent}
-              {row.model === "" ? <span className="text-hold"> · no model chosen, Gentle AI default</span> : <span> · {row.model}</span>}
+              {row.model === "" ? (
+                <span className="text-hold">
+                  {" "}
+                  · no model chosen, Gentle AI default
+                </span>
+              ) : (
+                <span> · {row.model}</span>
+              )}
             </dd>
           </div>
         ))}

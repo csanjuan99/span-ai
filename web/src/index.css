@@ -171,6 +171,11 @@
     --shadow-md-value: 0 8px 24px #00000080;
 }
 
+/* The accent bar on the left edge of the row that is open. */
+@utility shadow-accent-edge {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 /* The two-tone band a skeleton block sweeps while its content loads. */
 @utility bg-shimmer {
   background-image: linear-gradient(90deg, var(--muted) 0%, var(--border) 50%, var(--muted) 100%);

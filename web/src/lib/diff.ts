@@ -57,7 +57,15 @@ export function parseDiff(patch: string): DiffFile[] {
       const match = /^diff --git a\/(.+) b\/(.+)$/.exec(raw)
       const oldPath = unquote(match?.[1] ?? "")
       const path = unquote(match?.[2] ?? oldPath)
-      file = { path, oldPath, status: "modified", binary: false, added: 0, removed: 0, hunks: [] }
+      file = {
+        path,
+        oldPath,
+        status: "modified",
+        binary: false,
+        added: 0,
+        removed: 0,
+        hunks: [],
+      }
       files.push(file)
       hunk = undefined
       continue
@@ -81,7 +89,10 @@ export function parseDiff(patch: string): DiffFile[] {
       } else if (raw.startsWith("rename from ")) {
         file.status = "renamed"
         file.oldPath = raw.slice("rename from ".length)
-      } else if (raw.startsWith("Binary files ") || raw.startsWith("GIT binary patch")) {
+      } else if (
+        raw.startsWith("Binary files ") ||
+        raw.startsWith("GIT binary patch")
+      ) {
         file.binary = true
       }
       continue
@@ -95,7 +106,12 @@ export function parseDiff(patch: string): DiffFile[] {
       oldNo += 1
       file.removed += 1
     } else if (raw.startsWith("\\")) {
-      hunk.lines.push({ kind: "note", oldNo: null, newNo: null, text: raw.slice(2) })
+      hunk.lines.push({
+        kind: "note",
+        oldNo: null,
+        newNo: null,
+        text: raw.slice(2),
+      })
     } else if (raw !== "" || hunk.lines.length > 0) {
       hunk.lines.push({ kind: "ctx", oldNo, newNo, text: raw.slice(1) })
       oldNo += 1
@@ -125,7 +141,11 @@ export function parseStat(stat: string): StatRow[] {
 }
 
 /** Totals across files, for the one-line summary above the list. */
-export function totals(files: { added: number; removed: number }[]): { files: number; added: number; removed: number } {
+export function totals(files: { added: number; removed: number }[]): {
+  files: number
+  added: number
+  removed: number
+} {
   return {
     files: files.length,
     added: files.reduce((sum, file) => sum + file.added, 0),
@@ -136,7 +156,9 @@ export function totals(files: { added: number; removed: number }[]): { files: nu
 /** Splits a path into its folder (with trailing slash) and file name. */
 export function splitPath(path: string): { dir: string; name: string } {
   const at = path.lastIndexOf("/")
-  return at < 0 ? { dir: "", name: path } : { dir: path.slice(0, at + 1), name: path.slice(at + 1) }
+  return at < 0
+    ? { dir: "", name: path }
+    : { dir: path.slice(0, at + 1), name: path.slice(at + 1) }
 }
 
 /** Files the stat lists that the patch did not reach, because the patch was cut. */
@@ -159,4 +181,16 @@ function missingFromPatch(stat: string, shown: DiffFile[]): DiffFile[] {
 export function filesOf(stat: string, patch: string): DiffFile[] {
   const parsed = parseDiff(patch)
   return [...parsed, ...missingFromPatch(stat, parsed)]
+}
+
+const statusOfLetter: Record<string, FileStatus> = {
+  A: "added",
+  M: "modified",
+  D: "deleted",
+  R: "renamed",
+}
+
+/** The status a git letter names; anything unknown reads as modified. */
+export function statusOf(letter: string): FileStatus {
+  return statusOfLetter[letter] ?? "modified"
 }
