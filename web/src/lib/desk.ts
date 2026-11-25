@@ -25,8 +25,19 @@ const groups: { key: GroupKey; title: string; hint: string }[] = [
   { key: "done", title: "Done", hint: "" },
 ]
 
-/** Which group a run belongs to: a hold waits for a person, a stop failed, the rest follow the verdict. */
+/** A held run whose check failed, worded the way the engine and the fixtures do. */
+function checkFailed(run: SpanHead): boolean {
+  return /\bexit \d+\b/i.test(run.reason) || /check failed/i.test(run.reason)
+}
+
+/**
+ * Which group a run belongs to. A hold usually waits for a person. A hold that is only a
+ * failed check sits with the failures, so the desk offers Resume instead of Review.
+ */
 export function groupOf(run: SpanHead): GroupKey {
+  if (run.verdict === "hold" && run.need === "" && checkFailed(run)) {
+    return "failed"
+  }
   switch (run.verdict) {
     case "hold":
       return "waiting"

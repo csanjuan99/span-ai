@@ -78,6 +78,28 @@ beforeEach(() => {
 })
 
 describe("Desk", () => {
+  it("does not call a desk empty when the list never loaded", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/spans")) {
+        return Promise.reject(new Error("the desk could not load"))
+      }
+      if (url.startsWith("/jira?path=")) {
+        return Promise.resolve({ configured: false })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText("the desk could not load")).toBeTruthy()
+    expect(screen.queryByText("No runs yet")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: /Start with the sample brief/ })
+    ).toBeNull()
+  })
+
   it("does not ask for Jira credentials when the folder already has a session", async () => {
     render(
       <MemoryRouter>
@@ -144,7 +166,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByRole("button", { name: "Find repos" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Find repos" }))
     await waitFor(() => {
       expect(screen.getByText("api")).toBeTruthy()
     })
@@ -183,7 +205,7 @@ describe("Desk", () => {
     await waitFor(() => {
       expect(jiraCalls).toBe(1)
     })
-    fireEvent.click(screen.getByRole("button", { name: "Find repos" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Find repos" }))
     await waitFor(() => {
       expect(screen.getByText("the folder is gone")).toBeTruthy()
     })
@@ -198,7 +220,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
-    const field = screen.getByLabelText("Base branch")
+    const field = await screen.findByLabelText("Base branch")
     await waitFor(() => {
       expect(field.getAttribute("placeholder")).toBe("dev")
     })
@@ -209,7 +231,9 @@ describe("Desk", () => {
       getJSON.mock.calls.some(([url]) => String(url) === "/branches?path=.")
     ).toBe(true)
     fireEvent.change(field, { target: { value: "  feat/SAL-3 " } })
-    fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configure and run" })
+    )
     await waitFor(() => {
       expect(startRun).toHaveBeenCalled()
     })
@@ -225,7 +249,9 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configure and run" })
+    )
     await waitFor(() => {
       expect(startRun).toHaveBeenCalled()
     })

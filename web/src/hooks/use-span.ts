@@ -363,6 +363,12 @@ export function useSpan(id: string): SpanState {
       }
       if (spanResult.status === "rejected") {
         setError(reasonText(spanResult.reason, "the span could not be read"))
+        // The socket may never open when the server is down, so the first read
+        // has to raise the page problem itself. A replay used to be the only path.
+        const page = problemOf(spanResult.reason)
+        if (page !== null) {
+          setProblem(page)
+        }
       }
       const loaded = settledView(spanResult, snapshot)
       if (loaded !== null && firstSpan === spanToken) {

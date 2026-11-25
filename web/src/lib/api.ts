@@ -535,7 +535,31 @@ async function readBody(response: Response): Promise<unknown> {
   if (raw === "") {
     return null
   }
-  return parseJSON(raw)
+  try {
+    return parseJSON(raw)
+  } catch (err: unknown) {
+    // net/http's NotFound is plain text. A failed call still has to carry a code,
+    // or a missing run sits on the loading skeleton instead of the not-found page.
+    if (!response.ok) {
+      const gateway =
+        response.status === 502 ||
+        response.status === 503 ||
+        response.status === 504
+      return {
+        error:
+          response.status === 404
+            ? "not_found"
+            : gateway
+              ? "unreachable"
+              : "invalid",
+        message: raw.trim().slice(0, 200) || "request failed",
+      }
+    }
+    if (err instanceof Error) {
+      throw err
+    }
+    throw new Error("the response was not JSON")
+  }
 }
 
 /** Fetches JSON and surfaces the server message beside the action that sent it. */
@@ -555,7 +579,20 @@ export async function getJSON(url: string): Promise<unknown> {
   refuseUnauthorized(response)
   const body = await readBody(response)
   if (!response.ok) {
-    throw new ApiError(isRecord(body) ? text(body.error) : "", messageOf(body))
+    const gateway =
+      response.status === 502 ||
+      response.status === 503 ||
+      response.status === 504
+    const coded = isRecord(body) ? text(body.error) : ""
+    const code =
+      coded !== ""
+        ? coded
+        : response.status === 404
+          ? "not_found"
+          : gateway
+            ? "unreachable"
+            : ""
+    throw new ApiError(code, messageOf(body))
   }
   return body
 }

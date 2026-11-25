@@ -18,6 +18,7 @@ import {
   liveFrame,
   modelList,
   ApiError,
+  getJSON,
   answerShape,
   createShape,
   createShapeIssue,
@@ -44,6 +45,24 @@ function reply(status: number, body: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe("getJSON", () => {
+  it("reads a plain-text 404 as not found", async () => {
+    reply(404, "404 page not found")
+    await expect(getJSON("/spans/missing-run")).rejects.toMatchObject({
+      name: "ApiError",
+      code: "not_found",
+      message: "404 page not found",
+    })
+  })
+
+  it("reads a gateway failure as unreachable", async () => {
+    reply(502, "")
+    await expect(getJSON("/spans")).rejects.toMatchObject({
+      code: "unreachable",
+    })
+  })
 })
 
 describe("startRun", () => {

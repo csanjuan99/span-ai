@@ -117,7 +117,9 @@ export function Desk() {
   const [branches, setBranches] = useState<BranchChoice>(noBranches)
   const [spans, setSpans] = useState<SpanHead[]>([])
   const [listed, setListed] = useState(false)
-  const notifications = useNotifications(spans)
+  // A failed list is not an empty desk: "no runs yet" is only true after a list that worked.
+  const [listOk, setListOk] = useState(false)
+  const notifications = useNotifications(listOk ? spans : null)
   const formRef = useRef<HTMLFormElement>(null)
   const [starting, setStarting] = useState(false)
   const [now, setNow] = useState(() => new Date())
@@ -155,6 +157,7 @@ export function Desk() {
         if (!closed) {
           setSpans(spanHeadsOf(spanBody))
           setNow(new Date())
+          setListOk(true)
           setListed(true)
         }
       })
@@ -166,6 +169,7 @@ export function Desk() {
           setNeedsToken(true)
           setSettingsOpen(true)
         }
+        setListOk(false)
         setListNote(reasonText(err, "the desk could not load"))
         setListed(true)
       })
@@ -482,7 +486,7 @@ export function Desk() {
       {listNote !== "" ? (
         <p className="text-sm text-pretty text-destructive">{listNote}</p>
       ) : null}
-      {listed && spans.length > 0 ? (
+      {listed && listOk && spans.length > 0 ? (
         <RunsDesk
           runs={spans}
           now={now}
@@ -492,14 +496,14 @@ export function Desk() {
           }
         />
       ) : null}
-      {listed && spans.length === 0 ? (
+      {listed && listOk && spans.length === 0 ? (
         <EmptyDesk
           folder={workspace}
           onSample={startSample}
           onStory={() => setStarting(true)}
         />
       ) : null}
-      {starting || spans.length === 0 ? (
+      {starting || (listOk && spans.length === 0) ? (
         <>
           <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
           <form

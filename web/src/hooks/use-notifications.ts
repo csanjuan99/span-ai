@@ -57,9 +57,10 @@ function tellSystem(event: NotifyEvent): void {
 /**
  * Tells a person what the runs do: a toast when one needs them, fails or finishes, the tab title
  * and the page icon with how many wait, and the browser's own notification when they allowed it.
- * The first list it sees is not news. It never asks the browser for permission.
+ * The first list it sees is not news. A null list means the desk has not loaded yet, so it
+ * is not that first list and it raises nothing. It never asks the browser for permission.
  */
-export function useNotifications(runs: SpanHead[]): Notifications {
+export function useNotifications(runs: SpanHead[] | null): Notifications {
   const [prefs, setPrefs] = useState(loadPrefs)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [finished, setFinished] = useState<SpanHead | null>(null)
@@ -109,6 +110,11 @@ export function useNotifications(runs: SpanHead[]): Notifications {
   }, [])
 
   useEffect(() => {
+    // The desk starts with no list. Treating that as an empty desk would announce every
+    // run the moment the real list arrives.
+    if (runs === null) {
+      return
+    }
     const events = notifyEvents(previous.current, runs)
     previous.current = runs
     if (events.length === 0) {
@@ -154,7 +160,7 @@ export function useNotifications(runs: SpanHead[]): Notifications {
     }
   }, [])
 
-  const marked = runs.filter((run) => {
+  const marked = (runs ?? []).filter((run) => {
     const kind = kindOf(run)
     return (
       (kind === "needs" ||

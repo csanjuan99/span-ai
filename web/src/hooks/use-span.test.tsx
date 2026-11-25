@@ -397,6 +397,10 @@ describe("useSpan resync", () => {
   })
 })
 
+function spanUrl(url: string): boolean {
+  return /\/spans\/[^/]+$/.test(url)
+}
+
 describe("useSpan first load", () => {
   it("keeps the span when the implementation cannot be read", async () => {
     failImplementation = true
@@ -407,6 +411,30 @@ describe("useSpan first load", () => {
     expect(result.current.acceptance?.skipped).toBe(true)
     expect(result.current.implementation).toBeNull()
     expect(result.current.error).toBe("")
+  })
+
+  it("shows the not-found page when the first read says the run is missing", async () => {
+    intercept = (url) =>
+      spanUrl(url)
+        ? Promise.resolve(
+            new Response(
+              JSON.stringify({ error: "not_found", message: "run s1 is not on this desk" }),
+              { status: 404 }
+            )
+          )
+        : undefined
+    const { result } = renderHook(() => useSpan("s1"))
+    await settle()
+    expect(result.current.problem).toBe("notfound")
+    expect(result.current.span).toBeNull()
+  })
+
+  it("shows the unreachable page when the first read never gets an answer", async () => {
+    intercept = (url) => (spanUrl(url) ? Promise.reject(new TypeError("Failed to fetch")) : undefined)
+    const { result } = renderHook(() => useSpan("s1"))
+    await settle()
+    expect(result.current.problem).toBe("unreachable")
+    expect(result.current.span).toBeNull()
   })
 })
 

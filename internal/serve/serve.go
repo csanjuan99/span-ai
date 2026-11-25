@@ -221,7 +221,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		snap, err := engine.Load(root, id)
 		if err != nil {
-			http.NotFound(w, r)
+			writeErr(w, &requestError{"not_found", "run " + id + " is not on this desk"})
 			return
 		}
 		writeJSON(w, http.StatusOK, snap)

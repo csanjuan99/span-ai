@@ -53,6 +53,24 @@ describe("groupRuns", () => {
     ])
   })
 
+  it("puts a held check failure with the failures", () => {
+    const failed = head({
+      id: "e",
+      verdict: "hold",
+      stage: "prove",
+      reason: "prove failed: 2 tests (exit 1)",
+    })
+    expect(groupRuns([...runs, failed], "all", clock).map((group) => [
+      group.key,
+      group.runs.map((run) => run.id),
+    ])).toEqual([
+      ["waiting", ["a"]],
+      ["failed", ["e", "b"]],
+      ["running", ["c"]],
+      ["done", ["d"]],
+    ])
+  })
+
   it("leaves out an empty group", () => {
     expect(
       groupRuns(runs.slice(2), "all", clock).map((group) => group.key)
@@ -144,6 +162,12 @@ describe("actionOf", () => {
     expect(of({ verdict: "hold", need: "questions" }).label).toBe("Answer")
     expect(of({ verdict: "hold", need: "decision" }).label).toBe("Decide")
     expect(of({ verdict: "hold" }).label).toBe("Review")
+    expect(
+      of({
+        verdict: "hold",
+        reason: "prove failed: 2 tests (exit 1)",
+      }).label
+    ).toBe("Resume")
     expect(of({ verdict: "stop" }).label).toBe("Resume")
     expect(of({ verdict: "running" })).toEqual({
       label: "Open",

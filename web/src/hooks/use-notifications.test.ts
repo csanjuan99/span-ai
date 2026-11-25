@@ -34,6 +34,18 @@ describe("useNotifications", () => {
     expect(result.current.toasts).toEqual([])
   })
 
+  it("does not announce the first list after the desk was still loading", () => {
+    const { result, rerender } = renderHook(
+      ({ runs }: { runs: SpanHead[] | null }) => useNotifications(runs),
+      { initialProps: { runs: null as SpanHead[] | null } }
+    )
+    rerender({ runs: [waiting] })
+    expect(result.current.toasts).toEqual([])
+    rerender({ runs: [waiting, { ...finished, id: "b", issue: "SPAN-2" }] })
+    expect(result.current.toasts).toHaveLength(1)
+    expect(result.current.toasts[0]?.title).toBe("SPAN-2 is done")
+  })
+
   it("raises a toast when a run starts needing me, and keeps it until it is closed", () => {
     const { result, rerender } = renderHook(({ runs }) => useNotifications(runs), { initialProps: { runs: [running] } })
     rerender({ runs: [waiting] })
