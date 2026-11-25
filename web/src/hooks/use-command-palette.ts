@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react"
 
-import { isTyping, nextChord, openPaletteEvent } from "@/lib/help"
+import {
+  getRunContext,
+  isTyping,
+  nextChord,
+  openPaletteEvent,
+  runCommandFor,
+  setRunContext,
+  type RunContext,
+} from "@/lib/help"
 
 /** What the palette and the shortcut sheet need: whether each is open, and a way to change that. */
 export interface CommandPaletteState {
@@ -51,6 +59,18 @@ export function useCommandPalette(
         setSheetOpen(true)
         return
       }
+      if (pending.current !== "g") {
+        const command = runCommandFor(
+          getRunContext(),
+          event.key,
+          event.shiftKey
+        )
+        if (command !== undefined) {
+          event.preventDefault()
+          command.run()
+          return
+        }
+      }
       const step = nextChord(pending.current, event.key.toLowerCase())
       pending.current = step.pending
       if (step.go !== "") {
@@ -67,4 +87,13 @@ export function useCommandPalette(
   }, [])
 
   return { paletteOpen, setPaletteOpen, sheetOpen, setSheetOpen }
+}
+
+/**
+ * Tells the palette what can be done to the run in front: the page calls it with the run's name
+ * and its actions, and they appear first in the palette under "This run", with their keys. Pass
+ * null while the run cannot be acted on. The actions go away when the page does.
+ */
+export function useRunCommands(context: RunContext | null): void {
+  useEffect(() => setRunContext(context), [context])
 }

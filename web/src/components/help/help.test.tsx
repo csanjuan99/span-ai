@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { CommandPalette, HelpPopover } from "@/components/help"
 import { ThemeProvider } from "@/components/theme-provider"
+import { setRunContext } from "@/lib/help"
 
 function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>
@@ -128,5 +129,93 @@ describe("HelpPopover", () => {
     fireEvent.click(trigger)
     fireEvent.keyDown(trigger, { key: "Escape" })
     expect(screen.queryByText("Runs the stage again.")).toBeNull()
+  })
+})
+
+describe("This run", () => {
+  afterEach(() => {
+    setRunContext(null)
+  })
+
+  function give(resume = vi.fn(), stop = vi.fn()) {
+    act(() => {
+      setRunContext({
+        label: "SPAN-482",
+        commands: [
+          {
+            id: "resume",
+            title: "Resume verify",
+            hint: "Runs the stage again.",
+            key: "r",
+            run: resume,
+          },
+          {
+            id: "stop",
+            title: "Stop now",
+            hint: "Ends the run.",
+            key: "s",
+            shift: true,
+            run: stop,
+          },
+        ],
+      })
+    })
+    return { resume, stop }
+  }
+
+  it("lists what the run page offers first, under its name", () => {
+    mount()
+    give()
+    press("k", { metaKey: true })
+    expect(screen.getByText("This run · SPAN-482")).toBeTruthy()
+    const options = screen.getAllByRole("option")
+    expect(options[0]?.textContent).toContain("Resume verify")
+  })
+
+  it("runs an action from its key, and Shift+S only with Shift", () => {
+    mount()
+    const { resume, stop } = give()
+    press("r")
+    expect(resume).toHaveBeenCalledTimes(1)
+    press("s")
+    expect(stop).not.toHaveBeenCalled()
+    press("S", { shiftKey: true })
+    expect(stop).toHaveBeenCalledTimes(1)
+  })
+
+  it("runs an action picked in the palette and closes it", () => {
+    mount()
+    const { resume } = give()
+    press("k", { metaKey: true })
+    fireEvent.click(screen.getByRole("option", { name: /Resume verify/ }))
+    expect(resume).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("dialog", { name: "Command palette" })).toBeNull()
+  })
+
+  it("lists its keys on the shortcut sheet", () => {
+    mount()
+    give()
+    press("?")
+    expect(screen.getByText("On this run · SPAN-482")).toBeTruthy()
+    expect(screen.getByText("Stop now")).toBeTruthy()
+  })
+
+  it("leaves g then d to the Desk, not to a run key", () => {
+    mount()
+    const { resume } = give()
+    press("g")
+    press("d")
+    expect(resume).not.toHaveBeenCalled()
+    expect(screen.getByTestId("where").textContent).toBe("/")
+  })
+
+  it("does nothing once the page clears its context", () => {
+    mount()
+    const { resume } = give()
+    act(() => {
+      setRunContext(null)
+    })
+    press("r")
+    expect(resume).not.toHaveBeenCalled()
   })
 })

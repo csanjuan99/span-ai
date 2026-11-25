@@ -4,8 +4,10 @@ import {
   attentionCount,
   badgeOf,
   defaultPrefs,
+  kindOf,
   loadPrefs,
   notifyEvents,
+  playTone,
   savePrefs,
   titleOf,
   toastCopy,
@@ -13,10 +15,26 @@ import {
 } from "@/lib/notify"
 import { head } from "@/test/heads"
 
-const waiting = head({ id: "a", issue: "SPAN-488", verdict: "hold", stage: "shape", reason: "3 questions" })
-const failed = head({ id: "b", issue: "SPAN-482", verdict: "stop", stage: "verify" })
+const waiting = head({
+  id: "a",
+  issue: "SPAN-488",
+  verdict: "hold",
+  stage: "shape",
+  reason: "3 questions",
+})
+const failed = head({
+  id: "b",
+  issue: "SPAN-482",
+  verdict: "stop",
+  stage: "verify",
+})
 const running = head({ id: "c", issue: "SPAN-495", verdict: "running" })
-const done = head({ id: "d", issue: "SPAN-468", verdict: "done", stage: "note" })
+const done = head({
+  id: "d",
+  issue: "SPAN-468",
+  verdict: "done",
+  stage: "note",
+})
 
 describe("notifyEvents", () => {
   it("says nothing on the first read, so opening the desk does not announce the backlog", () => {
@@ -24,7 +42,12 @@ describe("notifyEvents", () => {
   })
 
   it("announces a run that moved into waiting, failed or done", () => {
-    const before = [{ ...waiting, verdict: "running" }, { ...failed, verdict: "running" }, { ...running }, { ...done, verdict: "running" }]
+    const before = [
+      { ...waiting, verdict: "running" },
+      { ...failed, verdict: "running" },
+      { ...running },
+      { ...done, verdict: "running" },
+    ]
     const events = notifyEvents(before, [waiting, failed, running, done])
     expect(events.map((event) => [event.kind, event.run.id])).toEqual([
       ["needs", "a"],
@@ -34,15 +57,21 @@ describe("notifyEvents", () => {
   })
 
   it("does not repeat a run that stays where it was", () => {
-    expect(notifyEvents([waiting, failed, done], [waiting, failed, done])).toEqual([])
+    expect(
+      notifyEvents([waiting, failed, done], [waiting, failed, done])
+    ).toEqual([])
   })
 
   it("announces a run that appears already waiting", () => {
-    expect(notifyEvents([running], [running, waiting]).map((event) => event.kind)).toEqual(["needs"])
+    expect(
+      notifyEvents([running], [running, waiting]).map((event) => event.kind)
+    ).toEqual(["needs"])
   })
 
   it("does not announce a run that left a group for running", () => {
-    expect(notifyEvents([waiting], [{ ...waiting, verdict: "running" }])).toEqual([])
+    expect(
+      notifyEvents([waiting], [{ ...waiting, verdict: "running" }])
+    ).toEqual([])
   })
 })
 
@@ -57,8 +86,12 @@ describe("attentionCount, badgeOf and titleOf", () => {
   })
 
   it("shows how many need me and names the first", () => {
-    expect(badgeOf([waiting, { ...waiting, id: "z", issue: "SPAN-1" }], null)).toBe("2")
-    expect(titleOf([waiting, { ...waiting, id: "z", issue: "SPAN-1" }], null)).toBe("(2) SPAN-488 needs you · Span")
+    expect(
+      badgeOf([waiting, { ...waiting, id: "z", issue: "SPAN-1" }], null)
+    ).toBe("2")
+    expect(
+      titleOf([waiting, { ...waiting, id: "z", issue: "SPAN-1" }], null)
+    ).toBe("(2) SPAN-488 needs you · Span")
   })
 
   it("shows ! for a failure when no run waits", () => {
@@ -73,8 +106,12 @@ describe("attentionCount, badgeOf and titleOf", () => {
   })
 
   it("names a run by its title or id when it has no story key", () => {
-    expect(titleOf([head({ id: "x", verdict: "hold", title: "Add healthz" })], null)).toBe("(1) Add healthz needs you · Span")
-    expect(titleOf([head({ id: "x", verdict: "hold" })], null)).toBe("(1) x needs you · Span")
+    expect(
+      titleOf([head({ id: "x", verdict: "hold", title: "Add healthz" })], null)
+    ).toBe("(1) Add healthz needs you · Span")
+    expect(titleOf([head({ id: "x", verdict: "hold" })], null)).toBe(
+      "(1) x needs you · Span"
+    )
   })
 })
 
@@ -85,21 +122,39 @@ describe("preferences", () => {
   it("starts with toasts and the tab on, system off, and only in the background", () => {
     const prefs = loadPrefs()
     expect(prefs).toEqual(defaultPrefs)
-    expect(prefs.events.needs).toEqual({ toast: true, tab: true, system: false })
+    expect(prefs.events.needs).toEqual({
+      toast: true,
+      tab: true,
+      system: false,
+    })
     expect(prefs.background).toBe(true)
   })
 
   it("saves and reads back", () => {
-    const next = { ...defaultPrefs, background: false, events: { ...defaultPrefs.events, finished: { toast: false, tab: true, system: true } } }
+    const next = {
+      ...defaultPrefs,
+      background: false,
+      events: {
+        ...defaultPrefs.events,
+        finished: { toast: false, tab: true, system: true },
+      },
+    }
     expect(savePrefs(next)).toBe(true)
     expect(loadPrefs()).toEqual(next)
   })
 
   it("keeps the defaults for what a damaged value lacks", () => {
-    localStorage.setItem("span:notify", JSON.stringify({ background: false, events: { needs: { toast: false } } }))
+    localStorage.setItem(
+      "span:notify",
+      JSON.stringify({ background: false, events: { needs: { toast: false } } })
+    )
     const prefs = loadPrefs()
     expect(prefs.background).toBe(false)
-    expect(prefs.events.needs).toEqual({ toast: false, tab: true, system: false })
+    expect(prefs.events.needs).toEqual({
+      toast: false,
+      tab: true,
+      system: false,
+    })
     expect(prefs.events.failed).toEqual(defaultPrefs.events.failed)
     localStorage.setItem("span:notify", "{not json")
     expect(loadPrefs()).toEqual(defaultPrefs)
@@ -115,24 +170,114 @@ describe("preferences", () => {
   it("holds a toast back while the tab is in front, when the person asked for that", () => {
     expect(wantsToast(defaultPrefs, "needs", true)).toBe(false)
     expect(wantsToast(defaultPrefs, "needs", false)).toBe(true)
-    expect(wantsToast({ ...defaultPrefs, background: false }, "needs", true)).toBe(true)
-    const off = { ...defaultPrefs, events: { ...defaultPrefs.events, needs: { toast: false, tab: true, system: false } } }
+    expect(
+      wantsToast({ ...defaultPrefs, background: false }, "needs", true)
+    ).toBe(true)
+    const off = {
+      ...defaultPrefs,
+      events: {
+        ...defaultPrefs.events,
+        needs: { toast: false, tab: true, system: false },
+      },
+    }
     expect(wantsToast(off, "needs", false)).toBe(false)
   })
 })
 
 describe("toastCopy", () => {
   it("says who needs me and where", () => {
-    expect(toastCopy({ kind: "needs", run: waiting })).toEqual({ title: "SPAN-488 needs you", detail: "shape · 3 questions", action: "Review" })
+    expect(toastCopy({ kind: "needs", run: waiting })).toEqual({
+      title: "SPAN-488 needs you",
+      detail: "shape · 3 questions",
+      action: "Review",
+    })
   })
-  it("says a stopped run failed, with where it stopped", () => {
-    expect(toastCopy({ kind: "failed", run: failed })).toEqual({ title: "SPAN-482 failed", detail: "verify · failed", action: "Open" })
+  it("says a check failed, with where it stopped", () => {
+    expect(toastCopy({ kind: "failed", run: failed })).toEqual({
+      title: "SPAN-482 check failed",
+      detail: "verify · failed",
+      action: "Open",
+    })
   })
   it("names a finished run by what it was about", () => {
-    expect(toastCopy({ kind: "finished", run: { ...done, title: "Validate codes" } })).toEqual({
+    expect(
+      toastCopy({ kind: "finished", run: { ...done, title: "Validate codes" } })
+    ).toEqual({
       title: "SPAN-468 is done",
       detail: "Validate codes",
       action: "Summary",
     })
+  })
+})
+
+describe("kindOf", () => {
+  it("names an agent that cannot work, apart from a run that waits for a person", () => {
+    const blocked = head({
+      id: "k",
+      verdict: "hold",
+      reason:
+        "agent quota exhausted (claude): limit. Resume after the limit resets.",
+    })
+    expect(kindOf(blocked)).toBe("blocked")
+    expect(
+      kindOf(head({ id: "k", verdict: "hold", reason: "needs an answer" }))
+    ).toBe("needs")
+    expect(
+      kindOf(
+        head({
+          id: "k",
+          verdict: "hold",
+          reason: "agent credentials missing (codex): x",
+        })
+      )
+    ).toBe("blocked")
+  })
+  it("names a stop apart from a failing check", () => {
+    expect(
+      kindOf(
+        head({ id: "k", verdict: "stop", reason: "the run stopped: killed" })
+      )
+    ).toBe("stopped")
+    expect(
+      kindOf(
+        head({
+          id: "k",
+          verdict: "stop",
+          reason: "stopped by a decision: Abandon",
+        })
+      )
+    ).toBe("stopped")
+    expect(
+      kindOf(head({ id: "k", verdict: "stop", reason: "go test failed" }))
+    ).toBe("failed")
+  })
+  it("says nothing about a run that is only running", () => {
+    expect(kindOf(head({ id: "k", verdict: "running" }))).toBeUndefined()
+  })
+  it("announces a run that just became blocked, and its toast says so", () => {
+    const before = [head({ id: "z", issue: "SPAN-9", verdict: "running" })]
+    const after = [
+      head({
+        id: "z",
+        issue: "SPAN-9",
+        verdict: "hold",
+        stage: "build",
+        reason: "agent quota exhausted (claude): x",
+      }),
+    ]
+    const [event] = notifyEvents(before, after)
+    expect(event?.kind).toBe("blocked")
+    expect(toastCopy(event!).title).toBe("SPAN-9 agent blocked")
+  })
+})
+
+describe("sound", () => {
+  it("is off until asked for, and survives a reload", () => {
+    expect(loadPrefs().sound).toBe(false)
+    savePrefs({ ...defaultPrefs, sound: true })
+    expect(loadPrefs().sound).toBe(true)
+  })
+  it("stays quiet where the browser has no audio", () => {
+    expect(() => playTone()).not.toThrow()
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { summaryOf, toMarkdown } from "@/lib/summary"
+import { durationText, summaryOf, toMarkdown } from "@/lib/summary"
 import type { Cursor, Statement } from "@/lib/types"
 
 const cursor: Cursor = {
@@ -134,5 +134,25 @@ describe("toMarkdown", () => {
     const text = toMarkdown(summary({ implementation: null }))
     expect(text).toContain("Not assessed")
     expect(text).not.toContain("## Files")
+  })
+})
+
+describe("share parts", () => {
+  it("leaves out the parts that were not picked", () => {
+    const text = toMarkdown(summary(), new Set(["tests"] as const))
+    expect(text).toContain("## Tests")
+    expect(text).not.toContain("## Files")
+    expect(text).not.toContain("## Risks")
+    expect(text).not.toContain("## Links")
+  })
+})
+
+describe("durationText", () => {
+  it("says nothing when unknown, then seconds, minutes, hours", () => {
+    expect(durationText(0)).toBe("")
+    expect(durationText(30_000)).toBe("30 s")
+    expect(durationText(12 * 60_000)).toBe("12 min")
+    expect(durationText(93 * 60_000)).toBe("1 h 33 min")
+    expect(durationText(120 * 60_000)).toBe("2 h")
   })
 })

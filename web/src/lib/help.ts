@@ -3,6 +3,7 @@ export type CommandAction =
   | { type: "go"; path: string }
   | { type: "theme"; value: "system" | "light" | "dark" }
   | { type: "sheet" }
+  | { type: "run"; run: () => void }
 
 /** One line of the command palette. */
 export interface PaletteCommand {
@@ -143,3 +144,82 @@ export function nextChord(
 
 /** What the top bar sends to open the command palette from a click. */
 export const openPaletteEvent = "span:open-palette"
+
+/** One action a run page offers the palette: its words, its key, and what it does. */
+export interface RunCommand {
+  id: string
+  title: string
+  hint: string
+  /** The one key that does it while no field has focus, in lower case: "r", "n", "p"... */
+  key: string
+  /** True when the key needs Shift: Shift+S stops the run, S alone does nothing. */
+  shift?: boolean
+  run: () => void
+}
+
+/** What the page in front tells the palette about itself: whose run it is and what can be done to it. */
+export interface RunContext {
+  /** The run's name, for the group title: "This run · SPAN-482". */
+  label: string
+  commands: RunCommand[]
+}
+
+let context: RunContext | null = null
+const listeners = new Set<() => void>()
+
+/** Makes `next` the page's run context. Pass null to clear it. Returns a function that clears it if still current. */
+export function setRunContext(next: RunContext | null): () => void {
+  context = next
+  listeners.forEach((listener) => listener())
+  return () => {
+    if (context === next) {
+      context = null
+      listeners.forEach((listener) => listener())
+    }
+  }
+}
+
+/** The run context in front, or null when the page is not a run. */
+export function getRunContext(): RunContext | null {
+  return context
+}
+
+/** Calls `listener` when the run context changes. Returns the way to stop. */
+export function subscribeRunContext(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** The keys that run a command, as key caps: ["⇧", "S"] for Shift+S. */
+export function runKeys(command: RunCommand): string[] {
+  return [...(command.shift === true ? ["⇧"] : []), command.key.toUpperCase()]
+}
+
+/** The run command a key press asks for, if the context has one for it. */
+export function runCommandFor(
+  ctx: RunContext | null,
+  key: string,
+  shift: boolean
+): RunCommand | undefined {
+  return ctx?.commands.find(
+    (command) =>
+      command.key === key.toLowerCase() && (command.shift === true) === shift
+  )
+}
+
+/** The palette's own lines for a run context, first in the list. */
+export function runPaletteCommands(ctx: RunContext | null): PaletteCommand[] {
+  if (ctx === null) {
+    return []
+  }
+  return ctx.commands.map((command) => ({
+    id: `run-${command.id}`,
+    group: `This run · ${ctx.label}`,
+    title: command.title,
+    hint: command.hint,
+    action: { type: "run", run: command.run },
+    keys: runKeys(command),
+  }))
+}

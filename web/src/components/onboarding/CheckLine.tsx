@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils"
 export type CheckTone = "pass" | "hold" | "fail"
 
 const marks: Record<CheckTone, { glyph: string; className: string }> = {
-  pass: { glyph: "+", className: "bg-pass-soft text-pass" },
-  hold: { glyph: "!", className: "bg-hold-soft text-hold" },
-  fail: { glyph: "×", className: "bg-fail-soft text-fail" },
+  pass: { glyph: "+", className: "text-pass" },
+  hold: { glyph: "!", className: "text-hold" },
+  fail: { glyph: "×", className: "text-fail" },
 }
 
 /** One result of a check, with the exact fix beneath it when there is one. */
@@ -23,23 +23,16 @@ export function CheckLine({
 }) {
   const mark = marks[tone]
   return (
-    <li className="flex items-start gap-3 text-sm">
+    <li className="grid grid-cols-[16px_minmax(0,1fr)] gap-2 py-1 text-[13px]">
       <span
         aria-hidden="true"
-        className={cn(
-          "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full font-mono text-xs font-semibold",
-          mark.className
-        )}
+        className={cn("font-mono font-semibold", mark.className)}
       >
         {mark.glyph}
       </span>
-      <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="min-w-0">
         <span className="text-pretty">{children}</span>
-        {fix !== undefined ? (
-          <div className="flex flex-col gap-1.5 text-muted-foreground">
-            {fix}
-          </div>
-        ) : null}
+        {fix}
       </div>
     </li>
   )

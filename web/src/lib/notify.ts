@@ -1,9 +1,9 @@
-import { groupOf, pillOf, type GroupKey } from "@/lib/desk"
+import { groupOf, pillOf } from "@/lib/desk"
 import { isRecord } from "@/lib/guards"
 import type { SpanHead } from "@/lib/types"
 
 /** What a person is told about: a run needs them, a check failed, or a run finished. */
-export type NotifyKind = "needs" | "failed" | "finished"
+export type NotifyKind = "needs" | "failed" | "finished" | "blocked" | "stopped"
 
 /** One thing that just happened to one run. */
 export interface NotifyEvent {
@@ -22,42 +22,82 @@ export interface NotifyPrefs {
   events: Record<NotifyKind, Channels>
   /** Hold toasts back while this tab is in front. */
   background: boolean
+  /** A soft tone with each toast. */
+  sound: boolean
 }
 
 /** The kinds in the order a person reads them. */
-export const notifyKinds: NotifyKind[] = ["needs", "failed", "finished"]
+export const notifyKinds: NotifyKind[] = [
+  "needs",
+  "failed",
+  "finished",
+  "blocked",
+  "stopped",
+]
 
 /** What each kind is called on screen, with the words that explain it. */
 export const kindCopy: Record<NotifyKind, { label: string; hint: string }> = {
-  needs: { label: "A run needs me", hint: "question, decision, approval or conflict" },
-  failed: { label: "A run failed or stopped", hint: "a check failed, or the run stopped" },
+  needs: {
+    label: "A run needs me",
+    hint: "question, decision, approval or conflict",
+  },
+  failed: {
+    label: "A check failed",
+    hint: "verify or qa ended with a failing exit",
+  },
   finished: { label: "A run finished", hint: "merged and sealed" },
+  blocked: { label: "Agent blocked", hint: "login expired or quota used up" },
+  stopped: { label: "A run stopped", hint: "by you or by Span" },
 }
 
-const shown: Partial<Record<GroupKey, NotifyKind>> = { waiting: "needs", failed: "failed", done: "finished" }
+/**
+ * What a run is, as a person would name it. The engine words a stop and an agent block in its
+ * reason, so those two are read from the start of it: "agent credentials missing", "agent quota
+ * exhausted", "the run stopped", "stopped by a decision". Anything else keeps its group's kind.
+ */
+export function kindOf(run: SpanHead): NotifyKind | undefined {
+  const group = groupOf(run)
+  const reason = run.reason.trim().toLowerCase()
+  if (group === "waiting") {
+    return /^agent (credentials missing|quota exhausted)/.test(reason)
+      ? "blocked"
+      : "needs"
+  }
+  if (group === "failed") {
+    return /^(the run stopped|stopped by)/.test(reason) ? "stopped" : "failed"
+  }
+  return group === "done" ? "finished" : undefined
+}
 
 /**
- * The runs that moved into waiting, failed or done since the last read. The first read has
- * nothing to compare with, so it announces nothing: opening the desk is not news.
+ * The runs that moved into waiting, failed, stopped, blocked or done since the last read. The
+ * first read has nothing to compare with, so it announces nothing: opening the desk is not news.
  */
-export function notifyEvents(previous: SpanHead[] | null, next: SpanHead[]): NotifyEvent[] {
+export function notifyEvents(
+  previous: SpanHead[] | null,
+  next: SpanHead[]
+): NotifyEvent[] {
   if (previous === null) {
     return []
   }
-  const before = new Map(previous.map((run) => [run.id, groupOf(run)]))
+  const before = new Map(previous.map((run) => [run.id, kindOf(run)]))
   const events: NotifyEvent[] = []
   for (const run of next) {
-    const kind = shown[groupOf(run)]
-    if (kind !== undefined && before.get(run.id) !== groupOf(run)) {
+    const kind = kindOf(run)
+    if (kind !== undefined && before.get(run.id) !== kind) {
       events.push({ kind, run })
     }
   }
-  return events.sort((a, b) => notifyKinds.indexOf(a.kind) - notifyKinds.indexOf(b.kind))
+  return events.sort(
+    (a, b) => notifyKinds.indexOf(a.kind) - notifyKinds.indexOf(b.kind)
+  )
 }
 
 /** How many runs need a person: the ones waiting and the ones that failed. */
 export function attentionCount(runs: SpanHead[]): number {
-  return runs.filter((run) => groupOf(run) === "waiting" || groupOf(run) === "failed").length
+  return runs.filter(
+    (run) => groupOf(run) === "waiting" || groupOf(run) === "failed"
+  ).length
 }
 
 function nameOf(run: SpanHead): string {
@@ -93,7 +133,9 @@ export function titleOf(runs: SpanHead[], finished: SpanHead | null): string {
   if (failed !== undefined) {
     return `(${mark}) ${nameOf(failed)} failed · Span`
   }
-  return finished === null ? "Span" : `(${mark}) ${nameOf(finished)} done · Span`
+  return finished === null
+    ? "Span"
+    : `(${mark}) ${nameOf(finished)} done · Span`
 }
 
 const storageKey = "span:notify"
@@ -104,8 +146,11 @@ export const defaultPrefs: NotifyPrefs = {
     needs: { toast: true, tab: true, system: false },
     failed: { toast: true, tab: true, system: false },
     finished: { toast: true, tab: true, system: false },
+    blocked: { toast: true, tab: true, system: false },
+    stopped: { toast: false, tab: true, system: false },
   },
   background: true,
+  sound: false,
 }
 
 function channelsOf(value: unknown, fallback: Channels): Channels {
@@ -141,8 +186,14 @@ export function loadPrefs(): NotifyPrefs {
       needs: channelsOf(events.needs, defaultPrefs.events.needs),
       failed: channelsOf(events.failed, defaultPrefs.events.failed),
       finished: channelsOf(events.finished, defaultPrefs.events.finished),
+      blocked: channelsOf(events.blocked, defaultPrefs.events.blocked),
+      stopped: channelsOf(events.stopped, defaultPrefs.events.stopped),
     },
-    background: typeof saved.background === "boolean" ? saved.background : defaultPrefs.background,
+    background:
+      typeof saved.background === "boolean"
+        ? saved.background
+        : defaultPrefs.background,
+    sound: typeof saved.sound === "boolean" ? saved.sound : defaultPrefs.sound,
   }
 }
 
@@ -161,20 +212,54 @@ export function savePrefs(prefs: NotifyPrefs): boolean {
 }
 
 /** Whether a toast should show now: this kind has toasts on, and the tab is not in front when asked. */
-export function wantsToast(prefs: NotifyPrefs, kind: NotifyKind, tabInFront: boolean): boolean {
+export function wantsToast(
+  prefs: NotifyPrefs,
+  kind: NotifyKind,
+  tabInFront: boolean
+): boolean {
   return prefs.events[kind].toast && !(prefs.background && tabInFront)
 }
 
 /** What a toast says: who, what happened, and the word on its button. */
-export function toastCopy(event: NotifyEvent): { title: string; detail: string; action: string } {
+export function toastCopy(event: NotifyEvent): {
+  title: string
+  detail: string
+  action: string
+} {
   const name = nameOf(event.run)
   if (event.kind === "needs") {
-    return { title: `${name} needs you`, detail: pillOf(event.run), action: "Review" }
+    return {
+      title: `${name} needs you`,
+      detail: pillOf(event.run),
+      action: "Review",
+    }
   }
   if (event.kind === "failed") {
-    return { title: `${name} failed`, detail: pillOf(event.run), action: "Open" }
+    return {
+      title: `${name} check failed`,
+      detail: pillOf(event.run),
+      action: "Open",
+    }
   }
-  return { title: `${name} is done`, detail: event.run.title !== "" ? event.run.title : "merged and sealed", action: "Summary" }
+  if (event.kind === "blocked") {
+    return {
+      title: `${name} agent blocked`,
+      detail: pillOf(event.run),
+      action: "Open",
+    }
+  }
+  if (event.kind === "stopped") {
+    return {
+      title: `${name} stopped`,
+      detail: pillOf(event.run),
+      action: "Open",
+    }
+  }
+  return {
+    title: `${name} is done`,
+    detail: event.run.title !== "" ? event.run.title : "merged and sealed",
+    action: "Summary",
+  }
 }
 
 const iconSize = 64
@@ -210,4 +295,37 @@ export function faviconWith(mark: string): string {
     ctx.fillText(mark, 46, 47)
   }
   return canvas.toDataURL("image/png")
+}
+
+/**
+ * A soft two-note tone, drawn with the browser's own audio so nothing is downloaded. It does
+ * nothing when the browser has no audio or refuses to start it before a click.
+ */
+export function playTone(): void {
+  const Context =
+    window.AudioContext ??
+    (window as unknown as { webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext
+  if (Context === undefined) {
+    return
+  }
+  try {
+    const ctx = new Context()
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5)
+    gain.connect(ctx.destination)
+    for (const [index, hz] of [660, 880].entries()) {
+      const osc = ctx.createOscillator()
+      osc.type = "sine"
+      osc.frequency.value = hz
+      osc.connect(gain)
+      osc.start(ctx.currentTime + index * 0.16)
+      osc.stop(ctx.currentTime + index * 0.16 + 0.2)
+    }
+    window.setTimeout(() => void ctx.close(), 900)
+  } catch {
+    // Audio is a courtesy: a refusal changes nothing a person needs.
+  }
 }

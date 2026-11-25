@@ -1,7 +1,14 @@
 "use client"
 
 import { KeyCaps } from "@/components/help/KeyCaps"
-import { shortcuts } from "@/lib/help"
+import { useSyncExternalStore } from "react"
+
+import {
+  getRunContext,
+  runKeys,
+  shortcuts,
+  subscribeRunContext,
+} from "@/lib/help"
 
 /** Every key the page answers. Opens on ? and closes on Escape or a click outside. */
 export function ShortcutSheet({
@@ -11,9 +18,23 @@ export function ShortcutSheet({
   open: boolean
   onClose: () => void
 }) {
+  const run = useSyncExternalStore(subscribeRunContext, getRunContext)
   if (!open) {
     return null
   }
+  const groups =
+    run === null
+      ? shortcuts
+      : [
+          ...shortcuts,
+          {
+            group: `On this run · ${run.label}`,
+            items: run.commands.map((command) => ({
+              label: command.title,
+              keys: runKeys(command),
+            })),
+          },
+        ]
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-background/80 p-4 pt-[12vh]"
@@ -36,7 +57,7 @@ export function ShortcutSheet({
             Close
           </button>
         </div>
-        {shortcuts.map((group) => (
+        {groups.map((group) => (
           <div key={group.group} className="flex flex-col gap-2">
             <h3 className="text-xs tracking-wide text-muted-foreground uppercase">
               {group.group}

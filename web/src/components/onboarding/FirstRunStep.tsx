@@ -1,78 +1,167 @@
 "use client"
 
-import { Button } from "@/components/ui/button"
-import { sampleBrief } from "@/components/desk/EmptyDesk"
-import { Card, StepHead } from "@/components/onboarding/Frame"
-import { DryLook } from "@/components/onboarding/DryLook"
+import { useState } from "react"
 
-/** Step 3: a sample brief, a look at what each stage does, and the Start button. */
+import { sampleBrief } from "@/components/desk/EmptyDesk"
+import { DryLook } from "@/components/onboarding/DryLook"
+import { Panel } from "@/components/onboarding/Frame"
+import { Pill } from "@/components/onboarding/Pill"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { saveAgent, startRun } from "@/lib/api"
+import { reasonText } from "@/lib/guards"
+
+const row =
+  "grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2 first:border-t-0"
+
+/** Step 3: a sample brief, a look at what each stage does, and the Start button that starts it. */
 export function FirstRunStep({
   folder,
-  onStart,
+  agent,
+  onStarted,
   onBack,
   onSkip,
 }: {
   folder: string
-  onStart: () => void
+  agent: string
+  onStarted: (id: string) => void
   onBack: () => void
   onSkip: () => void
 }) {
+  const [title, setTitle] = useState(sampleBrief.title)
+  const [brief, setBrief] = useState(sampleBrief.detail)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState("")
+
+  async function start() {
+    setBusy(true)
+    setNote("")
+    try {
+      if (agent !== "") {
+        await saveAgent(folder, agent)
+      }
+      const form = new FormData()
+      form.set("workspace", folder)
+      form.set("story", `${title.trim()}\n\n${brief.trim()}`)
+      form.set("kind", "infer")
+      const started = await startRun(form)
+      if (typeof started === "string") {
+        setNote(started)
+        return
+      }
+      onStarted(started.id)
+    } catch (reason: unknown) {
+      setNote(reasonText(reason, "the run could not be started"))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-6">
-      <StepHead
-        step="Step 3 of 3"
-        title="Your first run"
-        lead="Start with a small brief we filled in. Look at what each stage will do first, then press Start."
-      />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-        <div className="flex flex-col gap-4">
-          <Card title="Sample brief" note="Prefilled">
-            <p className="font-medium">{sampleBrief.title}</p>
-            <textarea
-              aria-label="Brief"
-              readOnly
-              rows={4}
-              value={sampleBrief.detail}
-              className="rounded-lg border border-border bg-background px-3 py-2 text-sm"
-            />
-            {folder !== "" ? (
-              <p className="text-xs text-muted-foreground">
-                Runs in {folder} on a new branch.
-              </p>
-            ) : null}
-          </Card>
-          <Card title="When you press Start">
-            <dl className="flex flex-col gap-2 text-sm">
-              <div>
-                <dt className="font-medium">Changes</dt>
-                <dd className="text-muted-foreground">
-                  Creates a run branch. No file changes until build.
-                </dd>
+    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 sm:gap-8">
+      <div className="flex flex-col gap-2">
+        <Pill tone="acc">Step 3 of 3</Pill>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Your first run
+        </h1>
+        <p className="text-[13px] text-muted-foreground">
+          Start with a small brief we filled in. Look at what each stage will do
+          first, then press Start.
+        </p>
+      </div>
+      <div className="grid items-start gap-6 lg:grid-cols-[400px_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <Panel
+            title="Sample brief"
+            badge={<Pill tone="mut">Prefilled</Pill>}
+            lead="Change it if you like. It is the brief the first run starts from."
+          >
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium">Title</span>
+              <Input
+                className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium">What should change</span>
+              <Textarea
+                rows={4}
+                aria-label="Brief"
+                className="rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                value={brief}
+                onChange={(event) => setBrief(event.target.value)}
+              />
+            </label>
+            <p className="text-[13px] text-muted-foreground">
+              Runs in <span className="font-mono text-xs">{folder}</span> on a
+              new branch named <span className="font-mono text-xs">span/…</span>
+              .
+            </p>
+          </Panel>
+          <section className="flex flex-col gap-4 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:px-5">
+            <div className="rounded-[10px] bg-muted px-3.5 py-3">
+              <div className="mb-1 text-sm font-semibold">
+                When you press Start
               </div>
-              <div>
-                <dt className="font-medium">Kept</dt>
-                <dd className="text-muted-foreground">
+              <div className={row}>
+                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+                  Changes
+                </div>
+                <div className="text-[13px]">
+                  Creates a branch for the run. No file changes until build.
+                  {agent !== ""
+                    ? ` Saves ${agent} as the project's agent in span.yaml.`
+                    : ""}
+                </div>
+              </div>
+              <div className={row}>
+                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+                  Where
+                </div>
+                <div className="font-mono text-xs break-all">{folder}</div>
+              </div>
+              <div className={row}>
+                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+                  Kept
+                </div>
+                <div className="text-[13px]">
                   Everything you have now. Nothing is overwritten.
-                </dd>
+                </div>
               </div>
-              <div>
-                <dt className="font-medium">Next</dt>
-                <dd className="text-muted-foreground">
+              <div className={row}>
+                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+                  Next
+                </div>
+                <div className="text-[13px]">
                   Intake reads the brief. If something is unclear, the run holds
                   and asks you.
-                </dd>
+                </div>
               </div>
-            </dl>
-          </Card>
-          <Button onClick={onStart}>Start the first run</Button>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={onBack}>
-              Back
+            </div>
+            {note !== "" ? (
+              <p role="alert" className="text-sm text-pretty text-destructive">
+                {note}
+              </p>
+            ) : null}
+            <Button
+              className="h-10 w-full"
+              disabled={busy || title.trim() === "" || folder.trim() === ""}
+              onClick={() => void start()}
+            >
+              Start the first run
             </Button>
-            <Button variant="ghost" onClick={onSkip}>
-              Skip for now
-            </Button>
-          </div>
+            <div className="flex flex-wrap gap-3">
+              <Button variant="ghost" onClick={onBack}>
+                Back
+              </Button>
+              <Button variant="ghost" onClick={onSkip}>
+                Skip for now
+              </Button>
+            </div>
+          </section>
         </div>
         <DryLook />
       </div>

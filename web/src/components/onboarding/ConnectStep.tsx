@@ -2,94 +2,52 @@
 
 import { useEffect, useState } from "react"
 
-import { Button } from "@/components/ui/button"
+import { AgentPanel } from "@/components/onboarding/AgentPanel"
 import { CheckLine } from "@/components/onboarding/CheckLine"
-import { Card, StepHead } from "@/components/onboarding/Frame"
-import { agentChoice, branchChoice, getJSON } from "@/lib/api"
-import { reasonText } from "@/lib/guards"
-import { readJiraSession } from "@/lib/jira-session"
+import { FolderPanel } from "@/components/onboarding/FolderPanel"
+import { Panel } from "@/components/onboarding/Frame"
+import { JiraPanel } from "@/components/onboarding/JiraPanel"
+import { Pill } from "@/components/onboarding/Pill"
+import {
+  useFolderProbe,
+  usable,
+} from "@/components/onboarding/use-folder-probe"
+import { Button } from "@/components/ui/button"
+import { agentChoice, getJSON } from "@/lib/api"
+import { jiraSessionOf, noSession, readJiraSession } from "@/lib/jira-session"
+import { savedAgo } from "@/lib/onboarding"
 import type { AgentState } from "@/lib/types"
-
-type Folder =
-  | { state: "idle" }
-  | { state: "checking" }
-  | { state: "ok"; branches: number; base: string }
-  | { state: "bad"; reason: string }
 
 /** Step 2: the folder, the agent CLIs and Jira, each checked against the running server. */
 export function ConnectStep({
   folder,
+  agent,
+  savedAt,
   onFolder,
+  onAgent,
   onNext,
   onBack,
-  onSkip,
 }: {
   folder: string
+  agent: string
+  savedAt: number
   onFolder: (value: string) => void
+  onAgent: (id: string) => void
   onNext: () => void
   onBack: () => void
-  onSkip: () => void
 }) {
-  const [result, setFound] = useState<Folder>({ state: "idle" })
-  const [agents, setAgents] = useState<AgentState[] | null>(null)
-  const [jira, setJira] = useState("")
   const [again, setAgain] = useState(0)
-
-  useEffect(() => {
-    const path = folder.trim()
-    if (path === "") {
-      return
-    }
-    let live = true
-    const timer = setTimeout(() => {
-      getJSON(`/branches?path=${encodeURIComponent(path)}`)
-        .then((body) => {
-          const choice = branchChoice(body)
-          if (live) {
-            setFound({
-              state: "ok",
-              branches: choice.branches.length,
-              base: choice.defaultBase,
-            })
-          }
-        })
-        .catch((reason: unknown) => {
-          if (live) {
-            setFound({
-              state: "bad",
-              reason: reasonText(reason, "the folder could not be read"),
-            })
-          }
-        })
-      readJiraSession(path)
-        .then((body) => {
-          const session =
-            typeof body === "object" && body !== null
-              ? (body as Record<string, unknown>)
-              : {}
-          if (live) {
-            setJira(
-              session.configured === true
-                ? `Connected${typeof session.baseUrl === "string" ? ` to ${session.baseUrl}` : ""}.`
-                : ""
-            )
-          }
-        })
-        .catch(() => {
-          if (live) {
-            setJira("")
-          }
-        })
-    }, 250)
-    return () => {
-      live = false
-      clearTimeout(timer)
-    }
-  }, [folder, again])
+  const [agents, setAgents] = useState<AgentState[] | null>(null)
+  const [session, setSession] = useState(noSession)
+  const [jiraSkipped, setJiraSkipped] = useState(false)
+  // Whether the person arrived with a folder from an earlier visit.
+  const [returning] = useState(folder.trim() !== "" && savedAt > 0)
+  const probe = useFolderProbe(folder, again)
+  const path = folder.trim()
 
   useEffect(() => {
     let live = true
-    getJSON(`/agent?path=${encodeURIComponent(folder.trim())}`)
+    getJSON(`/agent?path=${encodeURIComponent(path)}`)
       .then((body) => {
         if (live) {
           setAgents(agentChoice(body).agents)
@@ -103,146 +61,131 @@ export function ConnectStep({
     return () => {
       live = false
     }
-  }, [folder, again])
+  }, [path, again])
 
-  const found: Folder = folder.trim() === "" ? { state: "idle" } : result
-  const anyReady = (agents ?? []).some((agent) => agent.ready)
-  const canContinue = found.state === "ok" && anyReady
+  useEffect(() => {
+    if (path === "") {
+      return
+    }
+    let live = true
+    readJiraSession(path)
+      .then((body) => {
+        if (live) {
+          setSession(jiraSessionOf(body))
+        }
+      })
+      .catch(() => {
+        if (live) {
+          setSession(noSession)
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [path, again])
+
+  const firstReady = (agents ?? []).find((item) => item.ready)?.id ?? ""
+  const picked = (agents ?? []).some((item) => item.ready && item.id === agent)
+    ? agent
+    : firstReady
+  const canContinue = usable(probe) && picked !== ""
 
   return (
-    <div className="flex flex-col gap-6">
-      <StepHead
-        step="Step 2 of 3"
-        title="Connect your project"
-        lead="Each check runs as you type. A problem shows what is wrong and the exact fix."
-      />
-      <Card
-        title="Project folder"
-        note={found.state === "ok" ? "Ready" : undefined}
-      >
-        <p className="text-sm text-muted-foreground">
-          The folder with your code. Span creates branches and runs your checks
-          here.
-        </p>
-        <input
-          aria-label="Project folder"
-          value={folder}
-          onChange={(event) => onFolder(event.target.value)}
-          placeholder="/path/to/your/project"
-          className="rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm"
-        />
-        <ul className="flex flex-col gap-2">
-          {found.state === "ok" ? (
-            <CheckLine tone="pass">
-              Git repository. {found.branches} branches, new runs start from{" "}
-              {found.base}.
-            </CheckLine>
-          ) : null}
-          {found.state === "bad" ? (
-            <CheckLine
-              tone="fail"
-              fix={
-                <p className="text-sm">
-                  Point this at the root of a git repository, then it checks
-                  again.
-                </p>
-              }
-            >
-              {found.reason}
-            </CheckLine>
-          ) : null}
-        </ul>
-      </Card>
-      <Card
-        title="Agent CLI"
-        note={
-          agents === null
-            ? undefined
-            : `${(agents ?? []).filter((agent) => agent.ready).length} ready`
-        }
-      >
-        <p className="text-sm text-muted-foreground">
-          Span drives one of these to do the work. At least one must be ready.
-        </p>
-        <ul className="flex flex-col gap-3">
-          {(agents ?? []).map((agent) => (
-            <AgentLine key={agent.id} agent={agent} />
-          ))}
-        </ul>
-        <div>
-          <Button
-            variant="outline"
-            onClick={() => setAgain((value) => value + 1)}
-          >
-            Check again
-          </Button>
+    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 sm:gap-8">
+      {returning ? (
+        <div className="flex flex-wrap items-center gap-2.5 rounded-[14px] border border-border bg-card px-4 py-2.5 shadow-sm">
+          <span className="text-[13px]">
+            <b>Welcome back.</b> Your folder from last time is already filled
+            in.
+          </span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {savedAgo(savedAt, Date.now())}
+          </span>
         </div>
-      </Card>
-      <Card title="Jira" note="Optional">
-        <p className="text-sm text-muted-foreground">
-          Lets Span read stories and move them when a run finishes. Skip it and
-          paste a brief by hand instead.
+      ) : null}
+      <div className="flex flex-col gap-2">
+        <Pill tone="acc">Step 2 of 3</Pill>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Connect your project
+        </h1>
+        <p className="text-[13px] text-muted-foreground">
+          Each check runs as you type. A problem shows what is wrong and the
+          exact fix.
         </p>
-        <p className="text-sm">
-          {jira !== ""
-            ? jira
-            : "Not connected. You can set it up later in Settings."}
-        </p>
-      </Card>
-      <div className="flex flex-wrap gap-2">
-        <Button onClick={onNext} disabled={!canContinue}>
-          Continue
-        </Button>
-        <Button variant="outline" onClick={onBack}>
-          Back
-        </Button>
-        <Button variant="ghost" onClick={onSkip}>
-          Skip setup
-        </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {canContinue
-          ? "Continue is on because a folder and one agent are ready. Jira can wait."
-          : "Continue turns on when the folder is a git repository and one agent is ready."}
-      </p>
-    </div>
-  )
-}
-
-function AgentLine({ agent }: { agent: AgentState }) {
-  if (agent.ready) {
-    return (
-      <CheckLine tone="pass">{agent.label} is installed and ready.</CheckLine>
-    )
-  }
-  if (agent.installed) {
-    const why =
-      agent.reason !== undefined && agent.reason !== ""
-        ? `: ${agent.reason}`
-        : ""
-    return (
-      <CheckLine
-        tone="hold"
-        fix={
-          <p className="text-sm">
-            Fix what it says in a terminal, then check again.
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-w-0 flex-col gap-6">
+          <FolderPanel folder={folder} onFolder={onFolder} probe={probe} />
+          <AgentPanel
+            agents={agents}
+            picked={picked}
+            onPick={onAgent}
+            onCheck={() => setAgain((value) => value + 1)}
+          />
+          {jiraSkipped ? (
+            <Panel
+              title="Jira"
+              badge={<Pill tone="mut">Skipped</Pill>}
+              lead="You can paste a brief by hand, or connect Jira later from Settings."
+            >
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setJiraSkipped(false)}
+                >
+                  Set up Jira
+                </Button>
+              </div>
+            </Panel>
+          ) : (
+            <JiraPanel
+              key={path}
+              folder={path}
+              session={session}
+              onSaved={() => setAgain((value) => value + 1)}
+              onSkip={() => setJiraSkipped(true)}
+            />
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button className="h-10" disabled={!canContinue} onClick={onNext}>
+              Continue
+            </Button>
+            <Button className="h-10" variant="ghost" onClick={onBack}>
+              Back
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {canContinue
+              ? "Continue is on because a folder and one agent are ready. Jira can wait."
+              : "Continue turns on when the folder is a git repository and one agent is ready."}
           </p>
-        }
-      >
-        {agent.label} is installed but not ready{why}
-      </CheckLine>
-    )
-  }
-  return (
-    <CheckLine
-      tone="fail"
-      fix={
-        <p className="text-sm">
-          Install it so {agent.binary} is on your PATH, then check again.
-        </p>
-      }
-    >
-      {agent.label} was not found. No {agent.binary} command on your PATH.
-    </CheckLine>
+        </div>
+        <aside className="flex flex-col gap-4">
+          <section className="rounded-[14px] border border-border bg-card px-4 py-4 shadow-sm sm:px-5">
+            <div className="mb-2 text-sm font-semibold">
+              What Span reads and writes
+            </div>
+            <ul>
+              <CheckLine tone="pass">
+                <b>Reads</b> files in the folder above.
+              </CheckLine>
+              <CheckLine tone="pass">
+                <b>Writes</b> only on branches named{" "}
+                <span className="font-mono text-xs">span/…</span>.
+              </CheckLine>
+              <CheckLine tone="pass">
+                <b>Sends</b> prompts to the agent CLI you choose, and to Jira if
+                you connect it.
+              </CheckLine>
+            </ul>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Credentials stay in each tool’s own login. A Jira token is kept in
+              a file only you can read.
+            </p>
+          </section>
+        </aside>
+      </div>
+    </div>
   )
 }

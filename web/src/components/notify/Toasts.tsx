@@ -10,6 +10,8 @@ const dots: Record<Toast["kind"], string> = {
   finished: "bg-pass",
   failed: "bg-destructive",
   needs: "bg-hold",
+  blocked: "bg-hold",
+  stopped: "bg-destructive",
 }
 
 interface ToastsProps {

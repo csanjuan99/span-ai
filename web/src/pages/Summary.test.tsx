@@ -102,6 +102,16 @@ describe("Summary", () => {
     expect(screen.getByRole("link", { name: "PR #8" })).toBeTruthy()
   })
 
+  it("leaves a part out of the copy when it is unchecked", async () => {
+    writeText.mockResolvedValue(undefined)
+    state = loaded()
+    page()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Files changed" }))
+    fireEvent.click(screen.getByRole("button", { name: "Copy as markdown" }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    expect(String(writeText.mock.calls[0][0])).not.toContain("## Files")
+  })
+
   it("copies the summary as markdown", async () => {
     writeText.mockResolvedValue(undefined)
     state = loaded()
@@ -109,7 +119,9 @@ describe("Summary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy as markdown" }))
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     expect(String(writeText.mock.calls[0][0])).toContain("# SPAN-1-run-1-api")
-    expect(await screen.findByText("Copied as markdown.")).toBeTruthy()
+    expect(
+      await screen.findByText(/of markdown is on your clipboard/)
+    ).toBeTruthy()
   })
 
   it("says so when the clipboard refuses", async () => {

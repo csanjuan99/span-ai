@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useSyncExternalStore } from "react"
 import { useNavigate } from "react-router"
 
 import { KeyCaps } from "@/components/help/KeyCaps"
@@ -9,7 +9,10 @@ import { useOptionalTheme } from "@/components/theme-provider"
 import { useCommandPalette } from "@/hooks/use-command-palette"
 import {
   filterCommands,
+  getRunContext,
   paletteCommands,
+  runPaletteCommands,
+  subscribeRunContext,
   type PaletteCommand,
 } from "@/lib/help"
 import { cn } from "@/lib/utils"
@@ -34,7 +37,9 @@ export function CommandPalette() {
     setActive(0)
   }
 
-  const shown = filterCommands(commands, query).filter(
+  const runContext = useSyncExternalStore(subscribeRunContext, getRunContext)
+  const all = [...runPaletteCommands(runContext), ...commands]
+  const shown = filterCommands(all, query).filter(
     (command) => command.action.type !== "theme" || theme !== undefined
   )
 
@@ -45,6 +50,8 @@ export function CommandPalette() {
       void navigate(action.path)
     } else if (action.type === "theme") {
       theme?.setTheme(action.value)
+    } else if (action.type === "run") {
+      action.run()
     } else {
       setSheetOpen(true)
     }

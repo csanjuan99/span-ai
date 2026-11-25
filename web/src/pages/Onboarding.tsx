@@ -5,6 +5,7 @@ import { useNavigate } from "react-router"
 
 import { ConnectStep } from "@/components/onboarding/ConnectStep"
 import { FirstRunStep } from "@/components/onboarding/FirstRunStep"
+import { ObBar } from "@/components/onboarding/ObBar"
 import { WelcomeStep } from "@/components/onboarding/WelcomeStep"
 import { readOnboarding, saveOnboarding } from "@/lib/onboarding"
 
@@ -21,37 +22,47 @@ export function Onboarding() {
     saveOnboarding({ folder })
     setState((now) => ({ ...now, folder }))
   }
+  const setAgent = (agent: string) => {
+    saveOnboarding({ agent })
+    setState((now) => ({ ...now, agent }))
+  }
   const skip = () => {
     saveOnboarding({ skipped: true })
     navigate("/")
   }
-  const start = () => {
+  const started = (id: string) => {
     saveOnboarding({ done: true })
-    navigate("/", { state: { sample: true } })
+    navigate(`/spans/${encodeURIComponent(id)}`)
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-10">
-      {state.step === 1 ? (
-        <WelcomeStep onNext={() => go(2)} onSkip={skip} />
-      ) : null}
-      {state.step === 2 ? (
-        <ConnectStep
-          folder={state.folder}
-          onFolder={setFolder}
-          onNext={() => go(3)}
-          onBack={() => go(1)}
-          onSkip={skip}
-        />
-      ) : null}
-      {state.step === 3 ? (
-        <FirstRunStep
-          folder={state.folder}
-          onStart={start}
-          onBack={() => go(2)}
-          onSkip={skip}
-        />
-      ) : null}
-    </main>
+    <div className="flex min-h-dvh flex-col bg-background">
+      <ObBar step={state.step} onSkip={skip} />
+      <main className="w-full flex-1 px-4 pt-6 pb-10 sm:px-10 sm:pt-12 sm:pb-16">
+        {state.step === 1 ? (
+          <WelcomeStep onNext={() => go(2)} onSkip={skip} />
+        ) : null}
+        {state.step === 2 ? (
+          <ConnectStep
+            folder={state.folder}
+            agent={state.agent}
+            savedAt={state.savedAt}
+            onFolder={setFolder}
+            onAgent={setAgent}
+            onNext={() => go(3)}
+            onBack={() => go(1)}
+          />
+        ) : null}
+        {state.step === 3 ? (
+          <FirstRunStep
+            folder={state.folder}
+            agent={state.agent}
+            onStarted={started}
+            onBack={() => go(2)}
+            onSkip={skip}
+          />
+        ) : null}
+      </main>
+    </div>
   )
 }

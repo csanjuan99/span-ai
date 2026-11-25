@@ -5,6 +5,8 @@ import {
   needsOnboarding,
   readOnboarding,
   saveOnboarding,
+  savedAgo,
+  stageGroups,
 } from "@/lib/onboarding"
 import { stages } from "@/lib/types"
 
@@ -18,12 +20,14 @@ describe("onboarding state", () => {
       skipped: false,
       done: false,
       folder: "",
+      agent: "",
+      savedAt: 0,
     })
   })
 
   it("remembers the step and the folder, so the flow can be resumed", () => {
     saveOnboarding({ step: 2, folder: "/work/api" })
-    expect(readOnboarding()).toEqual({
+    expect(readOnboarding()).toMatchObject({
       step: 2,
       skipped: false,
       done: false,
@@ -52,6 +56,8 @@ describe("onboarding state", () => {
       skipped: false,
       done: false,
       folder: "",
+      agent: "",
+      savedAt: 0,
     })
   })
 
@@ -94,5 +100,37 @@ describe("dryLook", () => {
       expect(row.touches).not.toBe("")
       expect(row.asks).not.toBe("")
     }
+  })
+})
+
+describe("saving", () => {
+  it("stamps the time of the last save", () => {
+    const before = Date.now()
+    saveOnboarding({ step: 2 })
+    expect(readOnboarding().savedAt).toBeGreaterThanOrEqual(before)
+  })
+
+  it("remembers the agent that was picked", () => {
+    saveOnboarding({ agent: "codex" })
+    expect(readOnboarding().agent).toBe("codex")
+  })
+})
+
+describe("savedAgo", () => {
+  const now = 1_000_000_000
+  it("says nothing when it was never saved", () => {
+    expect(savedAgo(0, now)).toBe("")
+  })
+  it("counts minutes, then hours, then days", () => {
+    expect(savedAgo(now - 20_000, now)).toBe("Saved just now")
+    expect(savedAgo(now - 12 * 60_000, now)).toBe("Saved 12 min ago")
+    expect(savedAgo(now - 3 * 3_600_000, now)).toBe("Saved 3 h ago")
+    expect(savedAgo(now - 2 * 86_400_000, now)).toBe("Saved 2 d ago")
+  })
+})
+
+describe("stageGroups", () => {
+  it("holds every stage the engine walks, once, in order", () => {
+    expect(stageGroups.flatMap((group) => group.stages)).toEqual([...stages])
   })
 })

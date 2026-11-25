@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { groupOf } from "@/lib/desk"
 import {
   faviconWith,
+  kindOf,
+  playTone,
   loadPrefs,
   notifyEvents,
   prefsChanged,
@@ -133,6 +134,9 @@ export function useNotifications(runs: SpanHead[]): Notifications {
     }
     if (shown.length > 0) {
       setToasts((all) => [...all, ...shown])
+      if (prefs.sound) {
+        playTone()
+      }
     }
   }, [runs, prefs, expireIn])
 
@@ -151,10 +155,13 @@ export function useNotifications(runs: SpanHead[]): Notifications {
   }, [])
 
   const marked = runs.filter((run) => {
-    const group = groupOf(run)
+    const kind = kindOf(run)
     return (
-      (group === "waiting" && prefs.events.needs.tab) ||
-      (group === "failed" && prefs.events.failed.tab)
+      (kind === "needs" ||
+        kind === "failed" ||
+        kind === "blocked" ||
+        kind === "stopped") &&
+      prefs.events[kind].tab
     )
   })
   const heading = titleOf(marked, finished)

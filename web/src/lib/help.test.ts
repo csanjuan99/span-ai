@@ -5,6 +5,9 @@ import {
   isTyping,
   nextChord,
   paletteCommands,
+  runCommandFor,
+  runKeys,
+  runPaletteCommands,
   shortcuts,
 } from "@/lib/help"
 
@@ -89,5 +92,43 @@ describe("nextChord", () => {
   it("forgets the chord on any other key", () => {
     expect(nextChord("g", "x")).toEqual({ pending: "", go: "" })
     expect(nextChord("", "d")).toEqual({ pending: "", go: "" })
+  })
+})
+
+describe("run context", () => {
+  const ctx = {
+    label: "SPAN-482",
+    commands: [
+      {
+        id: "resume",
+        title: "Resume",
+        hint: "again",
+        key: "r",
+        run: () => undefined,
+      },
+      {
+        id: "stop",
+        title: "Stop",
+        hint: "ends",
+        key: "s",
+        shift: true,
+        run: () => undefined,
+      },
+    ],
+  }
+  it("finds a command by key and Shift, never the other way", () => {
+    expect(runCommandFor(ctx, "R", false)?.id).toBe("resume")
+    expect(runCommandFor(ctx, "s", false)).toBeUndefined()
+    expect(runCommandFor(ctx, "S", true)?.id).toBe("stop")
+    expect(runCommandFor(null, "r", false)).toBeUndefined()
+  })
+  it("draws Shift as a key cap and names the group after the run", () => {
+    expect(runKeys(ctx.commands[1]!)).toEqual(["⇧", "S"])
+    const lines = runPaletteCommands(ctx)
+    expect(lines.map((line) => line.group)).toEqual([
+      "This run · SPAN-482",
+      "This run · SPAN-482",
+    ])
+    expect(runPaletteCommands(null)).toEqual([])
   })
 })
