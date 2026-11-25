@@ -395,6 +395,8 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, configView(r.URL.Query().Get("path")))
 	})
+	mux.HandleFunc("POST /config/preview", previewConfig)
+	mux.HandleFunc("POST /config", saveConfig)
 	mux.HandleFunc("GET /agent", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, agentView(r.URL.Query().Get("path")))
 	})
@@ -904,7 +906,7 @@ func configureOnly(ctx context.Context, req setup.Request) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&b, "repo %s\npolicy %s\nbranch %s\nbase %s\n", target.Name, res.PolicyPath, res.Branch, res.Base)
+		b.WriteString(fmt.Sprintf("repo %s\npolicy %s\nbranch %s\nbase %s\n", target.Name, res.PolicyPath, res.Branch, res.Base))
 	}
 	return b.String(), nil
 }

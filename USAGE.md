@@ -787,6 +787,29 @@ anything else is refused, so the picker never leaves a file in a home directory.
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
 
+### Editing `span.yaml` from Settings
+
+The Settings page edits the base branch, the three check lists (`prove.focused`, `prove.fast`,
+`prove.acceptance`), `qa.command`, `repair.maxAttempts` and the `stages` modes (`open`, `merge`,
+`promote`, `plan`, `conflict`). A change shows under **What changes** as the old and new value
+before anything is written; **Save N changes** writes it and **Discard changes** drops it.
+
+A save rewrites only the lines of the keys that changed. Comments, key order and every other key
+stay as they were, and the new file is checked with the same rules as a run before it replaces
+the old one. A value the file would refuse (a mode that is not `auto` or `hold`, `repair` outside
+1 to 8, a base such as `HEAD`, a check with shell punctuation) is refused with the reason and
+nothing is written. A section written inline (`stages: {open: auto}`) is refused too: write it as
+a block first. A folder without `span.yaml` gets one only when it is a git repository or already
+has `.span/`, as with the agent picker.
+
+`POST /config/preview` returns `{"lines": [{"key", "before", "after"}]}` and writes nothing;
+`POST /config` writes and returns the same lines plus the settings as they now read. Both take
+`project` and any of `base`, `open`, `merge`, `promote`, `plan`, `conflict`, `focused`, `fast`,
+`acceptance` (one check per line), `qa` and `repair`. A field that is absent is left alone; an
+empty `focused`, `fast` or `acceptance` empties the list, and an empty `base` or `qa` removes
+the key. Any other field is refused. Not editable here: `manifest`, `promote.environments`,
+`commit`, `limits`, `jira`.
+
 ### A folder of several repositories
 
 Span works from one repository or from a folder that holds several. Where a run starts decides
