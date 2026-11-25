@@ -161,9 +161,9 @@ Each turn the agent reads the idea, your answers, the product context and the re
 
 The interview must not change the repository. Span compares `git status`, the content of every listed file, where `HEAD` points and every branch and tag before and after each turn, so a commit, a checkout or a new tag counts too. A difference fails the turn with `shape_repo_changed` naming what changed. Span does not undo it. Files git ignores and files outside the repo are not compared. The repo of a session must be the folder or a checkout inside it (`shape_repo_outside`).
 
-- **Product context.** The interview reads `span/context/product.md` in the folder when it exists: personas, glossary, known surfaces. The agent can propose additions. They are written to the file only when you tick them.
-- **Split.** When the map holds two outcomes a person could receive separately, the session shows the split and cannot be sealed. Start a narrower session.
-- **Seal.** The story can be sealed only when no question is open (`shape_not_ready` lists the open ones). Sealing keeps the markdown and its sha256 digest, and the session does not change after that.
+- **Product context.** The interview reads `span/context/product.md` in the folder when it exists: personas, glossary, known surfaces. The agent can propose additions. A note is written to the file only when you accept it; skipped notes are dropped, can be brought back until the session is sealed, and a note already written cannot be skipped. A preview shows the exact lines accepting would add.
+- **Split.** When the map holds two outcomes a person could receive separately, the session shows the split and cannot be sealed. **Split** replaces it with one linked session per story (each starts from a copy of the map, so answered questions are not asked again, and drafts its own story on its first turn). **Keep one story** records the choice and runs the turn again so the agent writes a single story; the split is not proposed again.
+- **Seal.** The story can be sealed only when no question is open (`shape_not_ready` lists the open ones). Sealing keeps the markdown, its sha256 digest and the time (`sealedAt`), and the session does not change after that. **New session from this story** (`fork`) starts a new session from a sealed one: the story and the answers carry over, assumptions reopen, and the sealed session stays.
 - **Jira.** A sealed story can be created in Jira, and only in the backlog of the project's Kanban board. Give the project key, and the board id when the project has more than one Kanban board. The page shows a preview first and creates only after you confirm. The issue is a Story, unassigned, labelled `span`. Span reads its status back and moves it into a backlog status when it landed elsewhere. It never puts it in To Do or In Progress. The key is stored in the session, so asking again creates nothing.
 - **Run.** **Start run** on a sealed session starts a run with the sealed story as the brief and the Jira key, when there is one, as the issue.
 
@@ -181,8 +181,90 @@ Sessions live in `<workspace>/.span/shapes/<id>/session.json`.
 | `jira_backlog_disabled` | The board's Backlog column has no status, so the backlog is off. Turn it on in the board's column settings, or nothing is created |
 | `jira_board_ambiguous` | The project has more than one Kanban board. The message lists them; pass the board id |
 | `jira_not_in_backlog` | The issue was created but no transition reaches a backlog status. The key is stored and shown |
+| `shape_context_written` | The note is already in the product context, so it cannot be skipped |
+| `shape_no_split` | The session has no split to accept or keep, or it was already split |
+| `shape_source_not_found` | The `path:line` reference is not a readable file of the session's repository |
 
 HTTP: `POST /shapes`, `GET /shapes`, `GET /shapes/{id}`, `POST /shapes/{id}/answers`, `POST /shapes/{id}/context`, `POST /shapes/{id}/seal`, `GET /shapes/{id}/jira/preview`, `POST /shapes/{id}/jira`. Each takes the `workspace`; a relative one is read from the folder the server runs in, as on the desk.
+
+#### Listing, resuming and tidying sessions
+
+Every session answers with the stored fields and these derived ones: `ref` (`SES-` and the tail of the id), `title` (the story heading, else the first line of the idea), `openQuestions`, `jiraKey` (the issue created for the story, else the one it started from) and `updatedAt` (the last change; for a session saved before that was recorded, its last turn or the time in its id). New stored fields: `archived`, `sourceIssue` and `failure`.
+
+| Action | HTTP | Command |
+| --- | --- | --- |
+| List and filter | `GET /shapes?workspace=&status=&q=&repo=&agent=&sort=&archived=` | `./span shape list [--status s] [--query q] [--repo r] [--agent a] [--sort activity\|created] [--archived include\|only] [--json]` |
+| One session, with its failure | `GET /shapes/{id}` | `./span shape show <id> [--json]` |
+| Start | `POST /shapes` `{workspace, idea, repo?, agent?, model?, issue?}` | `./span shape start (--idea text \| --idea-file f \| --issue KEY) [--repo r] [--agent a] [--model m] [--json]` |
+| Resume a stopped interview | `POST /shapes/{id}/resume` `{workspace, agent?, model?}` | `./span shape resume <id> [--agent a] [--model m] [--json]` |
+| Change agent and model, no turn | `POST /shapes/{id}/agent` `{workspace, agent, model?}` | `./span shape agent <id> --agent a [--model m]` |
+| Archive / unarchive | `POST /shapes/{id}/archive` `{workspace, archived?}` (default `true`) | `./span shape archive <id> [--undo]` |
+| Delete | `DELETE /shapes/{id}?workspace=` | `./span shape delete <id> --yes` |
+
+### Revisions, compare and merge
+
+Every saved change to a story is a revision (`r1`, `r2`, ...): an answer, an accepted assumption, a context note, a split, a seal. They live in `<session dir>/revisions.jsonl`. Nothing is ever deleted: a restore adds a new revision with the old content. A sealed session can be compared but not restored; start a new session from a revision instead.
+
+| Action | HTTP | CLI |
+| --- | --- | --- |
+| List revisions | `GET /shapes/{id}/revisions?workspace=` | `./span shape log <id> [--json]` |
+| Compare two | `GET /shapes/{id}/diff?workspace=&from=r3&to=r4` | `./span shape diff <id> r3 r4 [--format inline\|side] [--json]` |
+| Restore | `POST /shapes/{id}/revisions/{r}/restore` `{workspace}` | `./span shape restore <id> r3 [--json]` |
+| New session from a revision | `POST /shapes/{id}/revisions/{r}/fork` `{workspace}` | `./span shape restore <id> r3 --new [--json]` |
+| Compare 2 to 5 sessions of one repo | `GET /shapes/compare?workspace=&ids=a,b,c` | `./span shape compare <id>... [--json]` |
+| Keep two apart | `POST /shapes/compare/dismiss` `{workspace, ids}` | `./span shape compare <id>... --dismiss` |
+| Merge | `POST /shapes/merge` `{workspace, into, from[], against[], resolve{C1: id}}` | `./span shape merge <into> <from>... --yes [--against ids] [--resolve C1=id,...]` |
+
+Matching between sessions is by shared words, so every figure of a comparison is an estimate. A merge needs every conflict decided (`shape_conflicts_open`, exit 4) and never changes a sealed session (`shape_sealed`); the merged-from sessions stay readable and link to the target (`mergedInto`). Unknown revision: `shape_revision_not_found` (404, exit 3).
+
+#### Board, history and transfer: the same code for the page and the command line
+
+| What | HTTP | Command |
+| --- | --- | --- |
+| Sessions in a column per status | `GET /shapes?group=status&workspace=&repo=&archived=&limit=` | `./span shape board [--repo r] [--archived include\|only] [--limit n] [--json]` |
+| What the agents did lately | `GET /shapes/activity?workspace=&who=&since=&limit=` (`follow=1` streams server-sent events) | `./span shape activity [--who agents\|you\|everyone] [--since t] [--limit n] [--follow] [--json]` |
+| One action on several sessions | `POST /shapes/bulk` `{workspace, action, ids[], dryRun?}`, action `assume`, `seal`, `archive` or `unarchive` | `./span shape bulk <action> <id\|SES-ref>... [--ready] [--dry-run] [--yes] [--json]` |
+| Steps of a session | `GET /shapes/{id}/history?workspace=&actor=you\|agents&kind=answers\|assumptions\|context\|split` | `./span shape history <id> [--actor a] [--kind k] [--json]` |
+| What undoing a step changes | `GET /shapes/{id}/history/{h}?workspace=` | `./span shape undo <id> <h> --plan [--json]` |
+| Undo a step | `POST /shapes/{id}/history/{h}/undo` `{workspace, cascade?}` | `./span shape undo <id> <h> [--cascade] --yes [--json]` |
+| Start from Jira or a markdown file | `POST /shapes/import` `{workspace, jira \| markdown+name, repo?, agent?, model?, dryRun?, run?}` | `./span shape import (--jira KEY \| --file story.md) [--dry-run] [--no-run] [--json]` |
+| Export a sealed story | `GET /shapes/{id}/export?workspace=&format=md\|json&sources=1&assumptions=1&digest=1` | `./span shape export <id> [--format md\|json] [--sources] [--assumptions] [--digest] [--out file]` |
+| Read-only links | `POST /shapes/{id}/shares` `{workspace, days?}`, `GET /shapes/{id}/shares`, `DELETE /shapes/{id}/shares/{token}`, `GET /shapes/{id}/shared/{token}` | `./span shape share <id> [--days n] \| --list \| --revoke TOKEN \| --open TOKEN` |
+
+- `bulk` runs each session on its own and answers one item per session (`ok`, `skipped` or `failed` with its code); one failure does not stop the others. At most 50 sessions. Without `--yes` the command only says what would change.
+- History is read from the revisions of the session: each step has who did it (`you` or an agent), what it gives and what it needs. Undo adds a step; it never rewrites the log. A step others depend on is refused (`shape_has_dependents`, 409) unless `cascade` is true; a sealed story never changes (`shape_sealed`). Undoing an accepted context note removes it from the context file, and refuses if the file was edited since (`shape_context_changed`). Unknown step: `shape_step_not_found` (404, exit 3).
+- Importing from Jira only reads the story; nothing is written to Jira. A markdown file becomes rules (headings), examples (bullets) and notes, each with its `file:line` as source (`source.kind` `import`); at most 256 KB.
+- Export needs a sealed story (`shape_not_sealed`). A share link is read-only, lives 7 days by default (90 at most) and can be revoked (`shape_share_revoked`, 410; expired `shape_share_expired`, 410). It does not skip the server's access token.
+
+- `status` is `interviewing`, `ready`, `split` or `sealed`. `q` matches the idea, title, id, ref, repo and Jira key, ignoring case. `agent=auto` matches a session that names no agent. `sort` is `activity` (default) or `created`, newest first. Archived sessions are hidden unless `archived=include` or `archived=only`. An unknown value answers `400 invalid`.
+- `issue` starts from a Jira story: the issue is read with the Jira account saved for the workspace, its brief becomes the idea, and `idea`, when also given, is added as more context. The key is kept as `sourceIssue`. A missing issue starts nothing.
+- When a turn after the first fails, the answers and the map so far are kept and `failure` is set: `{at, agent, kind, message}`, with `kind` `usage_limit`, `repo_changed` or `error`. It stays until a turn succeeds. `resume` runs the next turn from the saved map, on another agent or model if given (they stay on the session even if the turn fails again), and clears `failure`. A first turn that fails still leaves nothing on disk.
+- A sealed session cannot be deleted (`409 shape_sealed`); archive it instead. Archiving never changes its story or digest.
+- Exit codes of `span shape`: `0` done, `1` failed, `2` usage, `3` no such session, `4` refused because of the session's state (sealed, not ready, repository changed), `5` the interview agent failed (the failure is saved on the session). With `--json` an error prints `{"error": code, "message": text}` on stdout.
+
+#### Working a session: the page and the command line are two clients
+
+Every action of the session page is a route and a `./span shape` verb that call the same Go function in `internal/shape`. Flags go before the id. The same exit codes apply; `shape_context_written`, `shape_no_split`, `confirm_required` and the `jira_*` refusals exit `4`, `shape_source_not_found` exits `3`.
+
+| Action | HTTP | Command |
+| --- | --- | --- |
+| Answer, or use the assumption | `POST /shapes/{id}/answers` `{workspace, answers:[{question,text}], assume:[ids]}` | `./span shape answer [--answer Q1=text]... [--assume Q1,Q2] <id>` |
+| Answer instead of an assumption | the same route, with the assumed question's id in `answers` | the same verb |
+| Accept, skip or restore context notes | `POST /shapes/{id}/context` `{workspace, accept?, skip?, restore?}` | `./span shape context [--accept P1,P2] [--skip P3] [--restore P3] <id>` |
+| Preview what accepting writes | `GET /shapes/{id}/context/preview?workspace=&accept=P1,P2` | `./span shape context --preview --accept P1,P2 <id>` |
+| Accept the split, or keep one story | `POST /shapes/{id}/split` `{workspace, decision: "split"\|"keep"}` | `./span shape split (--split \| --keep) <id>` |
+| Seal | `POST /shapes/{id}/seal` | `./span shape seal <id>` |
+| Code behind a source | `GET /shapes/{id}/source?workspace=&ref=path:line` | `./span shape source --ref path:line <id>` |
+| Preview the Jira issue | `GET /shapes/{id}/jira/preview?workspace=&project=&board=` | `./span shape preview --project KEY [--board N] <id>` |
+| Create in Jira | `POST /shapes/{id}/jira` `{workspace, project, board?, confirm: true}` | `./span shape jira --project KEY [--board N] --confirm <id>` |
+| New session from a sealed story | `POST /shapes/{id}/fork` | `./span shape fork <id>` |
+| The sealed story | the `story` and `digest` of `GET /shapes/{id}` | `./span shape story [--json] <id>` |
+| Create a run from the sealed story | `POST /spans` with the story and `issue` | `./span shape story <id> > story.md`, then `./span quickstart --story-file story.md [--issue KEY]` and `./span run` |
+
+- Each answered or assumed question gets an answer id (`answerId`: `A1`, `A2`...), kept when an assumption is replaced by an answer. An answered question is final; only an assumed one can be answered instead, until the session is sealed.
+- Source references (`code` kind, `path:line` or `path:line-line`) are read from the session's repository as it is now, never from outside it, and never through a link that leaves it. The page shows the lines around the cited one.
+- A session created by a split has `parent`, and the parent has `children`. A session created by a fork has `parent` too.
+- The command line does not hold the server's per-session lock: do not run a `./span shape` verb on a session while a request to the same session is in flight.
 
 ## Branches
 
@@ -717,7 +799,28 @@ Span commits the build with the repository's own hooks on. A refusal is a blocke
 
 A decision is a question with the evidence quoted, two to four options that each say what Span does next, a recommended one, and a box for your own words. Answer it on the run's page. An option does one of three things: `build` runs the build again with your words as guidance, `retry` tries the commit again without running the agent (you changed the rule or the hook in the repository), `stop` ends the run. While a decision is open, `Resume` does nothing and the page offers the decision instead; a restart from a stage clears it.
 
-The build agent can raise a decision too. When the brief asks for something a rule of the repository forbids, or it cannot go on without you, the prompt tells it to write the request to `.span/runs/<id>/decision.json` and stop, instead of choosing a side or asking in the chat. Span reads the file once, checks it, and holds with `decision needed`. A request it cannot show (fewer than two options, an action Span does not offer) holds with the reason, and the agent gets no commit made for it. Your answer is written to `answers.md` and stays in the prompt of every later build.
+The build agent can raise a decision too. When the brief asks for something a rule of the repository forbids, or it cannot go on without you, the prompt tells it to write the request to `.span/runs/<id>/decision.json` and stop, instead of choosing a side or asking in the chat. Span reads the file once, checks it, and holds with `decision needed`. A request it cannot show (fewer than two options, an action Span does not offer) holds with the reason, and the agent gets no commit made for it. Your answer is written to `answers.md` and stays in the prompt of every later build. Each option may carry `gain` and `cost`, a few words each (one line, up to 120 characters), which the page shows side by side under the option so you can weigh them; both are optional.
+
+From a shell, the page's two actions are:
+
+```
+./span decision show <run> [--json]                                  # the question, the evidence and the options
+./span decision choose <run> <option> [--text "..."] [--decision <id>] [--no-resume] [--json]
+```
+
+`choose` is "Choose and continue": the option and your words are the same answer the page posts to
+`POST /spans/<id>/decide`, checked the same way (an option the decision does not offer, or an answer for
+a decision that was replaced, exits 1). It then continues the run as `./span resume` does.
+
+| Page action | HTTP route | Command |
+| --- | --- | --- |
+| Read the decision | `GET /spans/<id>` (`cursor.decision`) | `span decision show <run>` |
+| Choose and continue | `POST /spans/<id>/decide` | `span decision choose <run> <option> --text ...` |
+| Read the conflict and every option's diff | `GET /spans/<id>` (`cursor.conflict`) | `span conflict show <run> --options` |
+| Apply resolution | `POST /spans/<id>/conflict/choose` | `span conflict choose <run> <group>=<option>...` |
+| Leave a hint for the agent | `POST /spans/<id>/conflict/hint` | `span conflict hint <run> --text ...` |
+| Abort merge | `POST /spans/<id>/conflict/abort` | `span conflict abort <run>` |
+
 
 ### What you decided stays decided
 
@@ -1127,6 +1230,28 @@ least `medium`, and `theirs`, `delete` and `regenerate` are always `high`. An ac
 once more; a second refusal, a missing agent, or a fourth proposal leaves only the mechanical
 options: keep this branch's version, take the base's, or keep or delete a deleted file.
 
+Every option's diff is served before anything is chosen: `GET /spans/<id>` returns the open
+conflict as `cursor.conflict.groups[].options[].diff`, and the run page's **Compare options**
+toggle (per group) shows them side by side, with the lines the options do not share marked;
+the arrow keys move between options and Enter chooses. From a shell, the same data and the same decisions, calling the engine functions the routes
+call (every verb takes `--spans .span/runs` and `--json`, never prompts, and exits 0 when it
+worked, 1 when it was refused or failed, 2 on a usage error):
+
+```
+./span conflict show <run>                                  # groups, files and summaries
+./span conflict show <run> --options [--json]               # plus every option, its risk, action and diff
+./span conflict choose <run> g1=combine g2=theirs           # one <group>=<option> for EVERY group
+./span conflict choose <run> g1 combine                     # the same, for a conflict with one group
+./span conflict hint <run> --text "keep the new rounding"   # ask the agent for a new proposal
+./span conflict abort <run>                                 # undo the merge; the run holds
+```
+
+`choose`, `hint` and `abort` record the decision and then continue the run in this process,
+the way `./span resume` does, and print where it stopped next. `--no-resume` only records it:
+the run goes on from `./span resume <run>` or from a running `./span serve`. A run another
+process is driving is refused (exit 1) rather than raced. `show` exits 1 when the run has no
+conflict open.
+
 The agent runs in the checkout. Whatever it does there is put back before its proposal is
 used: staged, edited or new files, commits, amends, resets, a checkout of another branch, the
 merge state, every ref (branches, tags, notes, remote-tracking refs), hooks, git config and
@@ -1303,9 +1428,9 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | POST | `/quickstart` | Fields `workspace`, `repo`, `kind`, `issue`, `story`, and `file`. `202` and `{"id","stage"}` when a run starts. Configuration text stays `200` |
 | GET | `/spans` | `Accept: application/json` returns `{"spans":[...]}`. Any other accept is the desk |
 
-Each run in `{"spans":[...]}` carries `id`, `label`, `issue`, `repo`, `stage`, `verdict` (`running`, `hold`, `stop` or `done`), `title` (the first line of the brief without the story key), `branch`, `reason` (why a run is held, stopped or failing), `updatedAt` (the last time the cursor moved), `startedAt`, and, for a held run, `need` (`conflict`, `questions` or `decision`) with `count` (how many files, questions or open decisions). The desk reads them to say "3 questions" and to offer Answer, Decide or Resolve. Done runs older than 30 days stay out of the list unless the page filters by Done.
 | GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, gate, and what the run is about: `title` (the brief's first line without the story key) and `repo` (the folder it writes in). Any other accept is the span page |
-| GET | `/spans/<id>/implementation` | `git diff <base>...<head>` stat and a patch capped at 256 KiB |
+| GET | `/spans/<id>/implementation` | `git diff <base>...<head>`: `stat`, a `patch` capped at 256 KiB, `commits` (how many) and `commitLog`, the same commits as `{sha, subject, time}`, oldest first. `commitLog` is empty, not absent, when the branch adds nothing |
+| GET | `/spans/<id>/log?path=iter/N/logs/<name>.log` | The full output of one command, `{path, text, lines, truncated}`. Only a clean relative `.log` path under `iter/`, resolved inside the run (no `..`, no link that leaves it), a regular file, the last 512 KiB. Any refusal is `404`, so a caller cannot tell a missing file from one that is not theirs |
 | GET | `/spans/<id>/feature` | The run's `odd/tasks/<feature>.md`, capped at 64 KiB, for the report. Empty when there is none |
 | GET | `/spans/<id>/acceptance` | Each acceptance line, its declaration, and the gate result |
 | GET | `/spans/<id>/live` | WebSocket. The first frame replays the run. Later frames wake the page |
@@ -1320,6 +1445,8 @@ Each run in `{"spans":[...]}` carries `id`, `label`, `issue`, `repo`, `stage`, `
 | POST | `/spans/<id>/conflict/abort` | `git merge --abort`, clears the conflict, holds with `conflict: aborted`. `202` |
 | POST | `/spans/<id>/instructions` | Form fields `stage` and `body` |
 | POST | `/spans/<id>/instructions/<stage>` | `text/plain` body or form field `body` |
+
+Each run in `{"spans":[...]}` carries `id`, `label`, `issue`, `repo`, `stage`, `verdict` (`running`, `hold`, `stop` or `done`), `title` (the first line of the brief without the story key), `branch`, `reason` (why a run is held, stopped or failing), `updatedAt` (the last time the cursor moved), `startedAt`, and, for a held run, `need` (`conflict`, `questions` or `decision`) with `count` (how many files, questions or open decisions). The desk reads them to say "3 questions" and to offer Answer, Decide or Resolve. Done runs older than 30 days stay out of the list unless the page filters by Done.
 
 A failed call returns JSON `{"error","message"}`. `unauthorized` is 401, `not_found` is 404, `unreachable` is 502, and the other codes are 400.
 
@@ -1364,6 +1491,66 @@ The binary and the agents live on the same machine. `serve` reads and writes fil
 - [ ] The brief states the request without invented requirements.
 - [ ] After `hold`, you read `.span/runs/<id>/iter/<n>/<stage>.md` before `./span resume`.
 - [ ] After `stop`, you do not expect resume to continue.
+
+## The run page from a terminal
+
+Every action of the run page is a route of `./span serve` and a `./span` verb that calls the same Go function, so a run on a remote machine can be driven over SSH with no browser. The verbs read and write the state directory (`--spans`, default `.span/runs`), never prompt, take `--json`, and exit `0` when done, `1` when the engine refuses or fails (an unknown run, a state that cannot take it, a run another process is driving) and `2` on a wrong call. The verbs that wake a run (`rewind`, `approve`, `answer`, and the `conflict` and `decision` ones) go on in the same process, as `./span resume` does; `--no-resume` records the choice and leaves the run held for `./span resume <run>` or a running `serve`.
+
+| Page action | Route | Command |
+| --- | --- | --- |
+| The desk's list: stage, verdict, `need`, `count`, `startedAt` | `GET /spans` | `./span runs list [--json]` |
+| One run: cursor, statements, acceptance lines, gate | `GET /spans/<id>` | `./span runs show <run> [--json]` |
+| Implementation tab: files, commits, diff | `GET /spans/<id>/implementation` | `./span runs implementation <run> [--patch] [--json]` |
+| Feature document report | `GET /spans/<id>/feature` | `./span runs feature <run> [--json]` |
+| QA tab: cases and the gate | `GET /spans/<id>/acceptance` | `./span runs acceptance <run> [--json]` |
+| Audit trail and its chain check (`1` when the chain is broken) | `GET /spans/<id>/events` | `./span runs events <run> [--json]` |
+| "Open full log" | `GET /spans/<id>/log?path=` | `./span log <run> <path> [--json]` |
+| Pause after the stage in flight | `POST /spans/<id>/pause` | `./span pause <run>` |
+| Restart from a stage, with a note | `POST /spans/<id>/rewind` | `./span rewind <run> <stage> [--note "..."] [--no-resume]` |
+| Leave a note for a stage | `POST /spans/<id>/instructions/<stage>` | `./span note <run> <stage> --text "..." \| --file path` |
+| Agent for a stage (`any` clears it) | `POST /spans/<id>/agent` | `./span stage-agent <run> <stage> <agent\|any>` |
+| Approve a stage that holds | `POST /spans/<id>/approve` | `./span approve <run> <stage> [--environment name] [--no-resume]` |
+| Answer the questions of a waiting run | `POST /spans/<id>/answer` | `./span answer <run> --answer "question=text"... \| --file answers.json` |
+| Continue a paused run, or a relaunch | `POST /spans/<id>/resume`, `/relaunch` | `./span resume <run>` |
+| Delete a run | `POST /spans/<id>/delete` | `./span delete <run> --yes` |
+| Decision panel | `GET /spans/<id>`, `POST /spans/<id>/decide` | `./span decision show\|choose` |
+| Conflict panel | `GET /spans/<id>`, `POST /spans/<id>/conflict/*` | `./span conflict show\|choose\|hint\|abort` |
+
+What a verb reads is what the route answers, field for field: `--json` prints the route's body. `runs list --json` prints `{"spans": [...]}`.
+
+The log of a command. A statement stores the path of each command's log (`iter/1/logs/prove-1.log`) and `lines`, how many lines the command printed, so the page can say "5 of 142 lines" over the last lines it shows. `./span log` and the route read the same file with the same limits: a clean relative `.log` path under `iter/`, resolved inside the run, a regular file, and the last 512 KiB (`truncated: true` when it was longer; the plain output then says so on stderr).
+
+Two page actions have no verb, and why:
+
+- **Stop the stage in flight** (`POST /spans/<id>/stop`) cancels the worker of the `serve` process that drives the run. It lives in that process's memory and leaves no file another process could write. A run driven by `./span run` or `./span resume` stops with Ctrl-C or `SIGTERM`, which holds it with the error; to cancel a stage of a run in `serve`, use `./span pause` (the run holds before the next stage) or stop the server.
+- **Read the Jira story again** (`POST /spans/<id>/story`) needs the server's Jira login and rebuilds the brief; run `./span quickstart --issue <key>` for a new run from the current story.
+
+`./span pause` writes the pause request the running process reads at its next stage boundary, so it also reaches a run driven by `serve`. The route answers `paused: false` for a run nothing is running; the verb cannot see another process's workers, so it only refuses a finished run, and a request made while nothing runs waits until the next resume discards it.
+
+
+## The Implementation tab from a terminal
+
+The Implementation tab (Overview, Diff, Commits, Reasoning, Audit) reads these routes. Each has a `./span implementation <run> <mode>` command that calls the same Go function (`internal/implementation`), so the page and a shell cannot disagree. All take `--spans` and `--json`, never prompt, and exit `0` when done, `1` when refused or failed, `2` on a wrong call, `4` when the run, file, commit or decision is not there, `3` when `--reasoning` finds assumed decisions nobody checked, and `12` when the audit chain is broken. With `--json` a failure prints `{"error","message"}` on stderr, as the routes do.
+
+| Page action | Route | Command |
+| --- | --- | --- |
+| Files with status, counts, flags and viewed marks | `GET /spans/<id>/files` | `--files` |
+| One file's diff (add `?commit=<sha>` for one commit; `?force=true` prints generated, binary and large files) | `GET /spans/<id>/files/<path>/diff` | `--diff <path> [--commit <sha>] [--force]` |
+| Mark a file viewed (`?viewed=false` takes it off) | `POST /spans/<id>/files/<path>/viewed` | `--viewed <path> [--unview]` |
+| Commits of the branch, newest first, with files and lines | `GET /spans/<id>/commits` | `--commits` |
+| What one commit changed, and nothing before it | `GET /spans/<id>/commits/<sha>/diff` | `--commit <sha>` |
+| Specs, tasks and decisions with "because", source and the assumed flag | `GET /spans/<id>/reasoning` | `--reasoning` |
+| Mark assumed decisions as checked (JSON `{"ids":[...]}` or a form with `ids`) | `POST /spans/<id>/decisions/check` | `--check D1 D3` |
+| The journal with each entry's hash and the previous hash it should have | `GET /spans/<id>/audit` (`?format=json` downloads it) | `--audit` |
+| Verify the chain | `GET /spans/<id>/audit/verify` | `--audit --verify` |
+
+The whole-branch diff is `GET /spans/<id>/implementation` (also `./span runs implementation`).
+
+**Files.** `status` is `A`, `M`, `D` or `R` (a rename carries `from`); `binary`, `generated` and `large` (over 5,000 changed lines) tell a reader that a line diff is not the right view. A diff of such a file answers with its flags and an empty patch unless `force` is set, so a remote reader is not sent megabytes nobody reads. `viewed` is the person's place in the list, kept in `viewed.json` of the run; it changes no code and nothing waits for it. `<sha>` may be a unique prefix of at least 4 characters and must be a commit of the run's branch.
+
+**Reasoning.** The feature document `odd/tasks/<feature>.md` is read in Go: `## Specs` become `S1`.. (or the `S`/`AC` id the line starts with), `## Tasks` lines keep a trailing commit hash, and each `Decision:` line becomes `D1`.. in order. Write `Decision: <what> because <why> [source: S2; files: a.go, b.go]`. A decision with no `source` is **assumed**: the story did not say. `decisions/check` saves a person's mark on assumed decisions in `decisions.json`, records `decisions.checked` in the journal and changes no code; a settled decision or an unknown id is refused.
+
+**Audit.** Every entry carries `hash` (SHA-256 of its line) and `want` (the hash the previous line really has). The chain holds when each entry's `prev` equals `want`; `brokenAt` is the first entry where it does not, and the entries after it are returned as stored but cannot be trusted.
 
 ## The implementation report
 
@@ -1446,3 +1633,21 @@ A `kill -9`, a crash or a power cut stops Span without letting it pause the run 
 - **The agent it left running is ended.** While an agent runs, Span writes its pid and name to `<tree>/.span/agent.pid`. When a run of that tree starts again, with the tree's lock held, it ends that process group if the pid is still alive and its command line still names the agent, so it cannot keep editing files under the next agent. A pid the system has since reused for something else is left alone. The journal records `agent.reaped`.
 
 Limits: on Windows the note is cleared but the process is not killed, because its command line cannot be checked safely. Only one agent per tree is recorded at a time. Work an agent half-finished in the tree is not undone: the resumed stage starts from the files as they are.
+
+## The QA tab from a terminal
+
+Everything the QA tab shows is one HTTP route and one verb of `./span`, both reading the same code. Every verb takes `--spans .span/runs` and `--json`.
+
+| Page | Route | Terminal |
+| --- | --- | --- |
+| Proof overview | `GET /spans/{id}/qa` | `./span qa show <run>` |
+| Cases | `GET /spans/{id}/qa/cases?status=failed\|passed\|skipped\|new&group=file&q=` | `./span qa cases <run> [--failed\|--passed\|--skipped\|--new] [--group file] [--q text]` |
+| One case | `GET /spans/{id}/qa/cases/{name}` | `./span qa case <run> <name>` |
+| Rerun cases | `POST /spans/{id}/qa/rerun` `{"cases":[...]}` | `./span qa rerun <run> --failed` or `<name>...` |
+| Go on without proof | `POST /spans/{id}/qa/accept` `{"reason":"..."}` | `./span qa accept <run> --reason "..."` |
+| A gate's whole log | `GET /spans/{id}/logs/{gate}?from=&to=&q=&first_error=1` | `./span qa log <run> <gate> [--lines from:to] [--grep text] [--first-error]` |
+| What the agent printed | `GET /spans/{id}/transcript?stage=&from=&limit=` | `./span transcript <run> [--stage name] [--from n] [--limit n]` |
+
+Exit codes: `0` ok, `1` failed, `2` usage, `4` run, case, gate or stage not found, `10` a gate failed (`qa show`, and `qa rerun` when a case still fails), `11` no proof (the run never ran the gate, found no cases or has no sealed build), `13` the start of a log was cut (the lines kept are still printed).
+
+What the page does not claim: a skipped or missing gate is `held`, never `pass`; a run with no sealed build says so; cases need `go test -json` or `-v` output; a rerun supports gates that are `go test` commands; accepting only records the person's reason; the agent's output is plain text, so a transcript has blocks, not roles or tool calls, and `structured` is false.

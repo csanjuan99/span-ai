@@ -48,6 +48,36 @@ func main() {
 		os.Exit(reposCmd(os.Args[2:]))
 	case "jira":
 		os.Exit(jiraCmd(os.Args[2:]))
+	case "shape":
+		os.Exit(shapeMain(os.Args[2:]))
+	case "conflict":
+		os.Exit(conflictCmd(os.Args[2:]))
+	case "decision":
+		os.Exit(decisionCmd(os.Args[2:]))
+	case "implementation":
+		os.Exit(implementationCmd(os.Args[2:]))
+	case "qa":
+		os.Exit(qaCmd(os.Args[2:]))
+	case "transcript":
+		os.Exit(transcriptCmd(os.Args[2:]))
+	case "runs":
+		os.Exit(runsCmd(os.Args[2:]))
+	case "log":
+		os.Exit(logCmd(os.Args[2:]))
+	case "pause":
+		os.Exit(pauseCmd(os.Args[2:]))
+	case "rewind":
+		os.Exit(rewindCmd(os.Args[2:]))
+	case "note":
+		os.Exit(noteCmd(os.Args[2:]))
+	case "stage-agent":
+		os.Exit(stageAgentCmd(os.Args[2:]))
+	case "approve":
+		os.Exit(approveCmd(os.Args[2:]))
+	case "answer":
+		os.Exit(answerCmd(os.Args[2:]))
+	case "delete":
+		os.Exit(deleteCmd(os.Args[2:]))
 	default:
 		usage()
 		os.Exit(2)
@@ -212,18 +242,29 @@ func serveCmd(args []string) int {
 	return 0
 }
 
+// existingRunOptions is what the engine needs to continue a run that already exists: the options
+// its cursor and project say, and the snapshot they were read from. The server's wake and
+// the commands that answer a waiting run both start here, so they continue it the same way.
+func existingRunOptions(spans, id string) (engine.Options, engine.Snapshot, error) {
+	snap, err := engine.Load(spans, id)
+	if err != nil {
+		return engine.Options{}, engine.Snapshot{}, err
+	}
+	opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project, snap.Cursor.Folder, false)
+	if err != nil {
+		return engine.Options{}, engine.Snapshot{}, err
+	}
+	opt.Issue = snap.Cursor.Issue
+	return opt, snap, nil
+}
+
 func wakeRuns(spans string, hub *live.Hub) serve.Wake {
 	return func(ctx context.Context, id string, wakeup serve.Signal) error {
-		snap, err := engine.Load(spans, id)
-		if err != nil {
-			return err
-		}
-		opt, err := options(snap.Cursor.Workspace, spans, resolvePolicy(spans, snap.Cursor.Workspace, snap.Cursor.Project), snap.Cursor.Project, snap.Cursor.Folder, false)
+		opt, snap, err := existingRunOptions(spans, id)
 		if err != nil {
 			return err
 		}
 		opt.Watch = hub
-		opt.Issue = snap.Cursor.Issue
 		var brief string
 		if wakeup.Reload {
 			key := snap.Cursor.Issue
@@ -849,6 +890,11 @@ func usage() {
 ./span jira logout [--project .]
 ./span jira issue [--project .] AET-1234
 ./span jira search [--project .] [--jql "project = AET"]
+./span shape list|show|start|resume|agent|archive|delete|answer|context|split|seal|source|preview|jira|story|fork [--workspace .] [--json]   (./span shape for each verb's flags)
+./span conflict show|choose|hint|abort <run> ...   (./span conflict for each verb's flags)
+./span decision show|choose <run> ...
+./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
+./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
 ./span resume <id> [--workspace .]
