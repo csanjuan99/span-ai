@@ -80,6 +80,8 @@ export interface Cursor {
   branch: string
   base: string
   weight?: string
+  /** When the run began, RFC 3339. */
+  startedAt?: string
   workspace: string
   issue: string
   questions: string[]
@@ -172,6 +174,8 @@ export interface AgentState {
   gentle: boolean
   ready: boolean
   reason?: string
+  /** The command that installs the CLI. Set only while it is missing. */
+  install?: string
 }
 
 /** One run as the desk lists it: no statements, just the label and where it stands. */
@@ -189,6 +193,12 @@ export interface SpanHead {
   reason: string
   /** When the run last moved, RFC 3339. Empty when unknown. */
   updatedAt: string
+  /** When the run was opened, RFC 3339. Empty when the run never recorded it. */
+  startedAt: string
+  /** What a held run waits for: conflict, questions or decision. Empty for anything else. */
+  need: string
+  /** How many files, questions or decisions `need` counts. */
+  count: number
 }
 
 /** The agent section of the desk: what is known, what was asked, what would run. */
@@ -262,6 +272,10 @@ export interface Snapshot {
   stageAgents?: Record<string, string>
   /** {JIRA_KEY}-{SessionId}-{REPO_NAME}. What the page shows instead of the bare id. */
   label?: string
+  /** What the run is about: the first line of its brief without the story key. */
+  title?: string
+  /** The folder the run writes in. */
+  repo?: string
 }
 
 /** One acceptance case with the declaration that names it. */
@@ -439,8 +453,20 @@ export interface ProjectConfig {
   qa: string
   repair: number
   blockStatus: string
+  /** The Jira status a finished run moves its story to. Empty leaves the story alone. */
+  doneStatus: string
   stageTimeout: string
+  /** The project's CLI choice: auto, any, or a CLI id. */
+  agent: string
+  /** The CLI of each stage that calls a model. Empty means the stage follows `agent`. */
+  agents: Record<AgentStage, string>
 }
+
+/** The stages that call a model, the only ones span.yaml can give their own CLI. */
+export const agentStages = ["frame", "build", "inspect"] as const
+
+/** One of {@link agentStages}. */
+export type AgentStage = (typeof agentStages)[number]
 
 /** What a save may change in span.yaml. A key that is absent is left alone; a list is one check per entry. */
 export interface ConfigEdits {
@@ -455,6 +481,10 @@ export interface ConfigEdits {
   acceptance?: string[]
   qa?: string
   repair?: number
+  doneStatus?: string
+  "agents.frame"?: string
+  "agents.build"?: string
+  "agents.inspect"?: string
 }
 
 /** One value a save would change: its key in span.yaml, and what it reads before and after. */
@@ -464,8 +494,53 @@ export interface ConfigLine {
   after: string
 }
 
+/** One thing a save does for a person, such as "Next stage: a run that reaches merge will ask you". */
+export interface ConfigEffect {
+  label: string
+  text: string
+}
+
+/** What a preview says: the lines a save writes and what they mean for runs. */
+export interface ConfigPreviewReply {
+  lines: ConfigLine[]
+  effects: ConfigEffect[]
+}
+
 /** What a save changed, and the settings as they read afterwards. */
 export interface ConfigSaved {
   lines: ConfigLine[]
+  effects: ConfigEffect[]
   config: ProjectConfig
+}
+
+/** What the server found in a folder the welcome page was pointed at. */
+export interface FolderProbe {
+  path: string
+  exists: boolean
+  git: boolean
+  branch: string
+  remote: string
+  /** Files with uncommitted changes, untracked ones included. */
+  dirty: number
+  reason: string
+}
+
+/** One directory of the folder picker. */
+export interface FolderEntry {
+  name: string
+  path: string
+  git: boolean
+}
+
+/** The directories under a path, with the way back up. */
+export interface FolderListing {
+  path: string
+  parent: string
+  dirs: FolderEntry[]
+}
+
+/** How a Jira account test came out. */
+export interface JiraCheck {
+  status: "ok" | "unauthorized" | "unreachable" | "invalid"
+  message: string
 }

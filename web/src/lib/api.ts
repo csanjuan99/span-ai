@@ -30,7 +30,13 @@ import {
   type ConfigEdits,
   type ConfigLine,
   type ConfigSaved,
+  type ConfigEffect,
+  type ConfigPreviewReply,
   type ProjectConfig,
+  type FolderListing,
+  type AgentBlock,
+  type FolderProbe,
+  type JiraCheck,
   type SpanHead,
   type ShapeExample,
   type ShapeJira,
@@ -141,7 +147,10 @@ export function socketProtocol(): string {
   for (const byte of bytes) {
     binary += String.fromCharCode(byte)
   }
-  const encoded = btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")
+  const encoded = btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "")
   return `span.${encoded}`
 }
 
@@ -150,13 +159,21 @@ function command(value: unknown): StatementCommand {
     return { command: "", exitCode: 0 }
   }
   const error = text(value.error)
+  const output = text(value.output)
+  const logPath = text(value.logPath)
   const tests = isRecord(value.tests)
-    ? { passed: count(value.tests.passed), failed: count(value.tests.failed), skipped: count(value.tests.skipped) }
+    ? {
+        passed: count(value.tests.passed),
+        failed: count(value.tests.failed),
+        skipped: count(value.tests.skipped),
+      }
     : undefined
   return {
     command: text(value.command),
     exitCode: count(value.exitCode),
     ...(error === "" ? {} : { error }),
+    ...(output === "" ? {} : { output }),
+    ...(logPath === "" ? {} : { logPath }),
     ...(tests === undefined ? {} : { tests }),
   }
 }
@@ -165,7 +182,9 @@ function statement(value: unknown): Statement {
   if (!isRecord(value)) {
     throw new Error("statement is missing")
   }
-  const commands = Array.isArray(value.commands) ? value.commands.map(command) : []
+  const commands = Array.isArray(value.commands)
+    ? value.commands.map(command)
+    : []
   return {
     stage: text(value.stage),
     iteration: count(value.iteration),
@@ -181,7 +200,11 @@ function statement(value: unknown): Statement {
 }
 
 /** The first allowed value equal to the input, or the fallback. Narrows without a cast. */
-function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
   return allowed.find((item) => item === value) ?? fallback
 }
 
@@ -208,7 +231,9 @@ function conflictGroup(value: unknown): ConflictGroup | undefined {
   if (!isRecord(value) || text(value.id) === "") {
     return undefined
   }
-  const options = Array.isArray(value.options) ? value.options.map(conflictOption).filter(present) : []
+  const options = Array.isArray(value.options)
+    ? value.options.map(conflictOption).filter(present)
+    : []
   if (options.length === 0) {
     return undefined
   }
@@ -233,11 +258,34 @@ export function conflictOf(value: unknown): Conflict | undefined {
     return undefined
   }
   const state = oneOf(value.state, conflictStates, "proposing")
-  const groups = Array.isArray(value.groups) ? value.groups.map(conflictGroup).filter(present) : []
+  const groups = Array.isArray(value.groups)
+    ? value.groups.map(conflictGroup).filter(present)
+    : []
   if (state === "choosing" && groups.length === 0) {
     return undefined
   }
-  return { base: text(value.base), baseSHA: text(value.baseSHA), state, note: text(value.note), groups }
+  return {
+    base: text(value.base),
+    baseSHA: text(value.baseSHA),
+    state,
+    note: text(value.note),
+    groups,
+  }
+}
+
+/** The agent CLI that cannot work until a person acts, or undefined when the cursor names none. */
+function agentBlockOf(value: unknown): AgentBlock | undefined {
+  if (!isRecord(value) || text(value.agent) === "") {
+    return undefined
+  }
+  const detail = text(value.detail)
+  const time = text(value.time)
+  return {
+    kind: text(value.kind),
+    agent: text(value.agent),
+    ...(detail === "" ? {} : { detail }),
+    ...(time === "" ? {} : { time }),
+  }
 }
 
 function cursor(value: unknown): Cursor {
@@ -246,7 +294,9 @@ function cursor(value: unknown): Cursor {
   }
   const conflict = conflictOf(value.conflict)
   const decision = decisionOf(value.decision)
+  const block = agentBlockOf(value.agentBlock)
   return {
+    ...(block === undefined ? {} : { agentBlock: block }),
     ...(conflict === undefined ? {} : { conflict }),
     ...(decision === undefined ? {} : { decision }),
     id: text(value.id),
@@ -260,6 +310,7 @@ function cursor(value: unknown): Cursor {
     changeURL: text(value.changeURL),
     branch: text(value.branch),
     base: text(value.base),
+    startedAt: text(value.startedAt),
     workspace: text(value.workspace),
     issue: text(value.issue),
     questions: stringList(value.questions),
@@ -282,12 +333,16 @@ export function decisionOf(value: unknown): DecisionRequest | undefined {
         reversible: flag(option.reversible),
       }))
     : []
-  const usable = options.filter((option) => option.id !== "" && option.label !== "")
+  const usable = options.filter(
+    (option) => option.id !== "" && option.label !== ""
+  )
   if (usable.length < 2) {
     return undefined
   }
   const evidence = Array.isArray(value.evidence)
-    ? value.evidence.filter(isRecord).map((item) => ({ ref: text(item.ref), excerpt: text(item.excerpt) }))
+    ? value.evidence
+        .filter(isRecord)
+        .map((item) => ({ ref: text(item.ref), excerpt: text(item.excerpt) }))
     : []
   return {
     id: text(value.id),
@@ -305,7 +360,9 @@ function stringList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return []
   }
-  return value.filter((item): item is string => typeof item === "string" && item !== "")
+  return value.filter(
+    (item): item is string => typeof item === "string" && item !== ""
+  )
 }
 
 function gate(value: unknown): Gate | null {
@@ -328,7 +385,10 @@ export function branchChoice(value: unknown): BranchChoice {
     return { branches: [], defaultBase: "dev" }
   }
   const fallback = text(value.default)
-  return { branches: stringList(value.branches), defaultBase: fallback === "" ? "dev" : fallback }
+  return {
+    branches: stringList(value.branches),
+    defaultBase: fallback === "" ? "dev" : fallback,
+  }
 }
 
 /** What an empty Base branch field means for the chosen kind: span.yaml's base never applies to a hotfix, which starts from master. */
@@ -338,7 +398,10 @@ export function basePlaceholder(kind: string, defaultBase: string): string {
 
 /** The branch a run works on and the base its change opens into, for the span header. */
 export function branchLine(cursor: Pick<Cursor, "branch" | "base">): string {
-  const parts = [cursor.branch === "" ? "" : `branch ${cursor.branch}`, cursor.base === "" ? "" : `base ${cursor.base}`]
+  const parts = [
+    cursor.branch === "" ? "" : `branch ${cursor.branch}`,
+    cursor.base === "" ? "" : `base ${cursor.base}`,
+  ]
   return parts.filter((part) => part !== "").join(" · ")
 }
 
@@ -347,15 +410,21 @@ export function snapshot(value: unknown): Snapshot {
   if (!isRecord(value)) {
     throw new Error("span payload is not a snapshot")
   }
-  const statements = Array.isArray(value.statements) ? value.statements.map(statement) : []
+  const statements = Array.isArray(value.statements)
+    ? value.statements.map(statement)
+    : []
   const acceptance = Array.isArray(value.acceptance)
-    ? value.acceptance.filter(isRecord).map((line) => ({ id: text(line.id), text: text(line.text) }))
+    ? value.acceptance
+        .filter(isRecord)
+        .map((line) => ({ id: text(line.id), text: text(line.text) }))
     : []
   return {
     cursor: cursor(value.cursor),
     statements,
     acceptance,
     gate: gate(value.gate),
+    title: text(value.title),
+    repo: text(value.repo),
   }
 }
 
@@ -418,10 +487,14 @@ export function liveFrame(value: unknown): LiveFrame {
     frame.stage = value.stage
   }
   if (Array.isArray(value.lines)) {
-    frame.lines = value.lines.filter((line): line is string => typeof line === "string")
+    frame.lines = value.lines.filter(
+      (line): line is string => typeof line === "string"
+    )
   }
   if (Array.isArray(value.transcript)) {
-    frame.transcript = value.transcript.filter((line): line is string => typeof line === "string")
+    frame.transcript = value.transcript.filter(
+      (line): line is string => typeof line === "string"
+    )
   }
   if (value.span != null) {
     frame.span = snapshot(value.span)
@@ -455,10 +528,15 @@ async function readBody(response: Response): Promise<unknown> {
 export async function getJSON(url: string): Promise<unknown> {
   let response: Response
   try {
-    response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+    response = await fetch(url, {
+      headers: withAuth(new Headers({ Accept: "application/json" })),
+    })
   } catch (err: unknown) {
     // The request never got an answer: the server is down or on another port.
-    throw new ApiError("unreachable", err instanceof Error ? err.message : "the server did not answer")
+    throw new ApiError(
+      "unreachable",
+      err instanceof Error ? err.message : "the server did not answer"
+    )
   }
   refuseUnauthorized(response)
   const body = await readBody(response)
@@ -476,7 +554,11 @@ function startedRuns(value: unknown): StartedRun[] {
   const items: unknown[] = value
   const runs: StartedRun[] = []
   for (const item of items) {
-    if (isRecord(item) && typeof item.id === "string" && typeof item.stage === "string") {
+    if (
+      isRecord(item) &&
+      typeof item.id === "string" &&
+      typeof item.stage === "string"
+    ) {
       runs.push({ id: item.id, stage: item.stage, repo: text(item.repo) })
     }
   }
@@ -485,17 +567,34 @@ function startedRuns(value: unknown): StartedRun[] {
 
 /** Posts the desk form. A 202 returns the new span. Other success is configuration text. */
 export async function startRun(form: FormData): Promise<Started | string> {
-  const response = await fetch("/quickstart", { method: "POST", body: form, headers: withAuth(new Headers()) })
+  const response = await fetch("/quickstart", {
+    method: "POST",
+    body: form,
+    headers: withAuth(new Headers()),
+  })
   refuseUnauthorized(response)
   const raw = await response.text()
   if (response.status === 202) {
     const body = parseJSON(raw)
-    if (!isRecord(body) || typeof body.id !== "string" || typeof body.stage !== "string") {
+    if (
+      !isRecord(body) ||
+      typeof body.id !== "string" ||
+      typeof body.stage !== "string"
+    ) {
       throw new Error("quickstart did not return a span id")
     }
     const listed = startedRuns(body.runs)
-    const runs = listed.length > 0 ? listed : [{ id: body.id, stage: body.stage, repo: "" }]
-    return { id: body.id, stage: body.stage, runs, partial: body.partial === true, notes: text(body.notes) }
+    const runs =
+      listed.length > 0
+        ? listed
+        : [{ id: body.id, stage: body.stage, repo: "" }]
+    return {
+      id: body.id,
+      stage: body.stage,
+      runs,
+      partial: body.partial === true,
+      notes: text(body.notes),
+    }
   }
   if (!response.ok) {
     throw new Error(failureText(raw))
@@ -520,7 +619,12 @@ function failureText(raw: string): string {
 async function postJSON(url: string, body: unknown): Promise<void> {
   const response = await fetch(url, {
     method: "POST",
-    headers: withAuth(new Headers({ "Content-Type": "application/json", Accept: "application/json" })),
+    headers: withAuth(
+      new Headers({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      })
+    ),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   refuseUnauthorized(response)
@@ -533,13 +637,24 @@ async function postJSON(url: string, body: unknown): Promise<void> {
 }
 
 /** Sends the answers and continues the waiting run. */
-export async function answerRun(id: string, answers: { question: string; body: string }[]): Promise<void> {
+export async function answerRun(
+  id: string,
+  answers: { question: string; body: string }[]
+): Promise<void> {
   await postJSON(`/spans/${id}/answer`, { answers })
 }
 
 /** Answers the decision a run waits on and continues it where the answer says. */
-export async function decideRun(id: string, decision: string, option: string, text: string): Promise<void> {
-  await postForm(`/spans/${encodeURIComponent(id)}/decide`, new URLSearchParams({ decision, option, text }))
+export async function decideRun(
+  id: string,
+  decision: string,
+  option: string,
+  text: string
+): Promise<void> {
+  await postForm(
+    `/spans/${encodeURIComponent(id)}/decide`,
+    new URLSearchParams({ decision, option, text })
+  )
 }
 
 /** Reads the Jira story again and continues the waiting run. */
@@ -553,7 +668,11 @@ export async function resumeRun(id: string): Promise<void> {
 }
 
 /** Approves a stage held by its mode and continues the run; the server binds it to the commit shown. */
-export async function approveStage(id: string, stage: string, environment: string): Promise<void> {
+export async function approveStage(
+  id: string,
+  stage: string,
+  environment: string
+): Promise<void> {
   const form = new URLSearchParams({ stage })
   if (environment !== "") {
     form.set("environment", environment)
@@ -592,13 +711,19 @@ export function agentList(value: unknown): AgentStatus[] {
 }
 
 /** Posts a stage instruction and leaves the span page in place. */
-export async function saveInstruction(id: string, stage: string, body: string): Promise<void> {
+export async function saveInstruction(
+  id: string,
+  stage: string,
+  body: string
+): Promise<void> {
   const data = new URLSearchParams()
   data.set("stage", stage)
   data.set("body", body)
   const response = await fetch(`/spans/${id}/instructions`, {
     method: "POST",
-    headers: withAuth(new Headers({ "Content-Type": "application/x-www-form-urlencoded" })),
+    headers: withAuth(
+      new Headers({ "Content-Type": "application/x-www-form-urlencoded" })
+    ),
     body: data,
     redirect: "manual",
   })
@@ -610,10 +735,15 @@ export async function saveInstruction(id: string, stage: string, body: string): 
 }
 
 /** Posts a form body and returns the JSON payload. */
-export async function postForm(url: string, body: URLSearchParams): Promise<unknown> {
+export async function postForm(
+  url: string,
+  body: URLSearchParams
+): Promise<unknown> {
   const response = await fetch(url, {
     method: "POST",
-    headers: withAuth(new Headers({ "Content-Type": "application/x-www-form-urlencoded" })),
+    headers: withAuth(
+      new Headers({ "Content-Type": "application/x-www-form-urlencoded" })
+    ),
     body,
   })
   refuseUnauthorized(response)
@@ -634,6 +764,7 @@ function agentStateOf(value: unknown): AgentState {
     gentle: flag(row.gentle),
     ready: flag(row.ready),
     reason: text(row.reason),
+    install: text(row.install),
   }
 }
 
@@ -675,18 +806,31 @@ export function modelList(value: unknown): ModelList {
       options.push({ id: text(item.id), label: text(item.label) })
     }
   }
-  const source = body.source === "cli" || body.source === "fixed" ? body.source : "none"
-  return { models: options, free: body.free !== false, source, error: text(body.error) }
+  const source =
+    body.source === "cli" || body.source === "fixed" ? body.source : "none"
+  return {
+    models: options,
+    free: body.free !== false,
+    source,
+    error: text(body.error),
+  }
 }
 
 /** Save the model one CLI runs on. An empty model gives the choice back to Gentle AI. */
-export async function saveModel(project: string, cli: string, model: string): Promise<unknown> {
+export async function saveModel(
+  project: string,
+  cli: string,
+  model: string
+): Promise<unknown> {
   return postForm("/agent/model", new URLSearchParams({ project, cli, model }))
 }
 
 /** Delete one run's record. The server refuses a run that is being driven. */
 export async function deleteRun(id: string): Promise<void> {
-  await postForm(`/spans/${encodeURIComponent(id)}/delete`, new URLSearchParams())
+  await postForm(
+    `/spans/${encodeURIComponent(id)}/delete`,
+    new URLSearchParams()
+  )
 }
 
 /** Save the agent the project runs. The server rewrites one line of span.yaml. */
@@ -695,31 +839,54 @@ export async function saveAgent(project: string, id: string): Promise<unknown> {
 }
 
 /** Save which CLI one stage of this run uses. An empty id clears the exception. */
-export async function setStageAgent(id: string, stage: string, agentId: string): Promise<unknown> {
-  return postForm(`/spans/${encodeURIComponent(id)}/agent`, new URLSearchParams({ stage, agent: agentId }))
+export async function setStageAgent(
+  id: string,
+  stage: string,
+  agentId: string
+): Promise<unknown> {
+  return postForm(
+    `/spans/${encodeURIComponent(id)}/agent`,
+    new URLSearchParams({ stage, agent: agentId })
+  )
 }
 
 /** Ask the run to hold before the next stage starts. Answers why it did or did not. */
 export async function pauseRun(id: string): Promise<string> {
-  const body = await postForm(`/spans/${encodeURIComponent(id)}/pause`, new URLSearchParams())
+  const body = await postForm(
+    `/spans/${encodeURIComponent(id)}/pause`,
+    new URLSearchParams()
+  )
   const record = isRecord(body) ? body : {}
   return text(record.reason)
 }
 
 /** Restart the run at a stage. The note is what that stage reads when it starts. */
-export async function rewindRun(id: string, stage: string, note: string): Promise<unknown> {
-  return postForm(`/spans/${encodeURIComponent(id)}/rewind`, new URLSearchParams({ stage, note }))
+export async function rewindRun(
+  id: string,
+  stage: string,
+  note: string
+): Promise<unknown> {
+  return postForm(
+    `/spans/${encodeURIComponent(id)}/rewind`,
+    new URLSearchParams({ stage, note })
+  )
 }
 
 /** Cancel the stage that is running now. Answers why it did or did not. */
 export async function stopRun(id: string): Promise<string> {
-  const body = await postForm(`/spans/${encodeURIComponent(id)}/stop`, new URLSearchParams())
+  const body = await postForm(
+    `/spans/${encodeURIComponent(id)}/stop`,
+    new URLSearchParams()
+  )
   const record = isRecord(body) ? body : {}
   return text(record.reason)
 }
 
 /** Applies the person's choice: one `group`/`option` pair per group, in group order. */
-export async function chooseConflict(id: string, pairs: { group: string; option: string }[]): Promise<unknown> {
+export async function chooseConflict(
+  id: string,
+  pairs: { group: string; option: string }[]
+): Promise<unknown> {
   const body = new URLSearchParams()
   for (const pair of pairs) {
     body.append("group", pair.group)
@@ -730,12 +897,18 @@ export async function chooseConflict(id: string, pairs: { group: string; option:
 
 /** Sends the person's hint so the agent proposes the options again. */
 export async function hintConflict(id: string, hint: string): Promise<unknown> {
-  return postForm(`/spans/${encodeURIComponent(id)}/conflict/hint`, new URLSearchParams({ text: hint }))
+  return postForm(
+    `/spans/${encodeURIComponent(id)}/conflict/hint`,
+    new URLSearchParams({ text: hint })
+  )
 }
 
 /** Runs `git merge --abort`: the branch is left exactly as it was. */
 export async function abortConflict(id: string): Promise<unknown> {
-  return postForm(`/spans/${encodeURIComponent(id)}/conflict/abort`, new URLSearchParams())
+  return postForm(
+    `/spans/${encodeURIComponent(id)}/conflict/abort`,
+    new URLSearchParams()
+  )
 }
 
 function spanHeadOf(value: unknown): SpanHead {
@@ -751,6 +924,9 @@ function spanHeadOf(value: unknown): SpanHead {
     branch: text(row.branch),
     reason: text(row.reason),
     updatedAt: text(row.updatedAt),
+    startedAt: text(row.startedAt),
+    need: text(row.need),
+    count: typeof row.count === "number" ? row.count : 0,
   }
 }
 
@@ -772,38 +948,60 @@ export class ApiError extends Error {
   }
 }
 
-async function shapeRequest(method: "GET" | "POST", url: string, body?: unknown): Promise<unknown> {
+async function shapeRequest(
+  method: "GET" | "POST",
+  url: string,
+  body?: unknown
+): Promise<unknown> {
   const headers = new Headers({ Accept: "application/json" })
   if (body !== undefined) {
     headers.set("Content-Type", "application/json")
   }
-  const response = await fetch(url, { method, headers: withAuth(headers), body: body === undefined ? undefined : JSON.stringify(body) })
+  const response = await fetch(url, {
+    method,
+    headers: withAuth(headers),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
   refuseUnauthorized(response)
   const raw = await response.text()
   if (response.ok) {
     return raw === "" ? null : parseJSON(raw)
   }
   const payload = errorBody(raw)
-  throw new ApiError(isRecord(payload) ? text(payload.error) : "", messageOf(payload))
+  throw new ApiError(
+    isRecord(payload) ? text(payload.error) : "",
+    messageOf(payload)
+  )
 }
 
 function shapeSource(value: unknown): ShapeSource {
   const row = isRecord(value) ? value : {}
-  return { kind: oneOf(row.kind, shapeSourceKinds, "prompt"), ref: text(row.ref) }
+  return {
+    kind: oneOf(row.kind, shapeSourceKinds, "prompt"),
+    ref: text(row.ref),
+  }
 }
 
 function shapeJira(value: unknown): ShapeJira | null {
   if (!isRecord(value) || text(value.key) === "") {
     return null
   }
-  return { key: text(value.key), url: text(value.url), status: text(value.status) }
+  return {
+    key: text(value.key),
+    url: text(value.url),
+    status: text(value.status),
+  }
 }
 
 /** Reads one shaping session. The reply is untrusted input, so every part has a safe default. */
 export function shapeSession(value: unknown): ShapeSession {
   const body = isRecord(value) ? value : {}
   const map = isRecord(body.map) ? body.map : {}
-  const rules: ShapeRule[] = rows(map.rules).map((row) => ({ id: text(row.id), text: text(row.text), source: shapeSource(row.source) }))
+  const rules: ShapeRule[] = rows(map.rules).map((row) => ({
+    id: text(row.id),
+    text: text(row.text),
+    source: shapeSource(row.source),
+  }))
   const examples: ShapeExample[] = rows(map.examples).map((row) => ({
     id: text(row.id),
     rule: text(row.rule),
@@ -818,7 +1016,10 @@ export function shapeSession(value: unknown): ShapeSession {
     status: oneOf(row.status, shapeQuestionStates, "open"),
     answer: text(row.answer),
   }))
-  const split: ShapeSplit[] = rows(body.split).map((row) => ({ story: text(row.story), leftOut: text(row.leftOut) }))
+  const split: ShapeSplit[] = rows(body.split).map((row) => ({
+    story: text(row.story),
+    leftOut: text(row.leftOut),
+  }))
   const proposals: ShapeProposal[] = rows(body.proposals).map((row) => ({
     id: text(row.id),
     section: text(row.section),
@@ -857,56 +1058,132 @@ export function shapePreview(value: unknown): ShapePreview {
 
 /** The sessions of one workspace, newest as the server orders them. */
 export async function listShapes(workspace: string): Promise<ShapeSession[]> {
-  const body = await shapeRequest("GET", `/shapes?workspace=${encodeURIComponent(workspace)}`)
+  const body = await shapeRequest(
+    "GET",
+    `/shapes?workspace=${encodeURIComponent(workspace)}`
+  )
   return Array.isArray(body) ? body.map(shapeSession) : []
 }
 
 /** One session. */
-export async function getShape(id: string, workspace: string): Promise<ShapeSession> {
-  return shapeSession(await shapeRequest("GET", `/shapes/${encodeURIComponent(id)}?workspace=${encodeURIComponent(workspace)}`))
+export async function getShape(
+  id: string,
+  workspace: string
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest(
+      "GET",
+      `/shapes/${encodeURIComponent(id)}?workspace=${encodeURIComponent(workspace)}`
+    )
+  )
 }
 
 /** Starts a session; the server runs the first turn before it answers. */
-export async function createShape(input: { workspace: string; repo?: string; idea: string; agent?: string; model?: string }): Promise<ShapeSession> {
+export async function createShape(input: {
+  workspace: string
+  repo?: string
+  idea: string
+  agent?: string
+  model?: string
+}): Promise<ShapeSession> {
   return shapeSession(await shapeRequest("POST", "/shapes", input))
 }
 
 /** Sends every answer and accepted assumption of one round; the server runs the next turn. */
-export async function answerShape(id: string, workspace: string, answers: { question: string; text: string }[], assume: string[]): Promise<ShapeSession> {
-  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/answers`, { workspace, answers, assume }))
+export async function answerShape(
+  id: string,
+  workspace: string,
+  answers: { question: string; text: string }[],
+  assume: string[]
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/answers`, {
+      workspace,
+      answers,
+      assume,
+    })
+  )
 }
 
 /** Accepts the product-context proposals the person ticked. */
-export async function acceptShapeContext(id: string, workspace: string, accept: string[]): Promise<ShapeSession> {
-  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/context`, { workspace, accept }))
+export async function acceptShapeContext(
+  id: string,
+  workspace: string,
+  accept: string[]
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/context`, {
+      workspace,
+      accept,
+    })
+  )
 }
 
 /** Seals the story. Refuses with `shape_not_ready` while a question is open. */
-export async function sealShape(id: string, workspace: string): Promise<ShapeSession> {
-  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/seal`, { workspace }))
+export async function sealShape(
+  id: string,
+  workspace: string
+): Promise<ShapeSession> {
+  return shapeSession(
+    await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/seal`, {
+      workspace,
+    })
+  )
 }
 
 /** What the Jira issue would look like, with nothing created. */
-export async function previewShapeIssue(id: string, workspace: string, project: string, board: string): Promise<ShapePreview> {
+export async function previewShapeIssue(
+  id: string,
+  workspace: string,
+  project: string,
+  board: string
+): Promise<ShapePreview> {
   const query = new URLSearchParams({ workspace, project })
   if (board.trim() !== "") {
     query.set("board", board.trim())
   }
-  return shapePreview(await shapeRequest("GET", `/shapes/${encodeURIComponent(id)}/jira/preview?${query.toString()}`))
+  return shapePreview(
+    await shapeRequest(
+      "GET",
+      `/shapes/${encodeURIComponent(id)}/jira/preview?${query.toString()}`
+    )
+  )
 }
 
 /** Creates the issue in the backlog. Only the confirm button calls this, so `confirm` is always true. */
-export async function createShapeIssue(id: string, workspace: string, project: string, board: string): Promise<ShapeSession> {
-  const request: { workspace: string; project: string; board?: number; confirm: true } = { workspace, project, confirm: true }
+export async function createShapeIssue(
+  id: string,
+  workspace: string,
+  project: string,
+  board: string
+): Promise<ShapeSession> {
+  const request: {
+    workspace: string
+    project: string
+    board?: number
+    confirm: true
+  } = { workspace, project, confirm: true }
   if (board.trim() !== "") {
     request.board = Number(board.trim())
   }
-  return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/jira`, request))
+  return shapeSession(
+    await shapeRequest(
+      "POST",
+      `/shapes/${encodeURIComponent(id)}/jira`,
+      request
+    )
+  )
 }
 
 /** What span.yaml means when a key is absent. The settings page marks anything else as changed. */
 export const configDefaults = {
-  stages: { open: "auto", merge: "auto", promote: "auto", plan: "auto", conflict: "hold" },
+  stages: {
+    open: "auto",
+    merge: "auto",
+    promote: "auto",
+    plan: "auto",
+    conflict: "hold",
+  },
   repair: 3,
 } as const
 
@@ -915,6 +1192,7 @@ export function projectConfig(value: unknown): ProjectConfig {
   const body = isRecord(value) ? value : {}
   const stages = isRecord(body.stages) ? body.stages : {}
   const prove = isRecord(body.prove) ? body.prove : {}
+  const agents = isRecord(body.agents) ? body.agents : {}
   return {
     folder: text(body.folder),
     exists: flag(body.exists),
@@ -927,16 +1205,31 @@ export function projectConfig(value: unknown): ProjectConfig {
       plan: text(stages.plan) || configDefaults.stages.plan,
       conflict: text(stages.conflict) || configDefaults.stages.conflict,
     },
-    prove: { focused: stringList(prove.focused), fast: stringList(prove.fast), acceptance: stringList(prove.acceptance) },
+    prove: {
+      focused: stringList(prove.focused),
+      fast: stringList(prove.fast),
+      acceptance: stringList(prove.acceptance),
+    },
     qa: text(body.qa),
-    repair: typeof body.repair === "number" ? body.repair : configDefaults.repair,
+    repair:
+      typeof body.repair === "number" ? body.repair : configDefaults.repair,
     blockStatus: text(body.blockStatus),
+    doneStatus: text(body.doneStatus),
     stageTimeout: text(body.stageTimeout),
+    agent: text(body.agent) || "auto",
+    agents: {
+      frame: text(agents.frame),
+      build: text(agents.build),
+      inspect: text(agents.inspect),
+    },
   }
 }
 
 /** The form a preview or a save posts: the project, and only the keys that change. */
-export function configForm(project: string, edits: ConfigEdits): URLSearchParams {
+export function configForm(
+  project: string,
+  edits: ConfigEdits
+): URLSearchParams {
   const form = new URLSearchParams({ project })
   for (const [key, value] of Object.entries(edits)) {
     if (value !== undefined) {
@@ -948,16 +1241,92 @@ export function configForm(project: string, edits: ConfigEdits): URLSearchParams
 
 function configLines(value: unknown): ConfigLine[] {
   const body = isRecord(value) ? value : {}
-  return rows(body.lines).map((line) => ({ key: text(line.key), before: text(line.before), after: text(line.after) }))
+  return rows(body.lines).map((line) => ({
+    key: text(line.key),
+    before: text(line.before),
+    after: text(line.after),
+  }))
 }
 
-/** What saving `edits` would change in span.yaml. Nothing is written. A value the file would refuse throws. */
-export async function previewConfig(project: string, edits: ConfigEdits): Promise<ConfigLine[]> {
-  return configLines(await postForm("/config/preview", configForm(project, edits)))
+function configEffects(value: unknown): ConfigEffect[] {
+  const body = isRecord(value) ? value : {}
+  return rows(body.effects).map((effect) => ({
+    label: text(effect.label),
+    text: text(effect.text),
+  }))
+}
+
+/** What saving `edits` would change in span.yaml, and what that means for runs. Nothing is written. A value the file would refuse throws. */
+export async function previewConfig(
+  project: string,
+  edits: ConfigEdits
+): Promise<ConfigPreviewReply> {
+  const body = await postForm("/config/preview", configForm(project, edits))
+  return { lines: configLines(body), effects: configEffects(body) }
 }
 
 /** Writes `edits` into span.yaml and returns what changed with the settings as they now read. */
-export async function saveConfig(project: string, edits: ConfigEdits): Promise<ConfigSaved> {
+export async function saveConfig(
+  project: string,
+  edits: ConfigEdits
+): Promise<ConfigSaved> {
   const body = await postForm("/config", configForm(project, edits))
-  return { lines: configLines(body), config: projectConfig(isRecord(body) ? body.config : {}) }
+  return {
+    lines: configLines(body),
+    effects: configEffects(body),
+    config: projectConfig(isRecord(body) ? body.config : {}),
+  }
+}
+
+/** Reads the `/onboarding/folder` reply. */
+export function folderProbeOf(value: unknown): FolderProbe {
+  const body = isRecord(value) ? value : {}
+  return {
+    path: text(body.path),
+    exists: flag(body.exists),
+    git: flag(body.git),
+    branch: text(body.branch),
+    remote: text(body.remote),
+    dirty: typeof body.dirty === "number" ? body.dirty : 0,
+    reason: text(body.reason),
+  }
+}
+
+/** Reads the `/onboarding/folders` reply. */
+export function folderListingOf(value: unknown): FolderListing {
+  const body = isRecord(value) ? value : {}
+  const dirs = Array.isArray(body.dirs) ? body.dirs.filter(isRecord) : []
+  return {
+    path: text(body.path),
+    parent: text(body.parent),
+    dirs: dirs.map((dir) => ({
+      name: text(dir.name),
+      path: text(dir.path),
+      git: flag(dir.git),
+    })),
+  }
+}
+
+const jiraStatuses = ["ok", "unauthorized", "unreachable", "invalid"] as const
+
+/** Asks the server whether Jira accepts an account. A blank token tests the one already saved. */
+export async function checkJiraAccount(
+  project: string,
+  account: { url: string; email: string; token: string }
+): Promise<JiraCheck> {
+  const body = await postForm(
+    "/jira/check",
+    new URLSearchParams({ project, ...account })
+  )
+  const row = isRecord(body) ? body : {}
+  const status = jiraStatuses.find((item) => item === row.status) ?? "invalid"
+  return { status, message: text(row.message) }
+}
+
+/** Saves the Jira account for a project. A blank token keeps the one already saved. */
+export async function saveJiraAccount(
+  project: string,
+  account: { url: string; email: string; token: string }
+): Promise<unknown> {
+  return postForm("/jira/account", new URLSearchParams({ project, ...account }))
 }

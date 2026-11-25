@@ -30,7 +30,13 @@ import {
 function reply(status: number, body: unknown) {
   vi.stubGlobal(
     "fetch",
-    vi.fn(() => Promise.resolve(new Response(typeof body === "string" ? body : JSON.stringify(body), { status }))),
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(typeof body === "string" ? body : JSON.stringify(body), {
+          status,
+        })
+      )
+    )
   )
 }
 
@@ -54,7 +60,10 @@ describe("startRun", () => {
       return
     }
     expect(started.id).toBe("span-1")
-    expect(started.runs.map((run) => `${run.repo}:${run.id}`)).toEqual(["api:span-1", "web:span-2"])
+    expect(started.runs.map((run) => `${run.repo}:${run.id}`)).toEqual([
+      "api:span-1",
+      "web:span-2",
+    ])
     expect(started.partial).toBe(false)
   })
 
@@ -85,7 +94,11 @@ describe("startRun", () => {
   })
 
   it("ignores run entries that are not runs", async () => {
-    reply(202, { id: "span-1", stage: "intake", runs: [null, 3, { id: 4 }, { id: "span-2", stage: "intake" }] })
+    reply(202, {
+      id: "span-1",
+      stage: "intake",
+      runs: [null, 3, { id: 4 }, { id: "span-2", stage: "intake" }],
+    })
     const started = await startRun(new FormData())
     if (typeof started === "string") {
       throw new Error("expected a started run")
@@ -94,14 +107,25 @@ describe("startRun", () => {
   })
 
   it("shows the server's busy message, not a bare status", async () => {
-    reply(409, { error: "busy", message: "another run is active in this checkout (pid 4 run span-3)" })
-    await expect(startRun(new FormData())).rejects.toThrow("another run is active in this checkout")
+    reply(409, {
+      error: "busy",
+      message: "another run is active in this checkout (pid 4 run span-3)",
+    })
+    await expect(startRun(new FormData())).rejects.toThrow(
+      "another run is active in this checkout"
+    )
   })
 })
 
 describe("approveStage", () => {
   it("posts the stage and the environment as a form", async () => {
-    const fetchSpy = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ id: "s", stage: "promote" }), { status: 202 })))
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "s", stage: "promote" }), {
+          status: 202,
+        })
+      )
+    )
     vi.stubGlobal("fetch", fetchSpy)
     await approveStage("span-1", "promote", "preview")
     const call = fetchSpy.mock.calls[0] as unknown as [string, RequestInit]
@@ -112,7 +136,9 @@ describe("approveStage", () => {
 
   it("surfaces the server's reason when the run is not held there", async () => {
     reply(409, { error: "invalid", message: "this run is not held at merge" })
-    await expect(approveStage("span-1", "merge", "")).rejects.toThrow("this run is not held at merge")
+    await expect(approveStage("span-1", "merge", "")).rejects.toThrow(
+      "this run is not held at merge"
+    )
   })
 })
 
@@ -141,8 +167,17 @@ function group(over: Record<string, unknown> = {}): Record<string, unknown> {
   }
 }
 
-function conflictBody(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { base: "main", baseSHA: "abc", state: "choosing", note: "two groups", groups: [group()], ...over }
+function conflictBody(
+  over: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    base: "main",
+    baseSHA: "abc",
+    state: "choosing",
+    note: "two groups",
+    groups: [group()],
+    ...over,
+  }
 }
 
 describe("conflictOf", () => {
@@ -187,7 +222,17 @@ describe("conflictOf", () => {
 
   it("degrades unknown enums to the safe reading instead of throwing", () => {
     const parsed = conflictOf(
-      conflictBody({ groups: [group({ kind: "submodule", options: [option({ risk: "tiny", action: "explode" }), option({ id: "o2" })] })] }),
+      conflictBody({
+        groups: [
+          group({
+            kind: "submodule",
+            options: [
+              option({ risk: "tiny", action: "explode" }),
+              option({ id: "o2" }),
+            ],
+          }),
+        ],
+      })
     )
     const first = parsed?.groups[0]
     expect(first?.kind).toBe("other")
@@ -201,19 +246,30 @@ describe("conflictOf", () => {
   })
 
   it("drops a group with no options, and the conflict when no group is left", () => {
-    expect(conflictOf(conflictBody({ groups: [group({ options: [] })] }))).toBeUndefined()
-    const parsed = conflictOf(conflictBody({ groups: [group({ id: "empty", options: [] }), group({ id: "g2" })] }))
+    expect(
+      conflictOf(conflictBody({ groups: [group({ options: [] })] }))
+    ).toBeUndefined()
+    const parsed = conflictOf(
+      conflictBody({
+        groups: [group({ id: "empty", options: [] }), group({ id: "g2" })],
+      })
+    )
     expect(parsed?.groups.map((item) => item.id)).toEqual(["g2"])
   })
 
   it("keeps a proposing conflict without groups: the agent is still reading", () => {
-    expect(conflictOf(conflictBody({ state: "proposing", groups: [] }))?.state).toBe("proposing")
+    expect(
+      conflictOf(conflictBody({ state: "proposing", groups: [] }))?.state
+    ).toBe("proposing")
   })
 
   it("fills missing fields with empty values and ignores a non-object", () => {
     expect(conflictOf(null)).toBeUndefined()
     expect(conflictOf("conflict")).toBeUndefined()
-    const parsed = conflictOf({ state: "choosing", groups: [{ id: "g1", options: [{ id: "o1" }] }] })
+    const parsed = conflictOf({
+      state: "choosing",
+      groups: [{ id: "g1", options: [{ id: "o1" }] }],
+    })
     expect(parsed).toEqual({
       base: "",
       baseSHA: "",
@@ -226,17 +282,33 @@ describe("conflictOf", () => {
           files: [],
           summary: "",
           chosen: "",
-          options: [{ id: "o1", title: "", summary: "", risk: "high", action: "keep", command: "", diff: "" }],
+          options: [
+            {
+              id: "o1",
+              title: "",
+              summary: "",
+              risk: "high",
+              action: "keep",
+              command: "",
+              diff: "",
+            },
+          ],
         },
       ],
     })
   })
 
   it("reads the conflict on the cursor and on the live frame", () => {
-    const span = snapshot({ cursor: { id: "s", conflict: conflictBody() }, statements: [] })
+    const span = snapshot({
+      cursor: { id: "s", conflict: conflictBody() },
+      statements: [],
+    })
     expect(span.cursor.conflict?.base).toBe("main")
     expect(snapshot({ cursor: { id: "s" } }).cursor.conflict).toBeUndefined()
-    const frame = liveFrame({ type: "conflict", conflict: conflictBody({ state: "applying" }) })
+    const frame = liveFrame({
+      type: "conflict",
+      conflict: conflictBody({ state: "applying" }),
+    })
     expect(frame.conflict?.state).toBe("applying")
   })
 })
@@ -256,14 +328,20 @@ describe("conflict posts", () => {
     const [url, init] = fetchMock.mock.calls[0] ?? ["", {}]
     expect(url).toBe("/spans/span%201/conflict/choose")
     expect(String(init.body)).toBe("group=g1&option=o2&group=g2&option=o1")
-    expect(new Headers(init.headers).get("Content-Type")).toBe("application/x-www-form-urlencoded")
+    expect(new Headers(init.headers).get("Content-Type")).toBe(
+      "application/x-www-form-urlencoded"
+    )
   })
 
   it("sends the hint text and the abort, and surfaces the server message", async () => {
     const fetchMock = vi.fn((url: string, init: RequestInit) => {
       void init
       if (url.endsWith("/abort")) {
-        return Promise.resolve(new Response(JSON.stringify({ message: "no merge in progress" }), { status: 409 }))
+        return Promise.resolve(
+          new Response(JSON.stringify({ message: "no merge in progress" }), {
+            status: 409,
+          })
+        )
       }
       return Promise.resolve(new Response("", { status: 202 }))
     })
@@ -283,7 +361,14 @@ describe("liveFrame seq", () => {
   })
 
   it("drops a seq that is not a whole non-negative number", () => {
-    for (const seq of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "3", null]) {
+    for (const seq of [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      "3",
+      null,
+    ]) {
       expect(liveFrame({ type: "cursor", seq }).seq).toBeUndefined()
     }
   })
@@ -293,13 +378,20 @@ describe("liveFrame offset", () => {
   it("keeps a whole non-negative offset and drops anything else", () => {
     expect(liveFrame({ type: "transcript", offset: 16 }).offset).toBe(16)
     expect(liveFrame({ type: "transcript", offset: -1 }).offset).toBeUndefined()
-    expect(liveFrame({ type: "transcript", offset: "16" }).offset).toBeUndefined()
+    expect(
+      liveFrame({ type: "transcript", offset: "16" }).offset
+    ).toBeUndefined()
   })
 })
 
 describe("branchChoice", () => {
   it("keeps the branch names and the default base", () => {
-    expect(branchChoice({ branches: ["dev", "feat/SAL-3", 4, ""], default: "feat/SAL-3" })).toEqual({
+    expect(
+      branchChoice({
+        branches: ["dev", "feat/SAL-3", 4, ""],
+        default: "feat/SAL-3",
+      })
+    ).toEqual({
       branches: ["dev", "feat/SAL-3"],
       defaultBase: "feat/SAL-3",
     })
@@ -312,7 +404,9 @@ describe("branchChoice", () => {
 
 describe("branchLine", () => {
   it("names the branch and the base it opens into", () => {
-    const span = snapshot({ cursor: { branch: "feat/SAL-4", base: "feat/SAL-3" } })
+    const span = snapshot({
+      cursor: { branch: "feat/SAL-4", base: "feat/SAL-3" },
+    })
     expect(span.cursor.base).toBe("feat/SAL-3")
     expect(branchLine(span.cursor)).toBe("branch feat/SAL-4 · base feat/SAL-3")
   })
@@ -333,16 +427,38 @@ describe("basePlaceholder", () => {
 
 describe("models", () => {
   it("reads the model chosen for each CLI and drops empty ones", () => {
-    const choice = agentChoice({ agents: [], models: { claude: "opus", cursor: "", pi: 4 } })
+    const choice = agentChoice({
+      agents: [],
+      models: { claude: "opus", cursor: "", pi: 4 },
+    })
     expect(choice.models).toEqual({ claude: "opus" })
     expect(agentChoice({}).models).toEqual({})
   })
 
   it("reads a model list and degrades a bad reply to an empty free-text one", () => {
     expect(
-      modelList({ models: [{ id: "opus", label: "Opus" }, { id: "" }, null, { label: "x" }], free: true, source: "fixed" }),
-    ).toEqual({ models: [{ id: "opus", label: "Opus" }], free: true, source: "fixed", error: "" })
-    expect(modelList("nope")).toEqual({ models: [], free: true, source: "none", error: "" })
+      modelList({
+        models: [
+          { id: "opus", label: "Opus" },
+          { id: "" },
+          null,
+          { label: "x" },
+        ],
+        free: true,
+        source: "fixed",
+      })
+    ).toEqual({
+      models: [{ id: "opus", label: "Opus" }],
+      free: true,
+      source: "fixed",
+      error: "",
+    })
+    expect(modelList("nope")).toEqual({
+      models: [],
+      free: true,
+      source: "none",
+      error: "",
+    })
     expect(modelList({ source: "weird" }).source).toBe("none")
   })
 
@@ -350,10 +466,20 @@ describe("models", () => {
     const fetchMock = vi.fn((url: string, init: RequestInit) => {
       void url
       void init
-      return Promise.resolve(new Response(JSON.stringify({ message: "Claude: not ready. Gentle AI and its configuration are required" }), { status: 400 }))
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            message:
+              "Claude: not ready. Gentle AI and its configuration are required",
+          }),
+          { status: 400 }
+        )
+      )
     })
     vi.stubGlobal("fetch", fetchMock)
-    await expect(saveModel("/p", "claude", "opus")).rejects.toThrow("Gentle AI and its configuration are required")
+    await expect(saveModel("/p", "claude", "opus")).rejects.toThrow(
+      "Gentle AI and its configuration are required"
+    )
     const [url, init] = fetchMock.mock.calls[0] ?? ["", {}]
     expect(url).toBe("/agent/model")
     expect(String(init.body)).toBe("project=%2Fp&cli=claude&model=opus")
@@ -368,8 +494,19 @@ const rawSession = {
   status: "ready",
   map: {
     rules: [{ id: "R1", text: "rule", source: { kind: "code", ref: "a.go" } }],
-    examples: [{ id: "E1", rule: "R1", text: "ex", source: { kind: "prompt", ref: "" } }],
-    questions: [{ id: "Q1", text: "q?", blocks: "R1", assume: "yes", status: "open", answer: "" }],
+    examples: [
+      { id: "E1", rule: "R1", text: "ex", source: { kind: "prompt", ref: "" } },
+    ],
+    questions: [
+      {
+        id: "Q1",
+        text: "q?",
+        blocks: "R1",
+        assume: "yes",
+        status: "open",
+        answer: "",
+      },
+    ],
   },
   split: [{ story: "a", leftOut: "b" }],
   proposals: [{ id: "P1", section: "Users", text: "t", status: "proposed" }],
@@ -398,12 +535,20 @@ describe("shapeSession", () => {
 describe("shape client", () => {
   it("posts the idea and reads the session back", async () => {
     reply(201, rawSession)
-    const session = await createShape({ workspace: "/w", repo: "api", idea: "idea" })
+    const session = await createShape({
+      workspace: "/w",
+      repo: "api",
+      idea: "idea",
+    })
     expect(session.id).toBe("sh-1")
     const call = vi.mocked(fetch).mock.calls[0]
     expect(call?.[0]).toBe("/shapes")
     expect(call?.[1]?.method).toBe("POST")
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ workspace: "/w", repo: "api", idea: "idea" })
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      workspace: "/w",
+      repo: "api",
+      idea: "idea",
+    })
   })
 
   it("sends answers and assumptions in one body", async () => {
@@ -411,39 +556,75 @@ describe("shape client", () => {
     await answerShape("sh-1", "/w", [{ question: "Q1", text: "a" }], ["Q2"])
     const call = vi.mocked(fetch).mock.calls[0]
     expect(call?.[0]).toBe("/shapes/sh-1/answers")
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ workspace: "/w", answers: [{ question: "Q1", text: "a" }], assume: ["Q2"] })
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      workspace: "/w",
+      answers: [{ question: "Q1", text: "a" }],
+      assume: ["Q2"],
+    })
   })
 
   it("keeps the error code and message of a refusal", async () => {
     reply(409, { error: "shape_not_ready", message: "open questions: Q1" })
     const failure = await sealShape("sh-1", "/w").catch((err: unknown) => err)
     expect(failure).toBeInstanceOf(ApiError)
-    expect(failure).toMatchObject({ code: "shape_not_ready", message: "open questions: Q1" })
+    expect(failure).toMatchObject({
+      code: "shape_not_ready",
+      message: "open questions: Q1",
+    })
   })
 
   it("reads the preview from the query", async () => {
-    reply(200, { project: "PRJ", board: { id: 7, name: "Kanban" }, backlogStatuses: ["Backlog"], summary: "s", description: "d" })
+    reply(200, {
+      project: "PRJ",
+      board: { id: 7, name: "Kanban" },
+      backlogStatuses: ["Backlog"],
+      summary: "s",
+      description: "d",
+    })
     const preview = await previewShapeIssue("sh-1", "/w", "PRJ", "7")
     expect(preview.board).toEqual({ id: 7, name: "Kanban" })
-    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("/shapes/sh-1/jira/preview?workspace=%2Fw&project=PRJ&board=7")
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "/shapes/sh-1/jira/preview?workspace=%2Fw&project=PRJ&board=7"
+    )
   })
 
   it("confirms the Jira creation explicitly", async () => {
     reply(200, rawSession)
     await createShapeIssue("sh-1", "/w", "PRJ", "")
-    const body: unknown = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
+    const body: unknown = JSON.parse(
+      String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)
+    )
     expect(body).toEqual({ workspace: "/w", project: "PRJ", confirm: true })
   })
 })
 
 describe("snapshot test counts", () => {
-  const cursorOf = { id: "r1", stage: "prove", iteration: 1, hold: true, stop: false, done: false }
+  const cursorOf = {
+    id: "r1",
+    stage: "prove",
+    iteration: 1,
+    hold: true,
+    stop: false,
+    done: false,
+  }
   const read = (commands: unknown[]) =>
-    snapshot({ cursor: cursorOf, statements: [{ stage: "prove", iteration: 1, verdict: "iterate", reason: "", commands }] })
-      .statements[0]?.commands ?? []
+    snapshot({
+      cursor: cursorOf,
+      statements: [
+        {
+          stage: "prove",
+          iteration: 1,
+          verdict: "iterate",
+          reason: "",
+          commands,
+        },
+      ],
+    }).statements[0]?.commands ?? []
 
   it("keeps the counts a check printed, and reads a field the engine left out as zero", () => {
-    const [counted] = read([{ command: "npm test", exitCode: 1, tests: { passed: 41, failed: 2 } }])
+    const [counted] = read([
+      { command: "npm test", exitCode: 1, tests: { passed: 41, failed: 2 } },
+    ])
     expect(counted?.tests).toEqual({ passed: 41, failed: 2, skipped: 0 })
   })
 
@@ -482,7 +663,11 @@ describe("projectConfig", () => {
 
 describe("configForm", () => {
   it("posts the project and only the keys that change, a list as one line per check", () => {
-    const form = configForm("/work/api", { merge: "hold", fast: ["go vet ./...", "go test ./..."], repair: 5 })
+    const form = configForm("/work/api", {
+      merge: "hold",
+      fast: ["go vet ./...", "go test ./..."],
+      repair: 5,
+    })
     expect(Object.fromEntries(form)).toEqual({
       project: "/work/api",
       merge: "hold",
@@ -503,12 +688,86 @@ describe("saveConfig", () => {
       config: { exists: true, stages: { merge: "hold" } },
     })
     const saved = await saveConfig("/work/api", { merge: "hold" })
-    expect(saved.lines).toEqual([{ key: "stages.merge", before: "auto", after: "hold" }])
+    expect(saved.lines).toEqual([
+      { key: "stages.merge", before: "auto", after: "hold" },
+    ])
     expect(saved.config.stages.merge).toBe("hold")
   })
 
   it("throws the server's reason when the file would refuse the value", async () => {
-    reply(400, { error: "invalid", message: 'stages.merge "maybe" is not auto or hold' })
-    await expect(saveConfig("/work/api", { merge: "maybe" })).rejects.toThrow("is not auto or hold")
+    reply(400, {
+      error: "invalid",
+      message: 'stages.merge "maybe" is not auto or hold',
+    })
+    await expect(saveConfig("/work/api", { merge: "maybe" })).rejects.toThrow(
+      "is not auto or hold"
+    )
+  })
+})
+
+describe("snapshot", () => {
+  const cursor = { id: "a", stage: "prove", startedAt: "2026-11-25T14:08:00Z" }
+
+  it("keeps what a failing check printed and where its full log is", () => {
+    const got = snapshot({
+      cursor,
+      statements: [
+        {
+          stage: "prove",
+          verdict: "hold",
+          commands: [
+            {
+              command: "go test",
+              exitCode: 1,
+              output: "FAIL x",
+              logPath: "iter/1/logs/prove-1.log",
+            },
+          ],
+        },
+      ],
+    })
+    expect(got.statements[0]?.commands[0]).toMatchObject({
+      output: "FAIL x",
+      logPath: "iter/1/logs/prove-1.log",
+    })
+  })
+
+  it("reads what the run is about, its folder and when it began", () => {
+    const got = snapshot({
+      cursor,
+      statements: [],
+      title: "Register a payment",
+      repo: "billing-api",
+    })
+    expect(got.title).toBe("Register a payment")
+    expect(got.repo).toBe("billing-api")
+    expect(got.cursor.startedAt).toBe("2026-11-25T14:08:00Z")
+  })
+})
+
+describe("snapshot agent block", () => {
+  it("keeps an agent that cannot work so the page can say what to do", () => {
+    const got = snapshot({
+      cursor: {
+        id: "a",
+        agentBlock: {
+          kind: "quota",
+          agent: "claude-code",
+          detail: "usage limit reached",
+        },
+      },
+      statements: [],
+    })
+    expect(got.cursor.agentBlock).toEqual({
+      kind: "quota",
+      agent: "claude-code",
+      detail: "usage limit reached",
+    })
+  })
+
+  it("has no block when the cursor names no agent", () => {
+    expect(
+      snapshot({ cursor: { id: "a" }, statements: [] }).cursor.agentBlock
+    ).toBeUndefined()
   })
 })
