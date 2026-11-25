@@ -31,11 +31,7 @@ import {
   withAgent,
   type TimelineAction,
 } from "@/lib/timeline"
-import type {
-  AgentStatus,
-  BranchChoice,
-  SpanHead,
-} from "@/lib/types"
+import type { AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
 import { isRecord, reasonText, rows, text } from "@/lib/guards"
 import {
   jiraSessionOf,
@@ -45,7 +41,11 @@ import {
 } from "@/lib/jira-session"
 import { repoNames } from "@/lib/repos"
 import { Shell } from "@/components/shell/Shell"
-import type { Lookup, StoryHit } from "@/components/start-run/JiraLookup"
+import type {
+  FoundStory,
+  Lookup,
+  StoryHit,
+} from "@/components/start-run/JiraLookup"
 import type { StartSource } from "@/components/start-run/WhatSection"
 import { useStartInfo } from "@/hooks/use-start-info"
 import { shapeArrival } from "@/lib/start-info"
@@ -63,12 +63,25 @@ function storiesOf(value: unknown): StoryHit[] {
   return rows(isRecord(value) ? value.issues : []).map((item) => ({
     key: text(item.key),
     summary: text(item.summary),
+    status: text(item.status),
   }))
 }
 
-function storyOf(value: unknown): { key: string; brief: string } {
+function storyOf(value: unknown): { found: FoundStory; brief: string } {
   const body = isRecord(value) ? value : {}
-  return { key: text(body.key), brief: text(body.brief) }
+  const key = text(body.key)
+  const brief = text(body.brief)
+  return {
+    brief,
+    found: {
+      key,
+      title: text(body.summary) || (brief.split("\n")[0] ?? key),
+      status: text(body.status),
+      type: text(body.type),
+      url: text(body.url),
+      acceptance: text(body.acceptance),
+    },
+  }
 }
 
 /** Desk: list runs or start a new one (N1–N4). */
@@ -84,6 +97,7 @@ export function Desk() {
   )
   const [session, setSession] = useState<JiraSession>(noSession)
   const [stories, setStories] = useState<StoryHit[]>([])
+  const [searched, setSearched] = useState("")
   const [issue, setIssue] = useState(arrival?.issue ?? "")
   const [story, setStory] = useState(() =>
     (location.state as { sample?: boolean } | null)?.sample === true
@@ -258,6 +272,9 @@ export function Desk() {
       setJiraNote("Session saved for this folder.")
       const next = await readJiraSession(workspace)
       setSession(jiraSessionOf(next))
+      if (issue.trim() !== "") {
+        void loadStory(issue.trim())
+      }
     } catch (err: unknown) {
       setJiraNote(reasonText(err, "the session was not saved"))
     }
@@ -270,13 +287,9 @@ export function Desk() {
         `/jira/issues/${encodeURIComponent(key)}?path=${encodeURIComponent(workspace)}`
       )
       const loaded = storyOf(body)
-      setIssue(loaded.key)
+      setIssue(loaded.found.key)
       setStory(loaded.brief)
-      setLookup({
-        phase: "found",
-        key: loaded.key,
-        title: loaded.brief.split("\n")[0] ?? loaded.key,
-      })
+      setLookup({ phase: "found", story: loaded.found })
       void readSession(workspace)
     } catch (err: unknown) {
       setLookup({
@@ -287,12 +300,18 @@ export function Desk() {
     }
   }
 
-  async function loadMine() {
+  async function searchStories(words: string) {
+    const jql =
+      words === ""
+        ? ""
+        : `text ~ "${words.replaceAll('"', " ")}" ORDER BY updated DESC`
     try {
       const body = await getJSON(
-        `/jira/search?path=${encodeURIComponent(workspace)}`
+        `/jira/search?path=${encodeURIComponent(workspace)}&jql=${encodeURIComponent(jql)}`
       )
       setStories(storiesOf(body))
+      setSearched(words)
+      setLookup({ phase: "idle" })
       void readSession(workspace)
     } catch (err: unknown) {
       setLookup({
@@ -468,10 +487,11 @@ export function Desk() {
                 token,
                 onToken: setToken,
                 stories,
+                searched,
                 lookup,
                 note: jiraNote,
                 onLoadOne: () => void loadStory(issue),
-                onLoadMine: () => void loadMine(),
+                onSearch: (words) => void searchStories(words),
                 onSaveSession: () => void saveSession(),
                 onPick: (key) => {
                   setIssue(key)

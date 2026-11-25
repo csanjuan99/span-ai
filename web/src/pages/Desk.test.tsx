@@ -124,7 +124,7 @@ describe("Desk", () => {
     )
     await openForm()
     expect(await screen.findByText(/me@example\.test/)).toBeTruthy()
-    expect(screen.queryByLabelText("Token")).toBeNull()
+    expect(screen.queryByLabelText("API token")).toBeNull()
     // The session is closed from Settings, which stay out of the way of the start form.
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
   })
@@ -150,7 +150,7 @@ describe("Desk", () => {
     await openForm()
     fireEvent.click(await screen.findByRole("button", { name: /^Connect$/ }))
     await waitFor(() => {
-      expect(screen.getByLabelText("Token")).toBeTruthy()
+      expect(screen.getByLabelText("API token")).toBeTruthy()
     })
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
   })
