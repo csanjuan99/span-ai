@@ -77,6 +77,13 @@ beforeEach(() => {
   })
 })
 
+/** The empty desk shows the first-run card; the start form opens behind "Paste a Jira story". */
+async function openForm() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Paste a Jira story" })
+  )
+}
+
 describe("Desk", () => {
   it("does not call a desk empty when the list never loaded", async () => {
     getJSON.mockImplementation((url: string) => {
@@ -141,6 +148,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
+    await openForm()
     fireEvent.click(await screen.findByRole("button", { name: /Connect Jira/ }))
     await waitFor(() => {
       expect(screen.getByLabelText("Token")).toBeTruthy()
@@ -166,6 +174,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
+    await openForm()
     fireEvent.click(await screen.findByRole("button", { name: "Find repos" }))
     await waitFor(() => {
       expect(screen.getByText("api")).toBeTruthy()
@@ -202,6 +211,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
+    await openForm()
     await waitFor(() => {
       expect(jiraCalls).toBe(1)
     })
@@ -220,6 +230,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
+    await openForm()
     const field = await screen.findByLabelText("Base branch")
     await waitFor(() => {
       expect(field.getAttribute("placeholder")).toBe("dev")
@@ -249,6 +260,7 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
+    await openForm()
     fireEvent.click(
       await screen.findByRole("button", { name: "Configure and run" })
     )
@@ -302,5 +314,17 @@ describe("Desk", () => {
     const sent = startRun.mock.calls[0]?.[0] as FormData
     expect(sent.get("story")).toContain("Add a /healthz endpoint")
     expect(sent.get("workspace")).toBe(".")
+  })
+
+  it("shows only the first-run card on an empty desk until a story is pasted", async () => {
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    await screen.findByRole("button", { name: "Start with the sample brief" })
+    expect(screen.getByLabelText("Story").closest("[hidden]")).not.toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Paste a Jira story" }))
+    expect(screen.getByLabelText("Story").closest("[hidden]")).toBeNull()
   })
 })

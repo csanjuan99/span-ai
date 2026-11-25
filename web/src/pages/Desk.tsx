@@ -504,7 +504,9 @@ export function Desk() {
         />
       ) : null}
       {starting || (listOk && spans.length === 0) ? (
-        <>
+        // On the empty desk the form stays mounted but hidden: the sample brief starts through it,
+        // and the design (P2) shows nothing below the first-run card until "Paste a Jira story".
+        <div hidden={!starting} className={starting ? "contents" : undefined}>
           <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
           <form
             ref={formRef}
@@ -684,7 +686,7 @@ export function Desk() {
               ) : null}
             </div>
           </form>
-        </>
+        </div>
       ) : null}
       <nav
         aria-label="More"
