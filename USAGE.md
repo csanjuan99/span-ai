@@ -1302,6 +1302,8 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | GET | `/jira/search?path=&jql=` | Up to 20 issues. Empty `jql` lists issues assigned to the current user |
 | POST | `/quickstart` | Fields `workspace`, `repo`, `kind`, `issue`, `story`, and `file`. `202` and `{"id","stage"}` when a run starts. Configuration text stays `200` |
 | GET | `/spans` | `Accept: application/json` returns `{"spans":[...]}`. Any other accept is the desk |
+
+Each run in `{"spans":[...]}` carries `id`, `label`, `issue`, `repo`, `stage`, `verdict` (`running`, `hold`, `stop` or `done`), `title` (the first line of the brief without the story key), `branch`, `reason` (why a run is held, stopped or failing), `updatedAt` (the last time the cursor moved), `startedAt`, and, for a held run, `need` (`conflict`, `questions` or `decision`) with `count` (how many files, questions or open decisions). The desk reads them to say "3 questions" and to offer Answer, Decide or Resolve. Done runs older than 30 days stay out of the list unless the page filters by Done.
 | GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, gate, and what the run is about: `title` (the brief's first line without the story key) and `repo` (the folder it writes in). Any other accept is the span page |
 | GET | `/spans/<id>/implementation` | `git diff <base>...<head>` stat and a patch capped at 256 KiB |
 | GET | `/spans/<id>/feature` | The run's `odd/tasks/<feature>.md`, capped at 64 KiB, for the report. Empty when there is none |
