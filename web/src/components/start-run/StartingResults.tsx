@@ -79,6 +79,7 @@ export function StartingResults({
         ) : null}
       </Panel>
       <KeptNext
+        marked={false}
         kept={
           result.partial
             ? `${result.runs.length === 1 ? "The running run and its branch" : `The ${result.runs.length} running runs and their branches`}. Nothing was created in the others.`

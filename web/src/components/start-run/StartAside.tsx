@@ -135,7 +135,9 @@ export function StartAside({
             <WandSparklesIcon aria-hidden="true" />
             Shape it first
           </Button>
-          <p className={noteText}>Opens Shape a story with this text as the idea.</p>
+          <p className={noteText}>
+            Opens Shape a story with this text as the idea.
+          </p>
         </Panel>
       ) : null}
       <ActionPanel

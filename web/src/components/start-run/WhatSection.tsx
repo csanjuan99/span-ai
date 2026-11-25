@@ -71,7 +71,9 @@ function SourceBlock({ what }: { what: WhatProps }) {
           multiple
           className="h-auto max-w-full py-2"
         />
-        <p className={noteText}>Up to 5 files, 200 KB each, read as the story.</p>
+        <p className={noteText}>
+          Up to 5 files, 200 KB each, read as the story.
+        </p>
       </div>
     )
   }
@@ -80,7 +82,9 @@ function SourceBlock({ what }: { what: WhatProps }) {
       <div className="flex flex-col gap-1 rounded-[10px] border border-border bg-surface-code p-4">
         <span className="text-xs text-muted-foreground">Sample brief</span>
         <h3 className="text-sm font-semibold">{what.sample.title}</h3>
-        <p className="text-[13px] text-muted-foreground">{what.sample.detail}</p>
+        <p className="text-[13px] text-muted-foreground">
+          {what.sample.detail}
+        </p>
       </div>
     )
   }

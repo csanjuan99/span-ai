@@ -2,16 +2,19 @@
 
 import { EmptyDesk, sampleBrief } from "@/components/desk/EmptyDesk"
 import { Toasts } from "@/components/notify/Toasts"
+import { hhmmss } from "@/lib/clock"
 import { useNotifications } from "@/hooks/use-notifications"
 import { RunsDesk } from "@/components/desk/RunsDesk"
 import { StartRunPanel } from "@/components/start-run/StartRunPanel"
+import type { StartPending } from "@/components/start-run/StartingProgress"
 import {
   refusalOf,
+  suggestBranch,
   tokenRefusal,
   type StartRefusal,
 } from "@/components/start-run/types"
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Link, useLocation, useNavigate } from "react-router"
+import { useLocation, useNavigate } from "react-router"
 
 import {
   agentList,
@@ -50,8 +53,6 @@ import type {
 import type { StartSource } from "@/components/start-run/WhatSection"
 import { useStartInfo } from "@/hooks/use-start-info"
 import { shapeArrival } from "@/lib/start-info"
-import { cn } from "@/lib/utils"
-import { touchArea } from "@/lib/button-class"
 
 const noBranches: BranchChoice = { branches: [], defaultBase: "dev" }
 
@@ -128,6 +129,9 @@ export function Desk() {
   const [runNote, setRunNote] = useState("")
   const [refusal, setRefusal] = useState<StartRefusal | null>(null)
   const [started, setStarted] = useState<Started | null>(null)
+  const [pending, setPending] = useState<StartPending | null>(null)
+  // One run per checked repository, and at least the folder itself.
+  const runCount = Math.max(repos.filter((repo) => repo.checked).length, 1)
   const [actions, setActions] = useState<TimelineAction[]>([])
   const [agents, setAgents] = useState<AgentStatus[]>([])
   const [agentAt, setAgentAt] = useState("")
@@ -343,7 +347,20 @@ export function Desk() {
     void begin(data)
   }
 
+  /** Start, with the page saying what it has reached while it works. */
   async function begin(data: FormData) {
+    setPending({
+      runs: runCount,
+      checkedAt: "",
+    })
+    try {
+      await launch(data)
+    } finally {
+      setPending(null)
+    }
+  }
+
+  async function launch(data: FormData) {
     setRunNote("")
     setStarted(null)
     setRefusal(null)
@@ -376,6 +393,9 @@ export function Desk() {
         setRefusal(blocked)
         return
       }
+      setPending((current) =>
+        current === null ? null : { ...current, checkedAt: hhmmss(new Date()) }
+      )
     } catch (err: unknown) {
       if (refuseToken(err)) {
         return
@@ -441,6 +461,9 @@ export function Desk() {
           visible={panelOpen}
           refusal={refusal}
           onDismissRefusal={() => setRefusal(null)}
+          suggestion={suggestBranch(branches.branches, refusal?.base ?? "")}
+          onUseBranch={setBase}
+          pending={pending}
           started={started}
           onOpenRun={(id) => void navigate(`/spans/${id}`)}
           onBack={() => {
@@ -513,7 +536,7 @@ export function Desk() {
             },
             aside: {
               summary: info.summary,
-              runs: Math.max(repos.filter((repo) => repo.checked).length, 1),
+              runs: runCount,
               story,
               shapeable: source === "text",
               onShapeFirst: () =>
@@ -524,20 +547,6 @@ export function Desk() {
           }}
         />
       ) : null}
-      <nav
-        aria-label="More"
-        className="flex flex-wrap gap-x-6 gap-y-1 text-[13px]"
-      >
-        <Link
-          className={cn(
-            touchArea,
-            "text-primary underline-offset-4 hover:underline"
-          )}
-          to="/settings"
-        >
-          Settings
-        </Link>
-      </nav>
       <Toasts
         toasts={notifications.toasts}
         onOpen={(runId) => navigate(`/spans/${runId}`)}

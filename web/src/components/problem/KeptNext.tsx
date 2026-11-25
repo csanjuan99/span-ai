@@ -13,8 +13,19 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-/** What a problem leaves safe, and the one thing to do about it. */
-export function KeptNext({ kept, next }: { kept: string; next: string }) {
+/**
+ * What a problem leaves safe, and the one thing to do about it. `marked` puts the green plus
+ * before what is kept; the refusal boards (N2, N4) leave it out.
+ */
+export function KeptNext({
+  kept,
+  next,
+  marked = true,
+}: {
+  kept: string
+  next: string
+  marked?: boolean
+}) {
   return (
     <div className="rounded-[10px] bg-muted px-3.5 py-3">
       <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
@@ -23,12 +34,14 @@ export function KeptNext({ kept, next }: { kept: string; next: string }) {
       </div>
       <dl>
         <Row label="Kept">
-          <span
-            aria-hidden="true"
-            className="mr-1.5 font-mono font-semibold text-pass"
-          >
-            +
-          </span>
+          {marked ? (
+            <span
+              aria-hidden="true"
+              className="mr-1.5 font-mono font-semibold text-pass"
+            >
+              +
+            </span>
+          ) : null}
           {kept}
         </Row>
         <Row label="Next">{next}</Row>

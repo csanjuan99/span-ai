@@ -4,6 +4,7 @@ import {
   ArrowRightIcon,
   BotIcon,
   FolderIcon,
+  GitBranchIcon,
   KeyRoundIcon,
   LinkIcon,
   LockIcon,
@@ -11,6 +12,7 @@ import {
   ShieldAlertIcon,
   type LucideIcon,
 } from "lucide-react"
+import { useEffect, useRef } from "react"
 import { Link } from "react-router"
 
 import { ProblemCard } from "@/components/problem/ProblemCard"
@@ -27,6 +29,8 @@ interface Refusal {
   next: string
   /** Where the main button goes; none means it hands the form back. */
   to?: string
+  /** The button when the refusal names the run; the plain action otherwise. */
+  runAction?: string
   action: string
   actionIcon: LucideIcon
   command?: string
@@ -40,6 +44,7 @@ const refusals: Record<number, Refusal> = {
     title: "A run for this story already exists",
     kept: "That run, its branch and its proof are untouched. Nothing new was started.",
     next: "Open it and resolve what holds it. To start over, rewind it from its page.",
+    runAction: "Open",
     action: "Open the run",
     actionIcon: ArrowRightIcon,
   },
@@ -81,6 +86,7 @@ const refusals: Record<number, Refusal> = {
     title: "This checkout is busy",
     kept: "The run that holds it keeps running. Your new run was not created.",
     next: "Wait for it to finish, or open it to see what it is doing.",
+    runAction: "See",
     action: "See the run",
     actionIcon: ArrowRightIcon,
   },
@@ -119,38 +125,79 @@ const generic: Refusal = {
   actionIcon: ArrowRightIcon,
 }
 
-/** N4: a coded refusal before any run exists: the cause, what is kept, and the one way on. */
+/** The title of a refusal that names what it is about, as the N4 board words it. */
+function titleOf(number: number, refusal: StartRefusal, fallback: string) {
+  const runId = refusal.runId ?? ""
+  if (number === 15 && refusal.base !== undefined && refusal.base !== "") {
+    return `Branch ${refusal.base} does not exist`
+  }
+  if (number === 6 && runId !== "") {
+    return `A run for ${runId} already exists`
+  }
+  if (number === 16 && runId !== "") {
+    return `This checkout is busy with ${runId}`
+  }
+  return fallback
+}
+
+/**
+ * N4: a coded refusal before any run exists: the cause, what is kept, and the one way on.
+ * `suggestion` is a branch that exists; the base-missing refusal offers it as the way on.
+ */
 export function RefusalPanels({
   refusal,
   onDismiss,
+  suggestion = "",
+  onUseBranch,
 }: {
   refusal: StartRefusal
   onDismiss: () => void
+  suggestion?: string
+  onUseBranch?: (branch: string) => void
 }) {
   const view = refusals[refusal.number] ?? generic
   const Action = view.actionIcon
-  const title =
-    refusal.number === 15 && refusal.base !== undefined && refusal.base !== ""
-      ? `Branch ${refusal.base} does not exist`
-      : view.title
+  const card = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    // The desk may be long: a refusal that lands below the fold would read as nothing happening.
+    card.current?.scrollIntoView({ block: "nearest" })
+  }, [refusal])
   const runId = refusal.runId ?? ""
   const target = view.to ?? (runId !== "" ? `/spans/${runId}` : undefined)
+  const useBranch =
+    refusal.number === 15 && suggestion !== "" && onUseBranch !== undefined
+  const label =
+    runId !== "" && view.runAction !== undefined
+      ? `${view.runAction} ${runId}`
+      : view.action
   return (
-    <div role="alert">
+    <div role="alert" ref={card}>
       <ProblemCard
         label={view.band}
         tone={view.tone}
         icon={view.icon}
-        title={title}
+        title={titleOf(refusal.number, refusal, view.title)}
         cause={refusal.message}
         command={view.command}
         kept={view.kept}
         next={view.next}
+        marked={false}
       >
-        {target !== undefined ? (
+        {useBranch ? (
+          <Button
+            type="button"
+            onClick={() => {
+              onUseBranch(suggestion)
+              onDismiss()
+            }}
+          >
+            <GitBranchIcon aria-hidden="true" />
+            Use {suggestion}
+          </Button>
+        ) : target !== undefined ? (
           <Link to={target} className={cn(buttonVariants(), "gap-2")}>
             <Action aria-hidden="true" />
-            {runId !== "" ? `${view.action}: ${runId}` : view.action}
+            {label}
           </Link>
         ) : (
           <Button type="button" onClick={onDismiss}>

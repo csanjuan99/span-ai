@@ -41,20 +41,23 @@ class NoResize {
   disconnect(): void {}
 }
 vi.stubGlobal("ResizeObserver", NoResize)
+// jsdom has no layout, so a refusal asking to be scrolled into view has nothing to do.
+Element.prototype.scrollIntoView = vi.fn()
+
+/** What starting one run answers: the first run, intake in flight. */
+const oneRunStarted = {
+  id: "s",
+  stage: "intake",
+  runs: [{ id: "s", stage: "intake", repo: "" }],
+  partial: false,
+  notes: "",
+}
 
 beforeEach(() => {
   getJSON.mockReset()
   postForm.mockReset()
   startRun.mockReset()
-  startRun.mockImplementation(() =>
-    Promise.resolve({
-      id: "s",
-      stage: "intake",
-      runs: [{ id: "s", stage: "intake", repo: "" }],
-      partial: false,
-      notes: "",
-    })
-  )
+  startRun.mockImplementation(() => Promise.resolve(oneRunStarted))
   getJSON.mockImplementation((url: string) => {
     if (url.startsWith("/start/precheck")) {
       return Promise.resolve({ ok: true })
@@ -410,5 +413,21 @@ describe("Desk", () => {
     })
     renderDesk()
     expect(await screen.findByText("the agents are away")).toBeTruthy()
+  })
+
+  it("tells what Start has reached while the run starts, then goes to the run", async () => {
+    let finish: (value: unknown) => void = () => undefined
+    startRun.mockImplementation(
+      () => new Promise((resolve) => (finish = resolve))
+    )
+    renderDesk()
+    await openForm()
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    expect(await screen.findByText("Starting intake")).toBeTruthy()
+    expect(screen.getByText("Checked the folder")).toBeTruthy()
+    finish(oneRunStarted)
+    await waitFor(() => {
+      expect(screen.queryByText("Starting intake")).toBeNull()
+    })
   })
 })

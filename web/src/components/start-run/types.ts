@@ -1,4 +1,5 @@
 import type { Started } from "@/lib/api"
+import { isRecord, text } from "@/lib/guards"
 
 /** Coded refusal from GET /start/precheck or a failed start. */
 export interface StartRefusal {
@@ -23,22 +24,31 @@ export function tokenRefusal(err: Error): StartRefusal {
 }
 
 export function refusalOf(value: unknown): StartRefusal | null {
-  if (typeof value !== "object" || value === null) {
+  if (!isRecord(value)) {
     return null
   }
-  const body = value as Record<string, unknown>
-  const code = typeof body.code === "string" ? body.code : ""
-  const message = typeof body.message === "string" ? body.message : ""
-  const number = typeof body.number === "number" ? body.number : 0
-  if ((code === "" && message === "") || body.ok === true) {
+  const code = text(value.code)
+  const message = text(value.message)
+  if ((code === "" && message === "") || value.ok === true) {
     return null
   }
   return {
-    number,
+    number: typeof value.number === "number" ? value.number : 0,
     code,
     message,
-    runId: typeof body.runId === "string" ? body.runId : undefined,
-    branch: typeof body.branch === "string" ? body.branch : undefined,
-    base: typeof body.base === "string" ? body.base : undefined,
+    runId: text(value.runId) || undefined,
+    branch: text(value.branch) || undefined,
+    base: text(value.base) || undefined,
   }
+}
+
+/** A branch that exists to offer when the base is missing: main, then master, then the first other. */
+export function suggestBranch(branches: string[], missing: string): string {
+  const others = branches.filter((name) => name !== missing)
+  return (
+    others.find((name) => name === "main") ??
+    others.find((name) => name === "master") ??
+    others[0] ??
+    ""
+  )
 }

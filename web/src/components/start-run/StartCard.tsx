@@ -19,10 +19,7 @@ export function StartCard({
   children: ReactNode
 }) {
   return (
-    <Panel
-      aria-label={title}
-      className="flex flex-col gap-3 p-4 md:p-5"
-    >
+    <Panel aria-label={title} className="flex flex-col gap-3 p-4 md:p-5">
       <header className="flex flex-col gap-1">
         <h2 className="flex flex-wrap items-center gap-2 text-lg leading-[26px] font-semibold">
           <span

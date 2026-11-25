@@ -101,8 +101,7 @@ export function HowSection({
           </p>
         ) : null}
         <p className="text-[13px]">
-          Empty means: first <code className="font-mono">span.yaml</code> base
-          ({" "}
+          Empty means: first <code className="font-mono">span.yaml</code> base ({" "}
           <code className="font-mono">{main}</code>), then the kind&apos;s
           default above.
         </p>

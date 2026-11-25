@@ -10,7 +10,7 @@ import {
   WifiOffIcon,
   type LucideIcon,
 } from "lucide-react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
 import { IdChip } from "@/components/list-controls/IdChip"
 import { Pill as StatusPill } from "@/components/onboarding/Pill"
@@ -176,17 +176,12 @@ function Found({ story }: { story: FoundStory }) {
         </div>
       ) : null}
       {story.url !== "" ? (
-        <a
-          className={
-            "inline-flex min-h-11 items-center gap-1.5 self-start rounded-lg border border-border px-3 text-sm hover:bg-muted md:min-h-9"
-          }
+        <JiraLink
           href={story.url}
-          target="_blank"
-          rel="noreferrer"
+          className="self-start rounded-lg border border-border px-3 hover:bg-muted md:min-h-9"
         >
-          <ExternalLinkIcon className="size-4" aria-hidden="true" />
           Open in Jira
-        </a>
+        </JiraLink>
       ) : null}
       <p className={noteText}>
         Read just now. Span copies the text into the run; later edits in Jira do
@@ -219,7 +214,7 @@ function Refused({
       <p className="text-sm text-pretty text-muted-foreground">
         {failure.body}
       </p>
-      <KeptNext kept={failure.kept} next={failure.next} />
+      <KeptNext kept={failure.kept} next={failure.next} marked={false} />
       <div className="flex flex-wrap items-center gap-3">
         {failure.mark === "Not found" ? (
           <Button type="button" onClick={() => props.onSearch(lookup.key)}>
@@ -233,19 +228,14 @@ function Refused({
             Retry look up
           </Button>
         ) : null}
-        <Button type="button" variant="ghost" onClick={props.onPasteInstead}>
-          Paste the story text instead
-        </Button>
+        <PasteInsteadButton onPaste={props.onPasteInstead} />
         {failure.mark === "No permission" && session.baseUrl !== "" ? (
-          <a
-            className="inline-flex min-h-11 items-center gap-1.5 text-sm text-primary underline-offset-4 hover:underline"
+          <JiraLink
             href={open}
-            target="_blank"
-            rel="noreferrer"
+            className="text-primary underline-offset-4 hover:underline"
           >
-            <ExternalLinkIcon className="size-4" aria-hidden="true" />
             Open {lookup.key} in Jira
-          </a>
+          </JiraLink>
         ) : null}
       </div>
     </Panel>
@@ -372,9 +362,7 @@ function ConnectPanel({ props }: { props: JiraProps }) {
           <LinkIcon aria-hidden="true" />
           {key !== "" ? `Connect and look up ${key}` : "Connect"}
         </Button>
-        <Button type="button" variant="ghost" onClick={props.onPasteInstead}>
-          Paste the story text instead
-        </Button>
+        <PasteInsteadButton onPaste={props.onPasteInstead} />
       </div>
       <p className={noteText}>
         Create a token at{" "}
@@ -387,6 +375,87 @@ function ConnectPanel({ props }: { props: JiraProps }) {
   )
 }
 
+/** A link out to Jira that opens in a new tab. */
+function JiraLink({
+  href,
+  className,
+  children,
+}: {
+  href: string
+  className: string
+  children: ReactNode
+}) {
+  return (
+    <a
+      className={cn(
+        "inline-flex min-h-11 items-center gap-1.5 text-sm",
+        className
+      )}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <ExternalLinkIcon className="size-4" aria-hidden="true" />
+      {children}
+    </a>
+  )
+}
+
+/** The way out of Jira for a person who has the text already. */
+function PasteInsteadButton({ onPaste }: { onPaste: () => void }) {
+  return (
+    <Button type="button" variant="ghost" onClick={onPaste}>
+      Paste the story text instead
+    </Button>
+  )
+}
+
+/** A labelled input with the button that acts on it: the key lookup and the word search. */
+function LookupField({
+  id,
+  name,
+  label,
+  value,
+  onChange,
+  action,
+  disabled,
+  onAction,
+}: {
+  id: string
+  name?: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  action: string
+  disabled: boolean
+  onAction: () => void
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={id}>{label}</Label>
+      <div className="flex gap-2">
+        <Input
+          id={id}
+          name={name}
+          className="h-11 min-w-0 flex-1 md:h-10"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          className="h-11 md:h-10"
+          disabled={disabled}
+          onClick={onAction}
+        >
+          <SearchIcon aria-hidden="true" />
+          {action}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /** N2: look a Jira story up by key or by words, connecting Jira first when it is not. */
 export function JiraLookup(props: JiraProps) {
   const { session, issue } = props
@@ -396,50 +465,26 @@ export function JiraLookup(props: JiraProps) {
   return (
     <div className="flex flex-col gap-3" aria-label="Jira story lookup">
       {byWords ? (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="words">Search Jira by words</Label>
-          <div className="flex gap-2">
-            <Input
-              id="words"
-              className="h-11 min-w-0 flex-1 md:h-10"
-              value={words}
-              onChange={(event) => setWords(event.target.value)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 md:h-10"
-              disabled={!connected || words.trim() === ""}
-              onClick={() => props.onSearch(words.trim())}
-            >
-              <SearchIcon aria-hidden="true" />
-              Search
-            </Button>
-          </div>
-        </div>
+        <LookupField
+          id="words"
+          label="Search Jira by words"
+          value={words}
+          onChange={setWords}
+          action="Search"
+          disabled={!connected || words.trim() === ""}
+          onAction={() => props.onSearch(words.trim())}
+        />
       ) : (
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="issue">Story key</Label>
-          <div className="flex gap-2">
-            <Input
-              id="issue"
-              name="issue"
-              className="h-11 min-w-0 flex-1 md:h-10"
-              value={issue}
-              onChange={(event) => props.onIssue(event.target.value)}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11 md:h-10"
-              disabled={!connected}
-              onClick={props.onLoadOne}
-            >
-              <SearchIcon aria-hidden="true" />
-              Look up
-            </Button>
-          </div>
-        </div>
+        <LookupField
+          id="issue"
+          name="issue"
+          label="Story key"
+          value={issue}
+          onChange={props.onIssue}
+          action="Look up"
+          disabled={!connected}
+          onAction={props.onLoadOne}
+        />
       )}
       {connected ? (
         <p className={noteText}>

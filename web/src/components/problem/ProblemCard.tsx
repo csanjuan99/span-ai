@@ -28,6 +28,7 @@ export function ProblemCard({
   command,
   kept,
   next,
+  marked,
   children,
 }: {
   label: string
@@ -39,6 +40,8 @@ export function ProblemCard({
   command?: string
   kept: string
   next: string
+  /** Whether the kept line carries the green plus; see KeptNext. */
+  marked?: boolean
   children?: ReactNode
 }) {
   const Icon = icon ?? (tone === "info" ? InfoIcon : TriangleAlertIcon)
@@ -62,7 +65,7 @@ export function ProblemCard({
           <b>Cause.</b> {cause}
         </p>
         {command !== undefined ? <CommandLine command={command} /> : null}
-        <KeptNext kept={kept} next={next} />
+        <KeptNext kept={kept} next={next} marked={marked} />
         {children !== undefined ? (
           <div className="flex flex-col gap-2 [&>*]:h-10 [&>*]:w-full [&>*]:rounded-[10px]">
             {children}
