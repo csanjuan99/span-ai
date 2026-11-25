@@ -31,7 +31,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T8 | S8 | inline | Done card: where the work went and the change link (Jira link needs the backend: no Jira URL on the page) | done, see git log |
 | T9 | S8 | inline | Relative times beside held and waiting | done, see git log |
 | T10 | S8 | inline | Transcript and command log as closed code-view entries (no dialog primitive exists, so they open in place) | done, see git log |
-| T11 | S8 | inline | Required marker on open questions | |
+| T11 | S8 | inline | Required marker and progress on open questions (the engine refuses an empty answer) | done, see git log |
 | T12 | S8 | deferred | Backend: commit count | |
 | T13 | S8 | deferred | Backend: expose the run holding the checkout | |
 | T14 | S8 | deferred | Backend: note and resume in one call | |

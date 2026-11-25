@@ -15,6 +15,8 @@ export function Waiting(props: {
 }) {
   const [bodies, setBodies] = useState<string[]>(() => props.questions.map(() => ""))
   const [busy, setBusy] = useState(false)
+  // The engine refuses an empty answer, so every question is required: say so before the request fails.
+  const open = bodies.filter((body) => body.trim() === "").length
 
   async function answer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -43,7 +45,10 @@ export function Waiting(props: {
       </p>
       {props.questions.map((question, index) => (
         <div className="flex flex-col gap-2" key={`${index}-${question}`}>
-          <Label htmlFor={`answer-${index}`}>{question}</Label>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+            <Label htmlFor={`answer-${index}`}>{question}</Label>
+            <span className="text-xs text-muted-foreground">Required</span>
+          </div>
           <Textarea
             id={`answer-${index}`}
             value={bodies[index] ?? ""}
@@ -53,16 +58,20 @@ export function Waiting(props: {
               setBodies(next)
             }}
             rows={4}
+            aria-required="true"
           />
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" className="self-start" disabled={busy}>
+        <Button type="submit" className="self-start" disabled={busy || open > 0}>
           Answer and continue
         </Button>
         <Button type="button" variant="secondary" className="self-start" disabled={busy} onClick={() => void reload()}>
           Read the story again
         </Button>
+        <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
+          {open === 0 ? "All answered" : `${props.questions.length - open} of ${props.questions.length} answered`}
+        </p>
         {props.note !== "" ? <p className="text-pretty text-sm">{props.note}</p> : null}
       </div>
     </form>
