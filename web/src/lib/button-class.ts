@@ -26,3 +26,7 @@ export const quietButton =
 /** The design's danger button: the quiet button with the fail color on its border and text. */
 export const dangerButton =
   "border-fail bg-card text-fail hover:bg-fail-soft hover:text-fail dark:border-fail dark:bg-card dark:hover:bg-fail-soft"
+
+/** Grows the touch area of a small inline link or control to 44px on a phone without moving anything around it. */
+export const touchArea =
+  "relative after:absolute after:-inset-x-1 after:-inset-y-3 md:after:hidden"

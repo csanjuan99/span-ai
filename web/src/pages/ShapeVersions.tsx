@@ -31,6 +31,8 @@ import {
 } from "@/lib/shape-versions"
 import type { ShapeSession } from "@/lib/types"
 import { emptyPanelTextLarge, errorText } from "@/components/shaping/styles"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 const exits =
   "0 ok · 1 failed · 2 usage · 3 not found · 4 refused, such as a sealed session · 5 agent failed"
@@ -185,12 +187,15 @@ export function ShapeVersions() {
         aria-label="Breadcrumb"
         className="flex flex-wrap items-center gap-2 text-[13px] leading-5 text-muted-foreground"
       >
-        <Link className="underline underline-offset-3" to="/shaping">
+        <Link
+          className={cn(touchArea, "underline underline-offset-3")}
+          to="/shaping"
+        >
           Sessions
         </Link>
         <span aria-hidden="true">/</span>
         <Link
-          className="underline underline-offset-3"
+          className={cn(touchArea, "underline underline-offset-3")}
           to={`/shaping/${encodeURIComponent(id)}?workspace=${encodeURIComponent(workspace)}`}
         >
           {ref}

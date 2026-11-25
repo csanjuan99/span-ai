@@ -109,7 +109,10 @@ export function AgentPicker({
       </p>
       <div className="flex flex-wrap items-end gap-2">
         <Select value={value} onValueChange={setPicked}>
-          <SelectTrigger id="agent" className="w-56">
+          <SelectTrigger
+            id="agent"
+            className="w-56 max-sm:data-[size=default]:h-11"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

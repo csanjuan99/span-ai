@@ -23,6 +23,8 @@ import {
   type UndoPlan,
 } from "@/lib/shape-flows"
 import { emptyPanelText, errorText } from "@/components/shaping/styles"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 const exits =
   "0 ok · 1 failed · 2 usage · 3 not found · 4 refused, such as a sealed session or a step others depend on · 5 agent failed"
@@ -142,14 +144,14 @@ export function ShapeHistory() {
       >
         <Link
           to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
-          className="hover:underline"
+          className={cn(touchArea, "hover:underline")}
         >
           Sessions
         </Link>
         <span aria-hidden="true">/</span>
         <Link
           to={`/shaping/${id}?workspace=${encodeURIComponent(workspace)}`}
-          className="hover:underline"
+          className={cn(touchArea, "hover:underline")}
         >
           {ref}
         </Link>

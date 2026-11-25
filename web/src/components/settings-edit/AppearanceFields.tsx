@@ -61,6 +61,7 @@ export function AppearanceFields() {
       >
         <SelectField
           label="Motion"
+          className="max-sm:h-11"
           value={motion}
           options={[
             { value: "system", label: "Follow system" },

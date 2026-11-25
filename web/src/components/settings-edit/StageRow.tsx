@@ -45,6 +45,7 @@ export function StageRow({
       </span>
       <SelectField
         mono
+        className="max-sm:h-11"
         label={label}
         value={value}
         options={options}

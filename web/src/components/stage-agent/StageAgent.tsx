@@ -15,6 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 const agents = [
   { id: "cursor", label: "Cursor" },
@@ -82,7 +84,10 @@ export function StageAgent({
             <SelectTrigger
               aria-label="Stage to choose an agent for"
               size="sm"
-              className="h-6 gap-1 border-0 px-1 text-sm font-medium shadow-none"
+              className={cn(
+                touchArea,
+                "h-6 gap-1 border-0 px-1 text-sm font-medium shadow-none"
+              )}
             >
               <SelectValue />
             </SelectTrigger>

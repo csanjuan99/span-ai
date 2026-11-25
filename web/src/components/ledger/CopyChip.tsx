@@ -41,7 +41,7 @@ export function CopyChip({ label, value, children, className }: Props) {
       aria-label={`Copy ${label} ${value}`}
       onClick={() => void copy()}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+        "relative inline-flex items-center gap-1.5 rounded-md after:absolute after:-inset-x-1 after:-inset-y-3 sm:after:hidden border border-border px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
         className,
       )}
     >

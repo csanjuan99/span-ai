@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Link } from "react-router"
 import { BotIcon } from "lucide-react"
+import { touchArea } from "@/lib/button-class"
 import { cn } from "@/lib/utils"
 
 import { FilterChips } from "@/components/list-controls/FilterChips"
@@ -93,7 +94,10 @@ function Card({
         </div>
         <Link
           to={`/shaping/${card.id}?workspace=${encodeURIComponent(workspace)}`}
-          className="text-sm font-semibold text-pretty hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          className={cn(
+            touchArea,
+            "text-sm font-semibold text-pretty hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+          )}
         >
           {card.title}
         </Link>

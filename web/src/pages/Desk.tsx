@@ -46,6 +46,8 @@ import {
 import { repoNames } from "@/lib/repos"
 import { Shell } from "@/components/shell/Shell"
 import type { StoryHit } from "@/components/start-run/JiraLookup"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 const noBranches: BranchChoice = { branches: [], defaultBase: "dev" }
 
@@ -440,7 +442,10 @@ export function Desk() {
         className="flex flex-wrap gap-x-6 gap-y-1 text-[13px]"
       >
         <Link
-          className="text-primary underline-offset-4 hover:underline"
+          className={cn(
+            touchArea,
+            "text-primary underline-offset-4 hover:underline"
+          )}
           to="/settings"
         >
           Settings

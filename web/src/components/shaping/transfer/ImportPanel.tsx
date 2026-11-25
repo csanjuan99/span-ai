@@ -148,6 +148,8 @@ export function ImportPanel({
                 mono
                 label="Repository"
                 value={repo}
+                className="h-10 w-full"
+                wrapperClassName="w-full"
                 onChange={setRepo}
                 options={[
                   { value: "", label: "The folder itself" },

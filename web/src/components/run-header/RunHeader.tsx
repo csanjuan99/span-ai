@@ -4,6 +4,7 @@ import { Link } from "react-router"
 
 import { IdChip } from "@/components/list-controls/IdChip"
 import { stateBadge, type RunState } from "@/lib/run-header"
+import { touchArea } from "@/lib/button-class"
 
 const tones = {
   acc: "bg-accent text-primary",
@@ -71,7 +72,10 @@ export function RunHeader({
         ) : null}
         <Link
           to={summaryTo}
-          className="text-xs text-primary underline-offset-4 hover:underline"
+          className={cn(
+            touchArea,
+            "text-xs text-primary underline-offset-4 hover:underline"
+          )}
         >
           Summary to share
         </Link>

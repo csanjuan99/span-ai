@@ -5,6 +5,8 @@ import { Link } from "react-router"
 import { SessionList, SessionRow } from "@/components/shape-entry/SessionRow"
 import type { ShapeSession } from "@/lib/types"
 import { headingText } from "@/components/shaping/styles"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 /** How many sessions the start page shows before "See all". */
 export const recentCount = 4
@@ -30,7 +32,10 @@ export function RecentSessions({
         <h2 className={headingText}>Recent sessions</h2>
         <Link
           to={allHref}
-          className="ml-auto text-[13px] leading-5 text-primary underline-offset-4 hover:underline"
+          className={cn(
+            touchArea,
+            "ml-auto text-[13px] leading-5 text-primary underline-offset-4 hover:underline"
+          )}
         >
           See all {total}
         </Link>

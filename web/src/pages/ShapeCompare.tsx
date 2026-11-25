@@ -27,6 +27,8 @@ import {
   type Comparison,
 } from "@/lib/shape-compare"
 import { errorText } from "@/components/shaping/styles"
+import { cn } from "@/lib/utils"
+import { touchArea } from "@/lib/button-class"
 
 const exits =
   "0 ok · 1 failed · 2 usage · 3 not found · 4 refused, such as open conflicts or a sealed session · 5 agent failed"
@@ -164,7 +166,7 @@ export function ShapeCompare() {
         className="flex items-center gap-2 text-[13px] text-muted-foreground"
       >
         <Link
-          className="underline underline-offset-3"
+          className={cn(touchArea, "underline underline-offset-3")}
           to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
         >
           Sessions
