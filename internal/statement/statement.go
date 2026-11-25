@@ -27,6 +27,13 @@ const (
 // build prompt receives. The whole output stays in the log file.
 const TailBytes = 4096
 
+// TestCounts is what a check's own output said about the tests it ran.
+type TestCounts struct {
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed,omitempty"`
+	Skipped int `json:"skipped,omitempty"`
+}
+
 // Command is one declared check, not a shell script.
 type Command struct {
 	Command     string `json:"command"`
@@ -38,6 +45,9 @@ type Command struct {
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Preexisting marks a failure the base commit already had. It is shown, not counted.
 	Preexisting bool `json:"preexisting,omitempty"`
+	// Tests is set only when the output printed a summary Span can read. A check that prints
+	// none (a build, a linter) leaves it nil: no count is better than a guessed one.
+	Tests *TestCounts `json:"tests,omitempty"`
 }
 
 // Statement is the control record for one stage in one iteration.
