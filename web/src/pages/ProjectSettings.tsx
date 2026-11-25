@@ -3,12 +3,24 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { Link } from "react-router"
 
+import { NotificationPrefs } from "@/components/notify/NotificationPrefs"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
+import { ApprovalsFields } from "@/components/settings-edit/ApprovalsFields"
+import { ChecksFields } from "@/components/settings-edit/ChecksFields"
+import {
+  changedEdits,
+  editCount,
+  type Draft,
+  type DraftKey,
+} from "@/components/settings-edit/draft"
+import { TextField, type EditProps } from "@/components/settings-edit/fields"
+import { useConfigPreview } from "@/components/settings-edit/useConfigPreview"
+import { WhatChanges } from "@/components/settings-edit/WhatChanges"
 import { Shell } from "@/components/shell/Shell"
 import { useOptionalTheme } from "@/components/theme-provider"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { configDefaults, getJSON, projectConfig } from "@/lib/api"
+import { getJSON, projectConfig, saveConfig } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import type { ProjectConfig } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -51,60 +63,14 @@ function Section({
   )
 }
 
-function Row({
-  label,
-  value,
-  fallback,
-}: {
-  label: string
-  value: string
-  fallback: string
-}) {
-  return (
-    <div className="grid gap-1 border-t border-border pt-3 first:border-t-0 first:pt-0 sm:grid-cols-[12rem_minmax(0,1fr)]">
-      <div className="flex flex-col">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">
-          Default: {fallback}
-        </span>
-      </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <code className="min-w-0 font-mono text-sm break-words">
-          {value === "" ? fallback : value}
-        </code>
-        {value !== "" ? (
-          <span className="rounded-md bg-hold-soft px-1.5 py-0.5 text-xs text-hold">
-            Changed
-          </span>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
-function Commands({
-  label,
-  items,
-  fallback,
-}: {
-  label: string
-  items: string[]
-  fallback: string
-}) {
-  return <Row label={label} value={items.join("  ·  ")} fallback={fallback} />
-}
-
-const modeLabel: Record<string, string> = {
-  auto: "Runs on its own",
-  hold: "Asks me",
-  conditional: "Asks me when the story is deep",
-}
-
 /** Project settings: what span.yaml says, the agent that writes, and how the page looks. */
 export function ProjectSettings() {
   const [folder, setFolder] = useState(".")
   const [config, setConfig] = useState<ProjectConfig | null>(null)
   const [note, setNote] = useState("")
+  const [draft, setDraft] = useState<Draft>({})
+  const [saving, setSaving] = useState(false)
+  const [done, setDone] = useState("")
   const theme = useOptionalTheme()
 
   useEffect(() => {
@@ -129,6 +95,46 @@ export function ProjectSettings() {
     }
   }, [folder])
 
+  const view = config ?? projectConfig({})
+  const edits = changedEdits(view, draft)
+  const count = editCount(edits)
+  const preview = useConfigPreview(folder, edits, count > 0)
+
+  function edit(key: DraftKey, value: string) {
+    setDraft((now) => ({ ...now, [key]: value }))
+    setDone("")
+  }
+
+  function changeFolder(value: string) {
+    setFolder(value)
+    setDraft({})
+    setDone("")
+  }
+
+  function save() {
+    setSaving(true)
+    setNote("")
+    void saveConfig(folder, edits)
+      .then((saved) => {
+        setConfig(saved.config)
+        setDraft({})
+        setDone(
+          `Saved ${saved.lines.length} ${saved.lines.length === 1 ? "change" : "changes"} to span.yaml.`
+        )
+      })
+      .catch((err: unknown) => {
+        setNote(reasonText(err, "span.yaml could not be saved"))
+      })
+      .finally(() => setSaving(false))
+  }
+
+  const props: EditProps = {
+    config: view,
+    draft,
+    disabled: config === null || saving,
+    onEdit: edit,
+  }
+
   return (
     <Shell path="~/settings" status="settings" lines={[]}>
       <header className="flex flex-col gap-2">
@@ -140,8 +146,9 @@ export function ProjectSettings() {
         </Link>
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-sm text-pretty text-muted-foreground">
-          The agent and how the page looks are saved here. Checks and approvals
-          are read from span.yaml: edit that file to change them.
+          The agent, base branch, checks and approvals are saved to span.yaml,
+          and how the page looks is saved in this browser. Changes show up below
+          before anything is written.
         </p>
       </header>
       <div className="grid gap-6 lg:grid-cols-[10rem_minmax(0,1fr)]">
@@ -172,16 +179,18 @@ export function ProjectSettings() {
               <Input
                 id="settings-folder"
                 value={folder}
-                onChange={(event) => setFolder(event.target.value)}
+                onChange={(event) => changeFolder(event.target.value)}
               />
               <span className="text-xs text-muted-foreground">
                 Default: the folder Span was started in
               </span>
             </div>
-            <Row
+            <TextField
+              props={props}
+              name="base"
               label="Base branch"
-              value={config?.base ?? ""}
               fallback="dev (master for a hotfix)"
+              placeholder="dev"
             />
           </Section>
           <Section
@@ -192,56 +201,15 @@ export function ProjectSettings() {
           </Section>
           <Section
             name="Checks"
-            hint="Commands that prove the work. Read from span.yaml."
+            hint="Commands that prove the work. Saved to span.yaml."
           >
-            <Commands
-              label="Focused"
-              items={config?.prove.focused ?? []}
-              fallback="none"
-            />
-            <Commands
-              label="Fast"
-              items={config?.prove.fast ?? []}
-              fallback="none"
-            />
-            <Commands
-              label="Acceptance"
-              items={config?.prove.acceptance ?? []}
-              fallback="none"
-            />
-            <Row label="QA command" value={config?.qa ?? ""} fallback="none" />
-            <Row
-              label="Repair attempts"
-              value={
-                config !== null && config.repair !== configDefaults.repair
-                  ? String(config.repair)
-                  : ""
-              }
-              fallback={String(configDefaults.repair)}
-            />
+            <ChecksFields props={props} />
           </Section>
           <Section
             name="Approvals"
-            hint="Which stages stop and wait for your yes. Read from span.yaml."
+            hint="Which stages stop and wait for your yes. Saved to span.yaml."
           >
-            {(["open", "merge", "promote", "plan", "conflict"] as const).map(
-              (stage) => (
-                <Row
-                  key={stage}
-                  label={stage}
-                  value={
-                    config !== null &&
-                    config.stages[stage] !== configDefaults.stages[stage]
-                      ? (modeLabel[config.stages[stage]] ??
-                        config.stages[stage])
-                      : ""
-                  }
-                  fallback={
-                    stage === "conflict" ? "Asks me" : "Runs on its own"
-                  }
-                />
-              )
-            )}
+            <ApprovalsFields props={props} />
           </Section>
           <Section
             name="Appearance"
@@ -270,6 +238,28 @@ export function ProjectSettings() {
               animation and skeleton shimmer are off.
             </p>
           </Section>
+          <Section
+            name="Notifications"
+            hint="When Span tells you a run needs you, failed or finished. Saved in this browser."
+          >
+            <NotificationPrefs />
+          </Section>
+          {done !== "" ? (
+            <p role="status" className="text-sm text-pass">
+              {done}
+            </p>
+          ) : null}
+          {count > 0 ? (
+            <WhatChanges
+              folder={folder}
+              count={count}
+              lines={preview.lines}
+              error={preview.error}
+              saving={saving}
+              onSave={save}
+              onDiscard={() => setDraft({})}
+            />
+          ) : null}
         </div>
       </div>
     </Shell>

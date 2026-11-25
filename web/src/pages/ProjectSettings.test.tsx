@@ -4,20 +4,30 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const getJSON = vi.fn()
+const previewConfig = vi.fn()
+const saveConfig = vi.fn()
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>()
-  return { ...actual, getJSON: (url: string) => getJSON(url) }
+  return {
+    ...actual,
+    getJSON: (url: string) => getJSON(url),
+    previewConfig: (project: string, edits: unknown) =>
+      previewConfig(project, edits),
+    saveConfig: (project: string, edits: unknown) => saveConfig(project, edits),
+  }
 })
 vi.mock("@/components/agent-picker/AgentPicker", () => ({
   AgentPicker: () => <p>agent picker</p>,
 }))
 
+import { projectConfig } from "@/lib/api"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ProjectSettings } from "@/pages/ProjectSettings"
 
@@ -25,6 +35,8 @@ afterEach(cleanup)
 
 beforeEach(() => {
   getJSON.mockReset()
+  previewConfig.mockReset()
+  saveConfig.mockReset()
   localStorage.clear()
   window.matchMedia = ((query: string) => ({
     matches: false,
@@ -54,10 +66,13 @@ describe("ProjectSettings", () => {
       qa: "npm test",
     })
     show()
-    expect(await screen.findByText("feat/SAL-3")).toBeTruthy()
-    expect(screen.getByText("go test ./...")).toBeTruthy()
+    expect(await screen.findByDisplayValue("feat/SAL-3")).toBeTruthy()
+    expect(screen.getByDisplayValue("go test ./...")).toBeTruthy()
+    expect(screen.getByDisplayValue("npm test")).toBeTruthy()
     expect(screen.getAllByText("Changed").length).toBeGreaterThanOrEqual(3)
-    expect(screen.getAllByText("Asks me").length).toBeGreaterThanOrEqual(1)
+    const merge = screen.getByLabelText<HTMLSelectElement>("merge approval")
+    expect(merge.value).toBe("hold")
+    expect(screen.queryByText("What changes")).toBeNull()
   })
 
   it("says so when the project has no span.yaml", async () => {
@@ -76,5 +91,110 @@ describe("ProjectSettings", () => {
     await waitFor(() => expect(getJSON).toHaveBeenCalled())
     fireEvent.click(screen.getByRole("button", { name: "Dark" }))
     expect(localStorage.getItem("theme")).toBe("dark")
+  })
+
+  describe("editing span.yaml", () => {
+    const saved = {
+      exists: true,
+      stages: { merge: "auto" },
+      prove: { fast: ["go test ./..."] },
+    }
+
+    async function edited() {
+      getJSON.mockResolvedValue(saved)
+      previewConfig.mockResolvedValue([
+        { key: "stages.merge", before: "auto", after: "hold" },
+      ])
+      show()
+      await screen.findByDisplayValue("go test ./...")
+      fireEvent.change(screen.getByLabelText("merge approval"), {
+        target: { value: "hold" },
+      })
+    }
+
+    it("shows what a change would write before anything is saved", async () => {
+      await edited()
+      const panel = await screen.findByRole("region", { name: "What changes" })
+      expect(await within(panel).findByText("+ hold")).toBeTruthy()
+      expect(within(panel).getByText("- auto")).toBeTruthy()
+      expect(within(panel).getByText("1 unsaved")).toBeTruthy()
+      expect(previewConfig).toHaveBeenCalledWith(".", { merge: "hold" })
+      expect(saveConfig).not.toHaveBeenCalled()
+    })
+
+    it("saves only what changed and shows the settings the server returns", async () => {
+      await edited()
+      saveConfig.mockResolvedValue({
+        lines: [{ key: "stages.merge", before: "auto", after: "hold" }],
+        config: projectConfig({ ...saved, stages: { merge: "hold" } }),
+      })
+      const panel = await screen.findByRole("region", { name: "What changes" })
+      await within(panel).findByText("+ hold")
+      fireEvent.click(screen.getByRole("button", { name: "Save 1 change" }))
+      expect(
+        await screen.findByText("Saved 1 change to span.yaml.")
+      ).toBeTruthy()
+      expect(saveConfig).toHaveBeenCalledWith(".", { merge: "hold" })
+      expect(screen.queryByText("What changes")).toBeNull()
+      expect(
+        screen.getByLabelText<HTMLSelectElement>("merge approval").value
+      ).toBe("hold")
+    })
+
+    it("drops the changes on Discard and writes nothing", async () => {
+      await edited()
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Discard changes" })
+      )
+      expect(screen.queryByText("What changes")).toBeNull()
+      expect(
+        screen.getByLabelText<HTMLSelectElement>("merge approval").value
+      ).toBe("auto")
+      expect(saveConfig).not.toHaveBeenCalled()
+    })
+
+    it("does not count a value typed back to what is saved", async () => {
+      await edited()
+      fireEvent.change(screen.getByLabelText("merge approval"), {
+        target: { value: "auto" },
+      })
+      expect(screen.queryByText("What changes")).toBeNull()
+    })
+
+    it("says why a value is refused and keeps Save off", async () => {
+      getJSON.mockResolvedValue(saved)
+      previewConfig.mockRejectedValue(
+        new Error("repair.maxAttempts is 12, allowed 1 to 8")
+      )
+      show()
+      await screen.findByDisplayValue("go test ./...")
+      fireEvent.change(screen.getByLabelText("Repair attempts"), {
+        target: { value: "12" },
+      })
+      expect(await screen.findByText(/allowed 1 to 8/)).toBeTruthy()
+      const button = screen.getByRole("button", { name: "Save 1 change" })
+      expect((button as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it("sends one command per line for a list of checks", async () => {
+      getJSON.mockResolvedValue(saved)
+      previewConfig.mockResolvedValue([
+        {
+          key: "prove.fast",
+          before: "go test ./...",
+          after: "go vet ./..., go test ./...",
+        },
+      ])
+      show()
+      await screen.findByDisplayValue("go test ./...")
+      fireEvent.change(screen.getByLabelText("Fast"), {
+        target: { value: "go vet ./...\n\ngo test ./...\n" },
+      })
+      await waitFor(() =>
+        expect(previewConfig).toHaveBeenCalledWith(".", {
+          fast: ["go vet ./...", "go test ./..."],
+        })
+      )
+    })
   })
 })

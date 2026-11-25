@@ -441,3 +441,31 @@ export interface ProjectConfig {
   blockStatus: string
   stageTimeout: string
 }
+
+/** What a save may change in span.yaml. A key that is absent is left alone; a list is one check per entry. */
+export interface ConfigEdits {
+  base?: string
+  open?: string
+  merge?: string
+  promote?: string
+  plan?: string
+  conflict?: string
+  focused?: string[]
+  fast?: string[]
+  acceptance?: string[]
+  qa?: string
+  repair?: number
+}
+
+/** One value a save would change: its key in span.yaml, and what it reads before and after. */
+export interface ConfigLine {
+  key: string
+  before: string
+  after: string
+}
+
+/** What a save changed, and the settings as they read afterwards. */
+export interface ConfigSaved {
+  lines: ConfigLine[]
+  config: ProjectConfig
+}

@@ -6,7 +6,9 @@ import {
   approveStage,
   basePlaceholder,
   branchChoice,
+  configForm,
   projectConfig,
+  saveConfig,
   branchLine,
   chooseConflict,
   conflictOf,
@@ -475,5 +477,38 @@ describe("projectConfig", () => {
     expect(config.prove.fast).toEqual(["go test ./..."])
     expect(config.repair).toBe(5)
     expect(config.qa).toBe("npm test")
+  })
+})
+
+describe("configForm", () => {
+  it("posts the project and only the keys that change, a list as one line per check", () => {
+    const form = configForm("/work/api", { merge: "hold", fast: ["go vet ./...", "go test ./..."], repair: 5 })
+    expect(Object.fromEntries(form)).toEqual({
+      project: "/work/api",
+      merge: "hold",
+      fast: "go vet ./...\ngo test ./...",
+      repair: "5",
+    })
+  })
+
+  it("posts an emptied list as an empty field, so the server clears it", () => {
+    expect(configForm("/work/api", { fast: [] }).get("fast")).toBe("")
+  })
+})
+
+describe("saveConfig", () => {
+  it("reads the changed lines and the settings after the write", async () => {
+    reply(200, {
+      lines: [{ key: "stages.merge", before: "auto", after: "hold" }],
+      config: { exists: true, stages: { merge: "hold" } },
+    })
+    const saved = await saveConfig("/work/api", { merge: "hold" })
+    expect(saved.lines).toEqual([{ key: "stages.merge", before: "auto", after: "hold" }])
+    expect(saved.config.stages.merge).toBe("hold")
+  })
+
+  it("throws the server's reason when the file would refuse the value", async () => {
+    reply(400, { error: "invalid", message: 'stages.merge "maybe" is not auto or hold' })
+    await expect(saveConfig("/work/api", { merge: "maybe" })).rejects.toThrow("is not auto or hold")
   })
 })

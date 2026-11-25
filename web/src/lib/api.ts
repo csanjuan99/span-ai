@@ -27,6 +27,9 @@ import {
   type AgentState,
   type BranchChoice,
   type AgentStatus,
+  type ConfigEdits,
+  type ConfigLine,
+  type ConfigSaved,
   type ProjectConfig,
   type SpanHead,
   type ShapeExample,
@@ -930,4 +933,31 @@ export function projectConfig(value: unknown): ProjectConfig {
     blockStatus: text(body.blockStatus),
     stageTimeout: text(body.stageTimeout),
   }
+}
+
+/** The form a preview or a save posts: the project, and only the keys that change. */
+export function configForm(project: string, edits: ConfigEdits): URLSearchParams {
+  const form = new URLSearchParams({ project })
+  for (const [key, value] of Object.entries(edits)) {
+    if (value !== undefined) {
+      form.set(key, Array.isArray(value) ? value.join("\n") : String(value))
+    }
+  }
+  return form
+}
+
+function configLines(value: unknown): ConfigLine[] {
+  const body = isRecord(value) ? value : {}
+  return rows(body.lines).map((line) => ({ key: text(line.key), before: text(line.before), after: text(line.after) }))
+}
+
+/** What saving `edits` would change in span.yaml. Nothing is written. A value the file would refuse throws. */
+export async function previewConfig(project: string, edits: ConfigEdits): Promise<ConfigLine[]> {
+  return configLines(await postForm("/config/preview", configForm(project, edits)))
+}
+
+/** Writes `edits` into span.yaml and returns what changed with the settings as they now read. */
+export async function saveConfig(project: string, edits: ConfigEdits): Promise<ConfigSaved> {
+  const body = await postForm("/config", configForm(project, edits))
+  return { lines: configLines(body), config: projectConfig(isRecord(body) ? body.config : {}) }
 }
