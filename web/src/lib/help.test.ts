@@ -70,6 +70,9 @@ describe("shortcuts", () => {
       "Go to Desk",
       "Go to Settings",
       "Close a panel",
+      "Next row",
+      "Previous row",
+      "Open row",
     ])
   })
 })

@@ -24,10 +24,21 @@ describe("runContextOf", () => {
 
   it("gives every command a distinct key", () => {
     const all = Object.fromEntries(
-      ["resume", "note", "pause", "stop", "rewind", "transcript", "diff", "copySummary"].map((name) => [name, vi.fn()])
+      ["resume", "note", "pause", "stop", "rewind", "transcript", "diff", "copySummary", "ledger", "implementation", "qa"].map((name) => [name, vi.fn()])
     )
     const keys = (runContextOf("x", all)?.commands ?? []).map((command) => `${command.shift === true}${command.key}`)
     expect(new Set(keys).size).toBe(keys.length)
-    expect(keys).toHaveLength(8)
+    expect(keys).toHaveLength(11)
+  })
+
+  it("switches tabs with the keys 1, 2 and 3", () => {
+    const ledger = vi.fn()
+    const implementation = vi.fn()
+    const qa = vi.fn()
+    const context = runContextOf("SPAN-482", { ledger, implementation, qa })
+    runCommandFor(context, "1", false)?.run()
+    runCommandFor(context, "2", false)?.run()
+    runCommandFor(context, "3", false)?.run()
+    expect([ledger, implementation, qa].map((fn) => fn.mock.calls.length)).toEqual([1, 1, 1])
   })
 })
