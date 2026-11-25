@@ -689,6 +689,8 @@ A non-zero exit attributed to this change does not discard the span. It returns 
 
 A command that never started does not consume an attempt. It holds, and `./span resume` repeats the band.
 
+Once a run is done and its branch was merged with a merge commit, the page reads the change from the base as it was just before that merge, since the branch is already in the base and a plain `base...head` diff would be empty. A fast-forward leaves no merge commit, so such a run shows no diff.
+
 When a command prints a test summary Span can read, the statement keeps the counts (`tests`: passed, failed, skipped) and the run page shows them as "41 passed · 2 failed". Span reads the summary lines of `vitest`, `jest` and `pytest`, and the `--- PASS` lines of `go test -v`. Plain `go test` prints no pass lines, so it has no count; use `go test -v` to get one. A command that prints no summary, such as a build or a linter, has no count and the page says so instead of guessing.
 
 Two stops run before the cap:

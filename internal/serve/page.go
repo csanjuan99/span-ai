@@ -111,7 +111,17 @@ func readImplementation(ctx context.Context, root, id string) (adapt.Diff, error
 	if snap.Cursor.Workspace == "" || snap.Cursor.Base == "" || snap.Cursor.GitSHA == "" {
 		return adapt.Diff{}, nil
 	}
-	return (adapt.Git{Dir: snap.Cursor.Workspace}).Diff(ctx, snap.Cursor.Base, snap.Cursor.GitSHA)
+	git := adapt.Git{Dir: snap.Cursor.Workspace}
+	base := snap.Cursor.Base
+	if snap.Cursor.Done {
+		// A merged branch is already in its base, so base...head would be empty. Read the work
+		// from where the merge took it in. Failing to find that is not an error: the plain diff
+		// is still the right answer for a run that was not merged this way.
+		if before, ok, err := git.Landed(ctx, base, snap.Cursor.GitSHA); err == nil && ok {
+			base = before
+		}
+	}
+	return git.Diff(ctx, base, snap.Cursor.GitSHA)
 }
 
 // featureLimit bounds the feature document the report reads.

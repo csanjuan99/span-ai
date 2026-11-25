@@ -271,6 +271,42 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 	return Diff{Stat: stat, Patch: patch, Truncated: truncated, Commits: commits}, nil
 }
 
+// Landed finds where a merged branch came in. When head is already in base, a plain
+// base...head diff is empty, so the work cannot be read back. If a merge commit on base's
+// first-parent line took head in, before is that commit's first parent: base as it was just
+// before the merge, which is the point to diff head against. ok is false when head is not in
+// base, or when it got there without a merge commit (a fast-forward leaves none to find).
+func (g Git) Landed(ctx context.Context, base, head string) (before string, ok bool, err error) {
+	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
+		return "", false, nil
+	}
+	if strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
+		return "", false, fmt.Errorf("landed %q..%q: not a commit", base, head)
+	}
+	if _, err := g.output(ctx, "merge-base", "--is-ancestor", head, base); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			// Exit 1 means head is not in base: nothing has landed, which is not an error.
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	merges, err := g.output(ctx, "log", "--merges", "--first-parent", "--ancestry-path", "--format=%H", head+".."+base, "--")
+	if err != nil {
+		return "", false, err
+	}
+	lines := strings.Fields(merges)
+	if len(lines) == 0 {
+		return "", false, nil
+	}
+	// The oldest merge on the line is the one that took head in; later ones took other work.
+	first, err := g.output(ctx, "rev-parse", lines[len(lines)-1]+"^1")
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(first), true, nil
+}
+
 // ErrBroadChange means the branch deleted, renamed, copied or retyped a path. What used to
 // import or load that path is not in a list of changed names, so the caller proves the
 // whole suite instead of a narrowed one.
