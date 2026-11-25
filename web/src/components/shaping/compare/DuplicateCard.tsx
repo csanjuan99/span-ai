@@ -25,7 +25,7 @@ export function DuplicateCard({
           {duplicate.aRef} and {duplicate.bRef}
         </span>
         <Pill tone={duplicate.dismissed ? "mut" : "hold"} small>
-          ~{duplicate.percent}% the same · estimate
+          Mostly the same story · estimate
         </Pill>
       </div>
       <p className="text-xs text-muted-foreground">

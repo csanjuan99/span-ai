@@ -1,10 +1,13 @@
 "use client"
 
+import { useState } from "react"
 import { Link } from "react-router"
 import { BotIcon } from "lucide-react"
 import { cn } from "cn"
 
+import { FilterChips } from "@/components/list-controls/FilterChips"
 import { IdChip } from "@/components/list-controls/IdChip"
+import { useNarrow } from "@/hooks/use-narrow"
 import { Pill, type Tone } from "@/components/shaping/session-ui"
 import { Checkbox } from "@/components/ui/checkbox"
 import { dayLabel } from "@/lib/clock"
@@ -107,6 +110,52 @@ function Card({
   )
 }
 
+function StatusColumn({
+  column,
+  workspace,
+  chosen,
+  onToggle,
+}: {
+  column: BoardColumn
+  workspace: string
+  chosen: Set<string>
+  onToggle: (id: string) => void
+}) {
+  return (
+    <section
+      aria-label={column.name}
+      className="flex min-w-0 flex-col gap-2"
+    >
+      <div className="flex items-center gap-2">
+        <h2 className="text-base font-semibold">{column.name}</h2>
+        <span className={countText}>{column.count}</span>
+      </div>
+      {column.cards.map((card) => (
+        <Card
+          key={card.id}
+          card={card}
+          workspace={workspace}
+          chosen={chosen.has(card.id)}
+          onToggle={() => onToggle(card.id)}
+        />
+      ))}
+      {column.hidden > 0 ? (
+        <Link
+          to={`/shaping?view=sessions&status=${column.key}&workspace=${encodeURIComponent(workspace)}`}
+          className="text-[13px] text-primary hover:underline"
+        >
+          See {column.hidden} more
+        </Link>
+      ) : null}
+      {column.count === 0 ? (
+        <p className="rounded-[10px] border border-dashed border-border p-3 text-xs text-muted-foreground">
+          Nothing here.
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
 /** The sessions in a column per status; a card is chosen with its checkbox. */
 export function BoardColumns({
   columns,
@@ -119,41 +168,42 @@ export function BoardColumns({
   chosen: Set<string>
   onToggle: (id: string) => void
 }) {
+  const narrow = useNarrow()
+  const [status, setStatus] = useState(columns[0]?.key ?? "")
+  const current =
+    columns.find((column) => column.key === status) ?? columns[0]
+  if (narrow && current !== undefined) {
+    return (
+      <div className="flex flex-col gap-3">
+        <FilterChips
+          label="Status"
+          value={current.key}
+          onChange={setStatus}
+          chips={columns.map((column) => ({
+            key: column.key,
+            label: column.name,
+            count: column.count,
+          }))}
+        />
+        <StatusColumn
+          column={current}
+          workspace={workspace}
+          chosen={chosen}
+          onToggle={onToggle}
+        />
+      </div>
+    )
+  }
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       {columns.map((column) => (
-        <section
+        <StatusColumn
           key={column.key}
-          aria-label={column.name}
-          className="flex min-w-0 flex-col gap-2"
-        >
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold">{column.name}</h2>
-            <span className={countText}>{column.count}</span>
-          </div>
-          {column.cards.map((card) => (
-            <Card
-              key={card.id}
-              card={card}
-              workspace={workspace}
-              chosen={chosen.has(card.id)}
-              onToggle={() => onToggle(card.id)}
-            />
-          ))}
-          {column.hidden > 0 ? (
-            <Link
-              to={`/shaping?view=sessions&status=${column.key}&workspace=${encodeURIComponent(workspace)}`}
-              className="text-[13px] text-primary hover:underline"
-            >
-              See {column.hidden} more
-            </Link>
-          ) : null}
-          {column.count === 0 ? (
-            <p className="rounded-[10px] border border-dashed border-border p-3 text-xs text-muted-foreground">
-              Nothing here.
-            </p>
-          ) : null}
-        </section>
+          column={column}
+          workspace={workspace}
+          chosen={chosen}
+          onToggle={onToggle}
+        />
       ))}
     </div>
   )

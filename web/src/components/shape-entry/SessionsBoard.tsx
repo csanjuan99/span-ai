@@ -1,10 +1,12 @@
 "use client"
 
 import { PlusIcon, SearchIcon } from "lucide-react"
+import { Link, useNavigate } from "react-router"
 
 import { FilterChips } from "@/components/list-controls/FilterChips"
 import { SearchField } from "@/components/list-controls/SearchField"
 import { SelectField } from "@/components/settings-edit/SelectField"
+import { TabStrip } from "@/components/shaping/TabStrip"
 import { SessionTidy } from "@/components/shape-entry/SessionTidy"
 import { SessionList, SessionRow } from "@/components/shape-entry/SessionRow"
 import { Button } from "@/components/ui/button"
@@ -94,9 +96,11 @@ export function SessionsBoard({
   onNew: () => void
   onChanged: () => void
 }) {
+  const navigate = useNavigate()
   const counts = stateCounts(all)
   const needing = all.filter(needsYou).length
   const set = (patch: Partial<ListFilter>) => onFilter({ ...filter, ...patch })
+  const here = `workspace=${encodeURIComponent(workspace)}`
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col gap-1">
@@ -107,6 +111,29 @@ export function SessionsBoard({
           {counts.all} {counts.all === 1 ? "session" : "sessions"} · {needing}{" "}
           {needing === 1 ? "needs" : "need"} you
         </p>
+      </div>
+      <div className={wrapRowWide}>
+        <TabStrip
+          label="View"
+          value="list"
+          options={[
+            { value: "list", label: "List" },
+            { value: "board", label: "Board" },
+          ]}
+          onChange={(next) => {
+            if (next === "board") {
+              void navigate(`/shaping/board?${here}`)
+            }
+          }}
+          className="w-full max-w-[520px] sm:w-auto sm:min-w-64"
+        />
+        <Button
+          asChild
+          variant="outline"
+          className="ml-auto h-11 rounded-[10px] px-4 md:h-10"
+        >
+          <Link to={`/shaping/compare?${here}`}>Compare sessions</Link>
+        </Button>
       </div>
       <div className={wrapRowWide}>
         <SearchField

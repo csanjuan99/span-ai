@@ -16,6 +16,7 @@ import { StoryDiff } from "@/components/shaping/versions/StoryDiff"
 import { SummaryCells } from "@/components/shaping/versions/SummaryCells"
 import { ViewTabs } from "@/components/shaping/versions/ViewTabs"
 import { useBusyAction } from "@/hooks/use-busy-action"
+import { useNarrow } from "@/hooks/use-narrow"
 import { getShape } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import {
@@ -74,6 +75,9 @@ export function ShapeVersions() {
   const [diff, setDiff] = useState<RevisionDiff | null>(null)
   const [back, setBack] = useState<RevisionDiff | null>(null)
   const [view, setView] = useState<"side" | "inline">("side")
+  const narrow = useNarrow()
+  // Side by side is the desktop comparison. A phone shows the inline diff only.
+  const shown = narrow ? "inline" : view
   const [note, setNote] = useState("")
   const timeline = useRef<HTMLDivElement>(null)
   const { busy, run } = useBusyAction({
@@ -256,15 +260,17 @@ export function ShapeVersions() {
               },
             ]}
           />
-          <ViewTabs
-            label="Compare view"
-            value={view}
-            onChange={setView}
-            options={[
-              { value: "side", label: "Side by side" },
-              { value: "inline", label: "Inline" },
-            ]}
-          />
+          {narrow ? null : (
+            <ViewTabs
+              label="Compare view"
+              value={view}
+              onChange={setView}
+              options={[
+                { value: "side", label: "Side by side" },
+                { value: "inline", label: "Inline" },
+              ]}
+            />
+          )}
           <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="flex min-w-0 flex-col gap-4">
               {diff.items.length === 0 && diff.story.length === 0 ? (
@@ -280,11 +286,11 @@ export function ShapeVersions() {
                   item={item}
                   from={diff.from.id}
                   to={diff.to.id}
-                  view={view}
+                  view={shown}
                 />
               ))}
               {diff.items.length > 0 || diff.story.length > 0 ? (
-                <StoryDiff diff={diff} view={view} />
+                <StoryDiff diff={diff} view={shown} />
               ) : null}
             </div>
             <aside className="flex min-w-0 flex-col gap-4">

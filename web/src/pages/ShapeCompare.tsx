@@ -9,11 +9,14 @@ import { Shell } from "@/components/shell/Shell"
 import { ConflictCard } from "@/components/shaping/compare/ConflictCard"
 import { DuplicateCard } from "@/components/shaping/compare/DuplicateCard"
 import { SameList } from "@/components/shaping/compare/SameList"
-import { ActionPanel, Panel } from "@/components/shaping/session-ui"
+import { SessionPicker } from "@/components/shaping/compare/SessionPicker"
+import { ActionPanel } from "@/components/shaping/session-ui"
 import { SummaryCells } from "@/components/shaping/versions/SummaryCells"
 import { Button } from "@/components/ui/button"
 import { useNotedAction } from "@/components/shaping/use-noted-action"
+import { listShapes } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
+import type { ShapeSession } from "@/lib/types"
 import {
   compareShapes,
   keepSeparate,
@@ -23,24 +26,44 @@ import {
   undecided,
   type Comparison,
 } from "@/lib/shape-compare"
-import { emptyPanelTextLarge, errorText } from "@/components/shaping/styles"
+import { errorText } from "@/components/shaping/styles"
 
 const exits =
   "0 ok · 1 failed · 2 usage · 3 not found · 4 refused, such as open conflicts or a sealed session · 5 agent failed"
 
 /** Two to five sessions of one repo: what they share, where they disagree, and a merge. */
 export function ShapeCompare() {
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const workspace = params.get("workspace") ?? "."
   const ids = (params.get("ids") ?? "").split(",").filter((id) => id !== "")
   const navigate = useNavigate()
+  const [catalog, setCatalog] = useState<ShapeSession[]>([])
   const [result, setResult] = useState<Comparison | null>(null)
   const [picks, setPicks] = useState<Record<string, string>>({})
   const { note, setNote, busy, run } = useNotedAction()
   const key = ids.join(",")
 
   useEffect(() => {
-    if (key === "") {
+    let live = true
+    void listShapes(workspace)
+      .then((rows) => {
+        if (live) {
+          setCatalog(rows)
+        }
+      })
+      .catch((err: unknown) => {
+        if (live) {
+          setNote(reasonText(err, "the sessions could not be read"))
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [workspace, setNote])
+
+  useEffect(() => {
+    if (ids.length < 2) {
+      setResult(null)
       return
     }
     let live = true
@@ -94,6 +117,16 @@ export function ShapeCompare() {
     { name: "Merge", method: "POST", route: "/shapes/merge", command },
   ]
 
+  function choose(next: string[]) {
+    const query = new URLSearchParams(params)
+    if (next.length === 0) {
+      query.delete("ids")
+    } else {
+      query.set("ids", next.join(","))
+    }
+    setParams(query, { replace: true })
+  }
+
   function merge() {
     void run(async () => {
       await mergeShapes(workspace, {
@@ -121,7 +154,10 @@ export function ShapeCompare() {
         aria-label="Breadcrumb"
         className="flex items-center gap-2 text-[13px] text-muted-foreground"
       >
-        <Link className="underline underline-offset-3" to="/shaping">
+        <Link
+          className="underline underline-offset-3"
+          to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
+        >
           Sessions
         </Link>
         <span aria-hidden="true">/</span>
@@ -134,11 +170,7 @@ export function ShapeCompare() {
           {note}
         </p>
       ) : null}
-      {ids.length < 2 ? (
-        <Panel className={emptyPanelTextLarge}>
-          Pick two to five sessions from the list to compare them.
-        </Panel>
-      ) : null}
+      <SessionPicker sessions={catalog} chosen={ids} onChange={choose} />
       {result !== null ? (
         <>
           <SummaryCells

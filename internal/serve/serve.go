@@ -135,6 +135,16 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		set, err := scope.Discover(r.URL.Query().Get("path"))
 		if err != nil {
+			// A folder with no checkout is an empty list, not a failed request. The shaping
+			// page asks for "." and for folders that are not repositories yet.
+			var noRepo *scope.Error
+			if errors.As(err, &noRepo) && noRepo.SpanCode() == "no_repo" && set.Root != "" {
+				if set.Repos == nil {
+					set.Repos = []scope.Repo{}
+				}
+				writeJSON(w, http.StatusOK, set)
+				return
+			}
 			writeErr(w, err)
 			return
 		}

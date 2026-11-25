@@ -30,8 +30,8 @@ export function agentLabel(session: ShapeSession): string {
 
 /** What the session is about, how it stands and where it runs. */
 const sessionLinks = [
-  { to: "versions", label: "History" },
-  { to: "history", label: "Steps" },
+  { to: "history", label: "History" },
+  { to: "versions", label: "Compare" },
   { to: "transfer", label: "Export" },
 ]
 

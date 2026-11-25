@@ -127,6 +127,28 @@ func TestQuickstartAcceptsStoryFiles(t *testing.T) {
 	}
 }
 
+func TestAFolderWithNoCheckoutListsNothing(t *testing.T) {
+	dir := t.TempDir()
+	for _, path := range []string{dir, ".", ""} {
+		req := httptest.NewRequest(http.MethodGet, "/repos?path="+url.QueryEscape(path), nil)
+		rec := httptest.NewRecorder()
+		Handler(t.TempDir(), "").ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("path %q status %d %s", path, rec.Code, rec.Body.String())
+		}
+		if path == dir && !strings.Contains(rec.Body.String(), `"repos":[]`) {
+			t.Fatalf("body %s", rec.Body.String())
+		}
+	}
+	missing := filepath.Join(t.TempDir(), "missing")
+	req := httptest.NewRequest(http.MethodGet, "/repos?path="+url.QueryEscape(missing), nil)
+	rec := httptest.NewRecorder()
+	Handler(t.TempDir(), "").ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestFolderOfReposRequiresASelection(t *testing.T) {
 	parent := t.TempDir()
 	for _, name := range []string{"salute-infra", "salute-apollo"} {
@@ -189,14 +211,7 @@ func TestJiraAccountResponseOmitsTheToken(t *testing.T) {
 
 func TestAnswerContinuesAWaitingRun(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "span-1")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(engine.Cursor{ID: "span-1", Stage: "frame", Hold: true, Reason: "open questions: Which currency?", Questions: []string{"Which currency?"}})
-	if err := os.WriteFile(filepath.Join(dir, "cursor.json"), append(raw, '\n'), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeCursor(t, root, engine.Cursor{ID: "span-1", Stage: "frame", Hold: true, Reason: "open questions: Which currency?", Questions: []string{"Which currency?"}})
 	var got Signal
 	handler := New(root, "", nil, func(_ context.Context, id string, signal Signal) error {
 		if id != "span-1" {

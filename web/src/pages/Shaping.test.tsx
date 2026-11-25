@@ -59,6 +59,8 @@ function open(url = "/shaping") {
     <MemoryRouter initialEntries={[url]}>
       <Routes>
         <Route path="/shaping" element={<Shaping />} />
+        <Route path="/shaping/board" element={<p>board page</p>} />
+        <Route path="/shaping/compare" element={<p>compare page</p>} />
         <Route path="/shaping/:id" element={<p>session page</p>} />
       </Routes>
     </MemoryRouter>
@@ -224,6 +226,17 @@ describe("shape a story: sessions", () => {
       expect(archiveShape).toHaveBeenCalledWith("sh-5", ".", true)
     )
     await waitFor(() => expect(listShapes).toHaveBeenCalledTimes(2))
+  })
+
+  it("switches to the board and opens compare from the list", async () => {
+    open("/shaping?view=sessions")
+    const list = await screen.findByRole("tab", { name: "List" })
+    expect(list.getAttribute("aria-selected")).toBe("true")
+    expect(
+      screen.getByRole("link", { name: "Compare sessions" }).getAttribute("href")
+    ).toBe("/shaping/compare?workspace=.")
+    fireEvent.click(screen.getByRole("tab", { name: "Board" }))
+    expect(await screen.findByText("board page")).toBeTruthy()
   })
 
   it("does not offer to delete a sealed session", async () => {
