@@ -18,7 +18,7 @@ export function KeptNext({ kept, next }: { kept: string; next: string }) {
   return (
     <div className="rounded-[10px] bg-muted px-3.5 py-3">
       <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
-        <InfoIcon className="size-4" aria-hidden="true" />
+        <InfoIcon className="size-4 text-primary" aria-hidden="true" />
         What to know
       </div>
       <dl>

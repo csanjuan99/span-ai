@@ -47,7 +47,7 @@ export function EmptyDesk({
   onStory: () => void
 }) {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl leading-8 font-semibold tracking-tight">
           Desk
@@ -63,7 +63,7 @@ export function EmptyDesk({
         <span className="inline-flex h-6 items-center rounded-full bg-accent px-2.5 text-xs leading-4 font-medium tracking-wide text-primary">
           Desk · no runs yet
         </span>
-        <h2 className="max-w-[720px] text-[30px] leading-[34px] font-semibold tracking-tight text-balance md:text-[40px] md:leading-[44px]">
+        <h2 className="max-w-[720px] text-[30px] leading-[34px] font-semibold tracking-tight md:text-[40px] md:leading-[44px]">
           Ship the story, not the chore
         </h2>
         <p className="max-w-[640px] text-base leading-[26px] text-pretty text-muted-foreground">
@@ -90,7 +90,7 @@ export function EmptyDesk({
         <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
-            className="h-11 rounded-[10px] px-4 md:h-10"
+            className="h-11 w-full rounded-[10px] px-4 md:h-10 md:w-auto"
             onClick={onSample}
           >
             <PlayIcon aria-hidden="true" />
@@ -99,7 +99,7 @@ export function EmptyDesk({
           <Button
             type="button"
             variant="ghost"
-            className="h-11 rounded-[10px] px-4 md:h-10"
+            className="h-11 w-full rounded-[10px] px-4 md:h-10 md:w-auto"
             onClick={onStory}
           >
             Paste a Jira story
@@ -126,7 +126,7 @@ export function EmptyDesk({
               <span className="flex items-center gap-2 text-lg leading-[26px] font-semibold">
                 <span
                   aria-hidden="true"
-                  className="font-mono font-semibold text-primary"
+                  className="font-mono text-sm font-semibold text-primary"
                 >
                   {index + 1}
                 </span>
@@ -134,7 +134,7 @@ export function EmptyDesk({
               </span>
               <span className="text-[13px] leading-5">{phase.does}</span>
               <span className="text-xs leading-4 text-muted-foreground">
-                {phase.you}
+                <b className="font-semibold">You:</b> {phase.you}
               </span>
             </li>
           ))}

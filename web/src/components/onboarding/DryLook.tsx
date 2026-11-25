@@ -1,5 +1,6 @@
 "use client"
 
+import { CheckIcon } from "lucide-react"
 import { useState } from "react"
 
 import { Pill } from "@/components/onboarding/Pill"
@@ -19,14 +20,17 @@ export function DryLook() {
     >
       <div className="flex flex-wrap items-center gap-2 px-4 py-4 sm:px-5">
         <h2 className="text-lg font-semibold">Dry look</h2>
-        <Pill tone="pass">Nothing has run</Pill>
+        <Pill tone="pass">
+          <CheckIcon aria-hidden="true" className="size-3" />
+          Nothing has run
+        </Pill>
         <button
           type="button"
           aria-pressed={on}
           onClick={() => setOn((now) => !now)}
           className={cn(
-            "ml-auto h-7 rounded-full border border-input px-3 text-xs font-medium text-muted-foreground",
-            "aria-pressed:border-transparent aria-pressed:bg-accent aria-pressed:text-primary"
+            "ml-auto h-11 rounded-full border border-input bg-card px-3 text-[13px] text-muted-foreground sm:h-8",
+            "aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-primary"
           )}
         >
           {on ? "Dry look on" : "Dry look off"}

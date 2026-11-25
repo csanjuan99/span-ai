@@ -63,7 +63,7 @@ export function Panel({
 }: {
   title: string
   badge?: ReactNode
-  lead: string
+  lead?: string
   children: ReactNode
 }) {
   return (
@@ -75,7 +75,9 @@ export function Panel({
         <h2 className="text-lg font-semibold">{title}</h2>
         {badge}
       </div>
-      <p className="text-[13px] text-muted-foreground">{lead}</p>
+      {lead !== undefined ? (
+        <p className="text-[13px] text-muted-foreground">{lead}</p>
+      ) : null}
       {children}
     </section>
   )

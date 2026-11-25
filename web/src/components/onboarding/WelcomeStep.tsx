@@ -1,6 +1,9 @@
 "use client"
 
+import { ArrowRightIcon, ShieldCheckIcon } from "lucide-react"
+
 import { CheckLine } from "@/components/onboarding/CheckLine"
+import { stepGlyph } from "@/components/onboarding/glyph"
 import { Pill } from "@/components/onboarding/Pill"
 import { Button } from "@/components/ui/button"
 import { stageGroups } from "@/lib/onboarding"
@@ -16,8 +19,28 @@ const safe = [
 const sealed = ["intake", "frame"]
 const current = "build"
 
+/** One stage of the example run: sealed, current or waiting. */
+function StagePill({ stage }: { stage: string }) {
+  return (
+    <span
+      className={cn(
+        "flex h-8 min-w-0 items-center gap-1.5 rounded-full border border-input bg-card px-2.5 text-xs font-medium whitespace-nowrap",
+        sealed.includes(stage) && "border-transparent bg-pass-soft text-pass",
+        stage === current &&
+          "border-transparent bg-primary text-primary-foreground",
+        glyph(stage) === "·" && "bg-muted text-muted-foreground"
+      )}
+    >
+      <b aria-hidden="true" className="font-mono font-semibold">
+        {glyph(stage)}
+      </b>
+      {stage}
+    </span>
+  )
+}
+
 function glyph(stage: string): string {
-  return sealed.includes(stage) ? "+" : stage === current ? ">" : "·"
+  return stepGlyph(sealed.includes(stage), stage === current)
 }
 
 /** Step 1: what Span does, the ten stages, and what stays safe. */
@@ -29,10 +52,10 @@ export function WelcomeStep({
   onSkip: () => void
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 sm:gap-8">
+    <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-6 sm:gap-8">
       <div className="flex max-w-[760px] flex-col gap-3">
         <Pill tone="acc">Step 1 of 3 · about 3 minutes</Pill>
-        <h1 className="text-[30px] leading-[34px] font-semibold tracking-tight text-balance sm:text-[40px] sm:leading-[44px]">
+        <h1 className="text-[30px] leading-[34px] font-semibold tracking-tight sm:text-[40px] sm:leading-[44px]">
           Span takes a story from idea to merged code
         </h1>
         <p className="text-base leading-[26px] text-muted-foreground">
@@ -42,14 +65,14 @@ export function WelcomeStep({
       </div>
       <section
         aria-label="The ten stages"
-        className="rounded-[14px] border border-border bg-card p-4 shadow-sm sm:p-6"
+        className="hidden rounded-[14px] border border-border bg-card p-6 shadow-sm sm:block"
       >
-        <div className="flex flex-wrap gap-2 sm:grid sm:grid-cols-10">
+        <div className="grid grid-cols-10 gap-2">
           {stageGroups.map((group) => (
             <div
               key={group.name}
               className={cn(
-                "mb-2 hidden border-b-2 border-input pb-1.5 text-xs font-semibold sm:block",
+                "mb-2 border-b-2 border-input pb-1.5 text-xs font-semibold",
                 group.span
               )}
             >
@@ -57,24 +80,7 @@ export function WelcomeStep({
             </div>
           ))}
           {stageGroups.flatMap((group) =>
-            group.stages.map((stage) => (
-              <span
-                key={stage}
-                className={cn(
-                  "flex h-8 min-w-0 items-center gap-1.5 rounded-full border border-input bg-card px-2.5 text-xs font-medium whitespace-nowrap",
-                  sealed.includes(stage) &&
-                    "border-transparent bg-pass-soft text-pass",
-                  stage === current &&
-                    "border-transparent bg-primary text-primary-foreground",
-                  glyph(stage) === "·" && "bg-muted text-muted-foreground"
-                )}
-              >
-                <b aria-hidden="true" className="font-mono font-semibold">
-                  {glyph(stage)}
-                </b>
-                {stage}
-              </span>
-            ))
+            group.stages.map((stage) => <StagePill key={stage} stage={stage} />)
           )}
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
@@ -89,15 +95,28 @@ export function WelcomeStep({
             className="flex flex-col gap-2 rounded-[14px] border border-border bg-card p-4 shadow-sm"
           >
             <div className="text-lg font-semibold">{group.name}</div>
-            <div className="font-mono text-xs text-muted-foreground">
+            <div className="hidden font-mono text-xs text-muted-foreground sm:block">
               {group.stages.join(" · ")}
             </div>
-            <p className="text-[13px]">{group.text}</p>
+            <div className="flex flex-wrap gap-2 sm:hidden">
+              {group.stages.map((stage) => (
+                <StagePill key={stage} stage={stage} />
+              ))}
+            </div>
+            <p className="text-[13px] text-muted-foreground sm:text-foreground">
+              {group.text}
+            </p>
           </section>
         ))}
       </div>
+      <p className="text-xs text-muted-foreground sm:hidden">
+        Example: + sealed · &gt; current · · waiting.
+      </p>
       <section className="rounded-[14px] border border-border bg-card px-4 py-4 shadow-sm sm:px-5">
-        <div className="mb-2 text-sm font-semibold">What stays safe</div>
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+          <ShieldCheckIcon aria-hidden="true" className="size-4 text-pass" />
+          What stays safe
+        </div>
         <ul className="flex flex-col">
           {safe.map((line) => (
             <CheckLine key={line} tone="pass">
@@ -107,10 +126,15 @@ export function WelcomeStep({
         </ul>
       </section>
       <div className="flex flex-wrap items-center gap-3">
-        <Button className="h-10" onClick={onNext}>
+        <Button className="h-11 w-full sm:h-10 sm:w-auto" onClick={onNext}>
+          <ArrowRightIcon aria-hidden="true" />
           Continue: connect your project
         </Button>
-        <Button className="h-10" variant="ghost" onClick={onSkip}>
+        <Button
+          className="h-11 w-full sm:h-10 sm:w-auto"
+          variant="ghost"
+          onClick={onSkip}
+        >
           Skip setup
         </Button>
       </div>

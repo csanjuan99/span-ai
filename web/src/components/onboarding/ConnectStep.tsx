@@ -1,5 +1,11 @@
 "use client"
 
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ClockIcon,
+  ShieldCheckIcon,
+} from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { AgentPanel } from "@/components/onboarding/AgentPanel"
@@ -91,9 +97,10 @@ export function ConnectStep({
   const canContinue = usable(probe) && picked !== ""
 
   return (
-    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-6 sm:gap-8">
+    <div className="mx-auto flex w-full max-w-[1020px] flex-col gap-6 sm:gap-8">
       {returning ? (
         <div className="flex flex-wrap items-center gap-2.5 rounded-[14px] border border-border bg-card px-4 py-2.5 shadow-sm">
+          <ClockIcon aria-hidden="true" className="size-4 text-primary" />
           <span className="text-[13px]">
             <b>Welcome back.</b> Your folder from last time is already filled
             in.
@@ -149,9 +156,11 @@ export function ConnectStep({
           )}
           <div className="flex flex-wrap items-center gap-3">
             <Button className="h-10" disabled={!canContinue} onClick={onNext}>
+              <ArrowRightIcon aria-hidden="true" />
               Continue
             </Button>
             <Button className="h-10" variant="ghost" onClick={onBack}>
+              <ArrowLeftIcon aria-hidden="true" />
               Back
             </Button>
           </div>
@@ -163,7 +172,11 @@ export function ConnectStep({
         </div>
         <aside className="flex flex-col gap-4">
           <section className="rounded-[14px] border border-border bg-card px-4 py-4 shadow-sm sm:px-5">
-            <div className="mb-2 text-sm font-semibold">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+              <ShieldCheckIcon
+                aria-hidden="true"
+                className="size-4 text-pass"
+              />
               What Span reads and writes
             </div>
             <ul>

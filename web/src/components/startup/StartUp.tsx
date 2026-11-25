@@ -72,28 +72,35 @@ export function StartUp() {
     <div
       role="status"
       aria-label="Starting Span"
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background px-4 sm:px-10"
     >
       <ol
-        className="flex max-w-xl flex-wrap justify-center gap-2 px-4 text-xs"
+        className="flex w-full max-w-[1000px] flex-wrap justify-center gap-2 px-4 sm:grid sm:grid-cols-10 sm:px-0"
         aria-hidden="true"
       >
         {stages.map((name, index) => (
           <li
             key={name}
             className={cn(
-              "rounded-md px-2 py-1 transition-colors",
+              "flex h-8 min-w-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium whitespace-nowrap transition-colors",
               index < filled
-                ? "bg-pass-soft text-pass"
-                : "text-muted-foreground"
+                ? "border-transparent bg-accent text-primary"
+                : "border-input bg-muted text-muted-foreground"
             )}
           >
-            <b className="mr-1 font-mono">{index < filled ? "+" : "·"}</b>
+            <b className="font-mono font-semibold">
+              {index < filled ? "+" : "·"}
+            </b>
             {name}
           </li>
         ))}
       </ol>
-      <p className="text-sm text-muted-foreground">Starting Span</p>
+      <div className="text-center">
+        <p className="text-sm font-semibold">Starting Span</p>
+        <p className="text-xs text-muted-foreground">
+          Opening your run folder.
+        </p>
+      </div>
     </div>
   )
 }

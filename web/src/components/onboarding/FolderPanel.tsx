@@ -1,5 +1,6 @@
 "use client"
 
+import { CheckIcon } from "lucide-react"
 import { useState } from "react"
 
 import { CheckLine } from "@/components/onboarding/CheckLine"
@@ -27,7 +28,14 @@ export function FolderPanel({
   return (
     <Panel
       title="Project folder"
-      badge={usable(probe) ? <Pill tone="pass">Ready</Pill> : null}
+      badge={
+        usable(probe) ? (
+          <Pill tone="pass">
+            <CheckIcon aria-hidden="true" className="size-3" />
+            Ready
+          </Pill>
+        ) : null
+      }
       lead="The folder with your code. Span creates branches and runs your checks here."
     >
       <div className="flex gap-2">

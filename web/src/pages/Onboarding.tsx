@@ -5,7 +5,7 @@ import { useNavigate } from "react-router"
 
 import { ConnectStep } from "@/components/onboarding/ConnectStep"
 import { FirstRunStep } from "@/components/onboarding/FirstRunStep"
-import { ObBar } from "@/components/onboarding/ObBar"
+import { MobileSteps, ObBar } from "@/components/onboarding/ObBar"
 import { WelcomeStep } from "@/components/onboarding/WelcomeStep"
 import { readOnboarding, saveOnboarding } from "@/lib/onboarding"
 
@@ -38,7 +38,10 @@ export function Onboarding() {
   return (
     <div className="flex min-h-dvh flex-col bg-background">
       <ObBar step={state.step} onSkip={skip} />
-      <main className="w-full flex-1 px-4 pt-6 pb-10 sm:px-10 sm:pt-12 sm:pb-16">
+      <main className="flex w-full flex-1 flex-col px-4 pt-6 pb-10 sm:px-10 sm:pt-12 sm:pb-16">
+        <div className="mb-6 sm:hidden">
+          <MobileSteps step={state.step} />
+        </div>
         {state.step === 1 ? (
           <WelcomeStep onNext={() => go(2)} onSkip={skip} />
         ) : null}

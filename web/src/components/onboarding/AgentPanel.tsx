@@ -1,5 +1,7 @@
 "use client"
 
+import { CheckIcon, RotateCwIcon } from "lucide-react"
+
 import { CheckLine } from "@/components/onboarding/CheckLine"
 import { FixBox } from "@/components/onboarding/FixBox"
 import { Panel } from "@/components/onboarding/Frame"
@@ -10,7 +12,12 @@ import { cn } from "@/lib/utils"
 
 function badgeOf(agent: AgentState) {
   if (agent.ready) {
-    return <Pill tone="pass">Installed · ready</Pill>
+    return (
+      <Pill tone="pass">
+        <CheckIcon aria-hidden="true" className="size-3" />
+        Installed · ready
+      </Pill>
+    )
   }
   if (!agent.installed) {
     return <Pill tone="fail">Not installed</Pill>
@@ -81,7 +88,12 @@ export function AgentPanel({
       title="Agent CLI"
       badge={
         agents === null ? null : (
-          <Pill tone={ready > 0 ? "pass" : "fail"}>{ready} ready</Pill>
+          <Pill tone={ready > 0 ? "pass" : "fail"}>
+            {ready > 0 ? (
+              <CheckIcon aria-hidden="true" className="size-3" />
+            ) : null}
+            {ready} ready
+          </Pill>
         )
       }
       lead="Pick the agent that does the work by default. You can change it later in Settings."
@@ -119,6 +131,7 @@ export function AgentPanel({
       </fieldset>
       <div>
         <Button type="button" variant="outline" onClick={onCheck}>
+          <RotateCwIcon aria-hidden="true" />
           Check again
         </Button>
       </div>

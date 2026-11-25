@@ -23,7 +23,7 @@ export function Shell({
     <div className="flex h-dvh flex-col overflow-hidden">
       <AppBar path={path} />
       <main className="min-h-0 w-full flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 pt-4 pb-12 sm:px-10 sm:pt-8 sm:pb-16">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 pt-4 pb-12 sm:gap-6 sm:px-10 sm:pt-8 sm:pb-16">
           {children}
         </div>
       </main>

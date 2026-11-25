@@ -1,3 +1,5 @@
+import { CopyIcon } from "lucide-react"
+
 import { CopyChip } from "@/components/ledger/CopyChip"
 
 /** A command to paste into a terminal, with a copy button. */
@@ -11,7 +13,12 @@ export function CommandLine({ command }: { command: string }) {
           </span>{" "}
           {command}
         </span>
-        <CopyChip label="command" value={command}>
+        <CopyChip
+          label="command"
+          value={command}
+          className="rounded-lg border-input bg-card px-2 py-1 font-sans text-xs font-medium text-foreground"
+        >
+          <CopyIcon aria-hidden="true" className="size-3.5" />
           Copy
         </CopyChip>
       </div>

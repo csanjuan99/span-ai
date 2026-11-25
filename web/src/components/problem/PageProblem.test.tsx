@@ -31,7 +31,9 @@ describe("PageProblem", () => {
         <PageProblem problem="notfound" id="SPAN-499" />
       </MemoryRouter>
     )
-    expect(screen.getByText("SPAN-499 is not on this desk")).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "Run SPAN-499 is not on this desk" })
+    ).toBeTruthy()
     expect(
       screen.getByRole("link", { name: "Back to Desk" }).getAttribute("href")
     ).toBe("/")

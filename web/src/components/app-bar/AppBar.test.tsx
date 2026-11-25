@@ -39,7 +39,7 @@ describe("AppBar", () => {
     const opened = vi.fn()
     window.addEventListener(openPaletteEvent, opened)
     bar("/")
-    fireEvent.click(screen.getByRole("button", { name: /Search/ }))
+    fireEvent.click(screen.getAllByRole("button", { name: /Search/ })[0])
     window.removeEventListener(openPaletteEvent, opened)
     expect(opened).toHaveBeenCalledTimes(1)
   })
@@ -47,5 +47,14 @@ describe("AppBar", () => {
   it("shows where the page is", () => {
     bar("/")
     expect(screen.getByText("~/work/api")).toBeTruthy()
+  })
+
+  it("opens the menu with the links and marks it expanded", () => {
+    bar("/")
+    const menu = screen.getByRole("button", { name: "Menu" })
+    expect(menu.getAttribute("aria-expanded")).toBe("false")
+    fireEvent.click(menu)
+    expect(menu.getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getAllByRole("link", { name: "Settings" })).toHaveLength(2)
   })
 })

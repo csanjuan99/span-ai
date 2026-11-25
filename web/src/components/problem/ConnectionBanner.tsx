@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckIcon, CircleAlertIcon, LoaderCircleIcon } from "lucide-react"
+import { CheckIcon, WifiOffIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 import type { ConnectionNotice } from "@/hooks/use-connection-notice"
@@ -28,7 +28,7 @@ function Banner({
     <p
       role="status"
       className={cn(
-        "flex flex-wrap items-center gap-3 rounded-[10px] px-4 py-2.5 text-[13px] leading-5 md:px-5",
+        "flex flex-wrap items-center gap-3 rounded-[14px] px-4 py-2.5 text-[13px] leading-5 md:px-5",
         tones[tone]
       )}
     >
@@ -77,7 +77,7 @@ export function ConnectionBanner({
     return (
       <Banner
         tone="fail"
-        icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+        icon={<WifiOffIcon aria-hidden="true" className="size-4" />}
         retry="Retry"
       >
         <b>Span is not answering.</b>
@@ -88,12 +88,7 @@ export function ConnectionBanner({
   return (
     <Banner
       tone="hold"
-      icon={
-        <LoaderCircleIcon
-          aria-hidden="true"
-          className="size-4 animate-spin motion-reduce:animate-none"
-        />
-      }
+      icon={<WifiOffIcon aria-hidden="true" className="size-4" />}
       retry="Retry now"
     >
       <b>Reconnecting to Span…</b> Your run keeps going on your machine.

@@ -1,4 +1,4 @@
-import { InfoIcon, TriangleAlertIcon } from "lucide-react"
+import { InfoIcon, TriangleAlertIcon, type LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { KeptNext } from "@/components/problem/KeptNext"
@@ -21,6 +21,7 @@ const tones: Record<ProblemTone, string> = {
 export function ProblemCard({
   label,
   tone,
+  icon,
   title,
   cause,
   command,
@@ -30,14 +31,16 @@ export function ProblemCard({
 }: {
   label: string
   tone: ProblemTone
-  title: string
+  /** The mark in the band; the tone's own when left out. */
+  icon?: LucideIcon
+  title: ReactNode
   cause: string
   command?: string
   kept: string
   next: string
   children?: ReactNode
 }) {
-  const Icon = tone === "info" ? InfoIcon : TriangleAlertIcon
+  const Icon = icon ?? (tone === "info" ? InfoIcon : TriangleAlertIcon)
   return (
     <section
       aria-label={label}
@@ -53,7 +56,7 @@ export function ProblemCard({
         <span>{label}</span>
       </div>
       <div className="flex flex-col gap-3 p-6">
-        <h2 className="text-lg font-semibold text-balance">{title}</h2>
+        <h2 className="text-lg leading-[26px] font-semibold">{title}</h2>
         <p className="text-sm leading-[22px] text-pretty">
           <b>Cause.</b> {cause}
         </p>

@@ -1,5 +1,6 @@
 "use client"
 
+import { ArrowLeftIcon, PlayIcon } from "lucide-react"
 import { useState } from "react"
 
 import { sampleBrief } from "@/components/desk/EmptyDesk"
@@ -59,7 +60,7 @@ export function FirstRunStep({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-6 sm:gap-8">
+    <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 sm:gap-8">
       <div className="flex flex-col gap-2">
         <Pill tone="acc">Step 3 of 3</Pill>
         <h1 className="text-2xl font-semibold tracking-tight">
@@ -70,40 +71,42 @@ export function FirstRunStep({
           first, then press Start.
         </p>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[400px_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <Panel
-            title="Sample brief"
-            badge={<Pill tone="mut">Prefilled</Pill>}
-            lead="Change it if you like. It is the brief the first run starts from."
-          >
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium">Title</span>
-              <Input
-                className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium">What should change</span>
-              <Textarea
-                rows={4}
-                aria-label="Brief"
-                className="rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
-                value={brief}
-                onChange={(event) => setBrief(event.target.value)}
-              />
-            </label>
-            <p className="text-[13px] text-muted-foreground">
-              Runs in <span className="font-mono text-xs">{folder}</span> on a
-              new branch named <span className="font-mono text-xs">span/…</span>
-              .
-            </p>
-          </Panel>
-          <section className="flex flex-col gap-4 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:px-5">
+      <div className="grid items-start gap-4 lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-6">
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
+          <div className="order-1 lg:order-none">
+            <Panel
+              title="Sample brief"
+              badge={<Pill tone="mut">Prefilled</Pill>}
+            >
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium">Title</span>
+                <Input
+                  className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium">What should change</span>
+                <Textarea
+                  rows={4}
+                  aria-label="Brief"
+                  className="rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                  value={brief}
+                  onChange={(event) => setBrief(event.target.value)}
+                />
+              </label>
+              <p className="text-[13px] text-muted-foreground">
+                Runs in <span className="font-mono text-xs">{folder}</span> on a
+                new branch named{" "}
+                <span className="font-mono text-xs">span/…</span>.
+              </p>
+            </Panel>
+          </div>
+          <section className="order-3 flex flex-col gap-4 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:px-5">
             <div className="rounded-[10px] bg-muted px-3.5 py-3">
-              <div className="mb-1 text-sm font-semibold">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
+                <PlayIcon aria-hidden="true" className="size-4 text-primary" />
                 When you press Start
               </div>
               <div className={row}>
@@ -151,10 +154,12 @@ export function FirstRunStep({
               disabled={busy || title.trim() === "" || folder.trim() === ""}
               onClick={() => void start()}
             >
+              <PlayIcon aria-hidden="true" />
               Start the first run
             </Button>
             <div className="flex flex-wrap gap-3">
               <Button variant="ghost" onClick={onBack}>
+                <ArrowLeftIcon aria-hidden="true" />
                 Back
               </Button>
               <Button variant="ghost" onClick={onSkip}>
@@ -163,7 +168,9 @@ export function FirstRunStep({
             </div>
           </section>
         </div>
-        <DryLook />
+        <div className="order-2 lg:order-none">
+          <DryLook />
+        </div>
       </div>
     </div>
   )

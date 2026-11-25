@@ -171,6 +171,21 @@
     --shadow-md-value: 0 8px 24px #00000080;
 }
 
+/* The two-tone band a skeleton block sweeps while its content loads. */
+@utility bg-shimmer {
+  background-image: linear-gradient(90deg, var(--muted) 0%, var(--border) 50%, var(--muted) 100%);
+}
+
+/* The sweep that runs over a skeleton block while its content loads. */
+@keyframes shim {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
