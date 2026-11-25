@@ -20,12 +20,14 @@ import (
 
 // fakeBacklog records the calls it receives and answers with canned values.
 type fakeBacklog struct {
-	mu       sync.Mutex
-	previews int
-	creates  []jira.Draft
-	preview  jira.Preview
-	created  jira.Created
-	err      error
+	mu        sync.Mutex
+	previews  int
+	creates   []jira.Draft
+	preview   jira.Preview
+	created   jira.Created
+	issue     jira.Story
+	issueKeys []string
+	err       error
 }
 
 func (f *fakeBacklog) Preview(_ context.Context, _ string, _ int) (jira.Preview, error) {
@@ -40,6 +42,14 @@ func (f *fakeBacklog) CreateInBacklog(_ context.Context, d jira.Draft) (jira.Cre
 	defer f.mu.Unlock()
 	f.creates = append(f.creates, d)
 	return f.created, f.err
+}
+
+// Issue makes the fake an issue reader too; the story it answers is f.issue.
+func (f *fakeBacklog) Issue(_ context.Context, key string) (jira.Story, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issueKeys = append(f.issueKeys, key)
+	return f.issue, f.err
 }
 
 func (f *fakeBacklog) createCount() int {

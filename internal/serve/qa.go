@@ -795,18 +795,6 @@ func hasCases(root, id string, snap engine.Snapshot, g QAGate, names []string) b
 // maxQABody caps a QA request body; the bodies are a few names or one sentence.
 const maxQABody = 1 << 16
 
-// decodeBody reads a small JSON body into T. A body that is not valid JSON answers 400
-// invalid and reports false.
-func decodeBody[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
-	var body T
-	r.Body = http.MaxBytesReader(w, r.Body, maxQABody)
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, &requestError{"invalid", "the body is not valid JSON: " + err.Error()})
-		return body, false
-	}
-	return body, true
-}
-
 // saveRerun appends one rerun to the run's history, atomically.
 func saveRerun(root, id string, entry rerun) error {
 	rerunMu.Lock()
@@ -896,9 +884,9 @@ func qaRoutes(mux *http.ServeMux, root string) {
 		writeJSON(w, http.StatusOK, body)
 	})
 	mux.HandleFunc("POST /spans/{id}/qa/rerun", func(w http.ResponseWriter, r *http.Request) {
-		body, ok := decodeBody[struct {
+		body, ok := decodeJSON[struct {
 			Cases []string `json:"cases"`
-		}](w, r)
+		}](w, r, maxQABody)
 		if !ok {
 			return
 		}
@@ -908,9 +896,9 @@ func qaRoutes(mux *http.ServeMux, root string) {
 		rerunReply(w, r, root, []string{r.PathValue("case")})
 	})
 	mux.HandleFunc("POST /spans/{id}/qa/accept", func(w http.ResponseWriter, r *http.Request) {
-		body, ok := decodeBody[struct {
+		body, ok := decodeJSON[struct {
 			Reason string `json:"reason"`
-		}](w, r)
+		}](w, r, maxQABody)
 		if !ok {
 			return
 		}

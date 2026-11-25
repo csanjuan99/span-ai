@@ -224,6 +224,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, diff)
 	})
+	registerImplementation(mux, root)
 	mux.HandleFunc("GET /spans/{id}/feature", func(w http.ResponseWriter, r *http.Request) {
 		body, err := readFeature(root, r.PathValue("id"))
 		if err != nil {
@@ -231,6 +232,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			return
 		}
 		writeJSON(w, http.StatusOK, body)
+	})
+	mux.HandleFunc("GET /spans/{id}/log", func(w http.ResponseWriter, r *http.Request) {
+		serveRunLog(root, w, r)
 	})
 	mux.HandleFunc("GET /spans/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -253,6 +257,8 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		writeJSON(w, http.StatusOK, body)
 	})
+	qaRoutes(mux, root)
+	transcriptRoutes(mux, root)
 	mux.HandleFunc("GET /spans/{id}/live", func(w http.ResponseWriter, r *http.Request) {
 		if hub == nil {
 			http.NotFound(w, r)
@@ -980,10 +986,13 @@ func writeErr(w http.ResponseWriter, err error) {
 		status = http.StatusUnprocessableEntity
 	case "unauthorized":
 		status = http.StatusUnauthorized
-	case "not_found", "shape_not_found":
+	case "not_found", "shape_not_found", "shape_source_not_found", "shape_revision_not_found", "shape_step_not_found", "shape_share_not_found":
 		status = http.StatusNotFound
-	case "shape_not_ready", "shape_not_sealed", "shape_sealed", "shape_repo_changed",
-		"jira_backlog_disabled", "jira_board_ambiguous", "jira_not_in_backlog":
+	case "shape_share_expired", "shape_share_revoked":
+		status = http.StatusGone
+	case "shape_not_ready", "shape_not_sealed", "shape_sealed", "shape_repo_changed", "shape_context_written", "shape_no_split",
+		"jira_backlog_disabled", "jira_board_ambiguous", "jira_not_in_backlog", "shape_conflicts_open",
+		"shape_not_undoable", "shape_has_dependents", "shape_context_changed":
 		status = http.StatusConflict
 	case "unreachable":
 		status = http.StatusBadGateway

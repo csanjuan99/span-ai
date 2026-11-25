@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"span/internal/fsutil"
 )
 
 var idPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$`)
@@ -25,6 +27,8 @@ type StartInput struct {
 	Idea      string
 	Agent     string
 	Model     string
+	// SourceIssue is the Jira key the idea was read from, if any.
+	SourceIssue string
 }
 
 // Dir is the folder holding the sessions of a workspace.
@@ -64,7 +68,7 @@ func newSession(in StartInput, now time.Time) (*Session, error) {
 		return nil, err
 	}
 	return &Session{
-		ID: id, Workspace: in.Workspace, Repo: in.Repo, Idea: in.Idea, Agent: in.Agent, Model: in.Model,
+		ID: id, Workspace: in.Workspace, Repo: in.Repo, Idea: in.Idea, Agent: in.Agent, Model: in.Model, SourceIssue: in.SourceIssue,
 		Status: StatusInterviewing,
 		Map:    Map{Rules: []Rule{}, Examples: []Example{}, Questions: []Question{}},
 		Split:  []Split{}, Proposals: []Proposal{}, Turns: []Turn{},
@@ -139,44 +143,20 @@ func Save(s *Session) error {
 	if err != nil {
 		return err
 	}
+	s.UpdatedAt = time.Now().UTC()
 	raw, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode session: %w", err)
 	}
-	return writeAtomic(path, append(raw, '\n'))
+	if err := writeAtomic(path, append(raw, '\n')); err != nil {
+		return err
+	}
+	return recordRevision(s)
 }
 
-func writeAtomic(path string, data []byte) (err error) {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", dir, err)
-	}
-	tmp, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return fmt.Errorf("temp file: %w", err)
-	}
-	name := tmp.Name()
-	defer func() {
-		if err == nil {
-			return
-		}
-		if rmErr := os.Remove(name); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
-			err = errors.Join(err, rmErr)
-		}
-	}()
-	if _, werr := tmp.Write(data); werr != nil {
-		return errors.Join(fmt.Errorf("write %s: %w", path, werr), tmp.Close())
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", path, err)
-	}
-	if err := os.Chmod(name, 0o644); err != nil {
-		return fmt.Errorf("chmod %s: %w", path, err)
-	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("replace %s: %w", path, err)
-	}
-	return nil
+// writeAtomic keeps session files readable by the group, as they always were.
+func writeAtomic(path string, data []byte) error {
+	return fsutil.WriteAtomicMode(path, data, 0o644)
 }
 
 // checkRepo refuses a repo that is not the workspace or a folder inside it, so the
@@ -204,4 +184,38 @@ func resolved(path string) string {
 		return real
 	}
 	return filepath.Clean(path)
+}
+
+// SetArchived hides or shows a session in the default list. A sealed session can be
+// archived: the flag is not part of its story or digest.
+func SetArchived(workspace, id string, archived bool) (*Session, error) {
+	s, err := Load(workspace, id)
+	if err != nil {
+		return nil, err
+	}
+	s.Archived = archived
+	if err := Save(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Delete removes a session and its folder. A sealed session is a record of a decision and
+// is refused with shape_sealed: archive it instead.
+func Delete(workspace, id string) error {
+	s, err := Load(workspace, id)
+	if err != nil {
+		return err
+	}
+	if s.Status == StatusSealed {
+		return fail("shape_sealed", "session %s is sealed and cannot be deleted; archive it instead", id)
+	}
+	path, err := sessionPath(workspace, id)
+	if err != nil {
+		return err
+	}
+	if err := os.RemoveAll(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("delete session %s: %w", id, err)
+	}
+	return nil
 }

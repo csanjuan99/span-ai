@@ -38,6 +38,8 @@ const (
 	ProposalProposed = "proposed"
 	// ProposalAccepted was written to the product context file.
 	ProposalAccepted = "accepted"
+	// ProposalSkipped was dropped by the person; it can be brought back until the session is sealed.
+	ProposalSkipped = "skipped"
 )
 
 // Source kinds: where a rule or example comes from.
@@ -82,6 +84,9 @@ type Question struct {
 	Assume string `json:"assume"`
 	Status string `json:"status"`
 	Answer string `json:"answer"`
+	// AnswerID names the answer (A1, A2, ...) once the question is answered or assumed. It
+	// stays when an assumption is replaced by an answer, so sources that cite it keep working.
+	AnswerID string `json:"answerId"`
 }
 
 // Map is the example map: rules, the examples that pin them, and the questions left.
@@ -119,6 +124,25 @@ type JiraRef struct {
 	Status string `json:"status"`
 }
 
+// Failure kinds: why an interview turn stopped.
+const (
+	// FailureUsageLimit means the agent CLI reported a usage, rate or quota limit.
+	FailureUsageLimit = "usage_limit"
+	// FailureRepoChanged means the agent changed the repository during a read-only turn.
+	FailureRepoChanged = "repo_changed"
+	// FailureError is any other failure of the agent or of its reply.
+	FailureError = "error"
+)
+
+// Failure says why the last interview turn stopped. It stays on the session until a turn
+// succeeds, so the page and the CLI can tell what was kept and offer to resume.
+type Failure struct {
+	At      time.Time `json:"at"`
+	Agent   string    `json:"agent"`
+	Kind    string    `json:"kind"`
+	Message string    `json:"message"`
+}
+
 // Session is one shaping conversation, stored as session.json.
 type Session struct {
 	ID        string     `json:"id"`
@@ -135,6 +159,24 @@ type Session struct {
 	Story     string     `json:"story"`
 	Digest    string     `json:"digest"`
 	Jira      *JiraRef   `json:"jira,omitempty"`
+	// Parent is the session this one was split from, or forked from once it was sealed.
+	Parent string `json:"parent,omitempty"`
+	// Children are the sessions an accepted split created, in the order of the split.
+	Children []string `json:"children,omitempty"`
+	// MergedInto is the session this one was merged into; this one stays readable and links to it.
+	MergedInto string `json:"mergedInto,omitempty"`
+	// SplitKept records that the person chose to keep the story whole: no split is proposed again.
+	SplitKept bool `json:"splitKept,omitempty"`
+	// SealedAt is when the story was sealed.
+	SealedAt *time.Time `json:"sealedAt,omitempty"`
+	// UpdatedAt is stamped by every Save.
+	UpdatedAt time.Time `json:"updatedAt"`
+	// Archived hides the session from the default list; it never changes the story.
+	Archived bool `json:"archived"`
+	// SourceIssue is the Jira key the session started from, when it did.
+	SourceIssue string `json:"sourceIssue,omitempty"`
+	// Failure is why the last turn stopped, until a turn succeeds.
+	Failure *Failure `json:"failure,omitempty"`
 }
 
 // Error is a failure the HTTP layer answers with its Code.

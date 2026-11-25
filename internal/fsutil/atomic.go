@@ -10,8 +10,14 @@ import (
 // WriteAtomic writes data to path through a temporary file in the same folder, so a reader
 // never sees half a file. It creates the folder when it is missing and flushes the data to
 // disk before the rename. A failure joins the error of removing the temporary file, so a
-// leftover is never silent.
+// leftover is never silent. The file is private to its owner; WriteAtomicMode picks another.
 func WriteAtomic(path string, data []byte) error {
+	return WriteAtomicMode(path, data, 0o600)
+}
+
+// WriteAtomicMode is WriteAtomic with the permission bits of the final file chosen by the
+// caller.
+func WriteAtomicMode(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -22,6 +28,9 @@ func WriteAtomic(path string, data []byte) error {
 	}
 	tmp := f.Name()
 	if err := fill(f, data); err != nil {
+		return discard(tmp, err)
+	}
+	if err := os.Chmod(tmp, perm); err != nil {
 		return discard(tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {

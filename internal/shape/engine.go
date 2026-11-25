@@ -87,12 +87,70 @@ func (e *Engine) Answer(ctx context.Context, workspace, id string, answers []Ans
 		return nil, err
 	}
 	if err := e.turn(ctx, s); err != nil {
-		return nil, err
+		return nil, recordFailure(s, e.now(), err)
 	}
 	if err := Save(s); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// Resume runs the next turn from the saved map, on another agent or model when given. The
+// agent and model stay on the session even when the turn fails again.
+func (e *Engine) Resume(ctx context.Context, workspace, id, agentName, model string) (*Session, error) {
+	s, err := loadOpen(workspace, id)
+	if err != nil {
+		return nil, err
+	}
+	if agentName != "" {
+		s.Agent, s.Model = agentName, model
+	}
+	if err := e.turn(ctx, s); err != nil {
+		return nil, recordFailure(s, e.now(), err)
+	}
+	if err := Save(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// SetAgent changes the agent and model the next turns use; no turn runs.
+func (e *Engine) SetAgent(workspace, id, agentName, model string) (*Session, error) {
+	s, err := loadOpen(workspace, id)
+	if err != nil {
+		return nil, err
+	}
+	s.Agent, s.Model = agentName, model
+	if err := Save(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// recordFailure saves why a turn stopped on the session, whose earlier answers and map
+// are kept, and returns the turn's error (joined with a save failure, if any).
+func recordFailure(s *Session, at time.Time, cause error) error {
+	s.Failure = &Failure{At: at.UTC(), Agent: s.Agent, Kind: failureKind(cause), Message: strings.TrimSpace(cause.Error())}
+	if err := Save(s); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+var limitWords = []string{"usage limit", "rate limit", "quota", "limit reached"}
+
+func failureKind(err error) string {
+	var coded *Error
+	if errors.As(err, &coded) && coded.Code == "shape_repo_changed" {
+		return FailureRepoChanged
+	}
+	text := strings.ToLower(err.Error())
+	for _, word := range limitWords {
+		if strings.Contains(text, word) {
+			return FailureUsageLimit
+		}
+	}
+	return FailureError
 }
 
 func loadOpen(workspace, id string) (*Session, error) {
@@ -123,16 +181,44 @@ func openQuestion(s *Session, id string) (*Question, error) {
 	return q, nil
 }
 
+// answerable is a question the person may answer: an open one, or one closed by an
+// assumption, which the person may replace with an answer until the story is sealed.
+func answerable(s *Session, id string) (*Question, error) {
+	q := findQuestion(s, id)
+	if q == nil || (q.Status != QuestionOpen && q.Status != QuestionAssumed) {
+		return nil, fmt.Errorf("question %q is not open", id)
+	}
+	return q, nil
+}
+
+// settle closes q with an answer, giving it the next answer id the first time.
+func settle(s *Session, q *Question, status, text string) {
+	if q.AnswerID == "" {
+		q.AnswerID = nextAnswerID(s)
+	}
+	q.Status, q.Answer = status, text
+}
+
+func nextAnswerID(s *Session) string {
+	highest := 0
+	for _, q := range s.Map.Questions {
+		if n, err := strconv.Atoi(strings.TrimPrefix(q.AnswerID, "A")); err == nil && n > highest {
+			highest = n
+		}
+	}
+	return "A" + strconv.Itoa(highest+1)
+}
+
 func applyAnswers(s *Session, answers []Answer, assume []string) error {
 	for _, a := range answers {
-		q, err := openQuestion(s, a.Question)
+		q, err := answerable(s, a.Question)
 		if err != nil {
 			return err
 		}
 		if strings.TrimSpace(a.Text) == "" {
 			return fmt.Errorf("answer to %s is empty", a.Question)
 		}
-		q.Status, q.Answer = QuestionAnswered, a.Text
+		settle(s, q, QuestionAnswered, a.Text)
 	}
 	for _, id := range assume {
 		q, err := openQuestion(s, id)
@@ -142,7 +228,7 @@ func applyAnswers(s *Session, answers []Answer, assume []string) error {
 		if strings.TrimSpace(q.Assume) == "" {
 			return fmt.Errorf("question %s has no assumption to accept", id)
 		}
-		q.Status, q.Answer = QuestionAssumed, q.Assume
+		settle(s, q, QuestionAssumed, q.Assume)
 	}
 	return nil
 }
@@ -213,6 +299,7 @@ func (e *Engine) turn(ctx context.Context, s *Session) error {
 	}
 	merged.Turns = append(merged.Turns, Turn{N: len(s.Turns) + 1, At: e.now().UTC(), Asked: newQuestionIDs(s, merged)})
 	merged.Status = computeStatus(merged)
+	merged.Failure = nil
 	*s = *merged
 	return nil
 }
@@ -260,6 +347,9 @@ func merge(s *Session, r agentReply) (*Session, error) {
 		added++
 	}
 	out.Split = nonNil(r.Split)
+	if s.SplitKept {
+		out.Split = []Split{}
+	}
 	out.Story = r.Story
 	out.Proposals = append([]Proposal{}, s.Proposals...)
 	for _, p := range r.Proposals {
@@ -330,6 +420,12 @@ func (e *Engine) prompt(s *Session) (string, error) {
 	}
 	if len(s.Split) > 0 || strings.TrimSpace(s.Story) != "" {
 		fmt.Fprintf(&b, "Current story draft:\n%s\n\n", s.Story)
+	}
+	if s.SplitKept {
+		b.WriteString("The person chose to keep this as one story: leave split empty and fill story.\n\n")
+	}
+	if s.Parent != "" {
+		b.WriteString("This session narrows a larger story. Keep only the rules and examples that belong to the idea above.\n\n")
 	}
 	b.WriteString("Rules:\n")
 	b.WriteString("- You must not modify any file. Inspect the repository read-only; Span fails the turn if anything changes.\n")
@@ -491,7 +587,14 @@ func appendContext(workspace, section, text string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read context: %w", err)
 	}
-	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	return writeAtomic(path, []byte(mergeContext(string(raw), section, text)))
+}
+
+// mergeContext is the product context after text is added under section: appended to the
+// section when it exists, under a new heading otherwise. It is the one place that decides
+// how the file changes, so a preview shows exactly what accepting writes.
+func mergeContext(raw, section, text string) string {
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
 	if len(raw) == 0 {
 		lines = nil
 	}
@@ -531,7 +634,7 @@ func appendContext(workspace, section, text string) error {
 		}
 		out = append(out, lines[end:]...)
 	}
-	return writeAtomic(path, []byte(strings.Join(out, "\n")+"\n"))
+	return strings.Join(out, "\n") + "\n"
 }
 
 // Seal freezes a ready session: it stores the story and its sha256 digest.
@@ -549,6 +652,8 @@ func (e *Engine) Seal(workspace, id string) (*Session, error) {
 	sum := sha256.Sum256([]byte(s.Story))
 	s.Digest = hex.EncodeToString(sum[:])
 	s.Status = StatusSealed
+	sealedAt := e.now().UTC()
+	s.SealedAt = &sealedAt
 	if err := Save(s); err != nil {
 		return nil, err
 	}
