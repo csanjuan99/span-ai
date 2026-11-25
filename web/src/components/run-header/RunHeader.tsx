@@ -2,6 +2,7 @@ import { cn } from "cn"
 import { ClockIcon, FolderIcon, GitBranchIcon } from "lucide-react"
 import { Link } from "react-router"
 
+import { IdChip } from "@/components/list-controls/IdChip"
 import { stateBadge, type RunState } from "@/lib/run-header"
 
 const tones = {
@@ -36,9 +37,7 @@ export function RunHeader({
   return (
     <header className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        <span className="inline-block rounded-md border border-border bg-muted px-1.5 font-mono text-xs leading-[18px] whitespace-nowrap">
-          {chip}
-        </span>
+        <IdChip>{chip}</IdChip>
         <span
           className={cn(
             "inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium tracking-wide whitespace-nowrap",

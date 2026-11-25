@@ -1,4 +1,11 @@
-import type { AgentStatus, Cursor, Gate, LiveFrame, Statement } from "@/lib/types"
+import { hhmmss } from "@/lib/clock"
+import type {
+  AgentStatus,
+  Cursor,
+  Gate,
+  LiveFrame,
+  Statement,
+} from "@/lib/types"
 
 /** How often the page asks whether an agent is still running. */
 export const agentReviewMs = 2000
@@ -34,10 +41,7 @@ export function clockOf(at: string): string {
   if (Number.isNaN(date.getTime())) {
     return at
   }
-  const hours = date.getHours().toString().padStart(2, "0")
-  const minutes = date.getMinutes().toString().padStart(2, "0")
-  const seconds = date.getSeconds().toString().padStart(2, "0")
-  return `${hours}:${minutes}:${seconds}`
+  return hhmmss(date)
 }
 
 function toneOf(mark: string): TimelineLine["tone"] {
@@ -69,7 +73,12 @@ function cursorMark(cursor: Cursor): string {
   return "running"
 }
 
-function decision(clock: string, stage: string, mark: string, detail: string): TimelineLine {
+function decision(
+  clock: string,
+  stage: string,
+  mark: string,
+  detail: string
+): TimelineLine {
   return {
     clock,
     stage,
@@ -81,7 +90,12 @@ function decision(clock: string, stage: string, mark: string, detail: string): T
 }
 
 function statementLine(item: Statement, fallback: string): TimelineLine {
-  return decision(clockOf(item.time && item.time !== "" ? item.time : fallback), item.stage, item.verdict, item.reason)
+  return decision(
+    clockOf(item.time && item.time !== "" ? item.time : fallback),
+    item.stage,
+    item.verdict,
+    item.reason
+  )
 }
 
 function gateLine(clock: string, gate: Gate): TimelineLine {
@@ -105,7 +119,9 @@ export function timelineLines(input: {
     lines.push(line)
   }
 
-  const statements = [...input.statements].sort((left, right) => (left.time ?? "").localeCompare(right.time ?? ""))
+  const statements = [...input.statements].sort((left, right) =>
+    (left.time ?? "").localeCompare(right.time ?? "")
+  )
   for (const item of statements) {
     push(statementLine(item, ""))
   }
@@ -166,7 +182,10 @@ export function timelineLines(input: {
 }
 
 /** One agent review. A later review replaces the previous one. */
-export function agentLine(status: AgentStatus | null, at: string): TimelineLine | null {
+export function agentLine(
+  status: AgentStatus | null,
+  at: string
+): TimelineLine | null {
   if (status === null || status.summary === "") {
     return null
   }
@@ -189,7 +208,10 @@ export function agentLine(status: AgentStatus | null, at: string): TimelineLine 
 }
 
 /** Replaces the previous agent summary and keeps it at the end of the band. */
-export function withAgent(lines: TimelineLine[], agent: TimelineLine | null): TimelineLine[] {
+export function withAgent(
+  lines: TimelineLine[],
+  agent: TimelineLine | null
+): TimelineLine[] {
   const rest = lines.filter((line) => line.key !== "agent")
   if (agent === null) {
     return rest
@@ -198,7 +220,10 @@ export function withAgent(lines: TimelineLine[], agent: TimelineLine | null): Ti
 }
 
 /** One desk line for the agents this process is running. Nobody running leaves the band alone. */
-export function deskAgentLine(agents: AgentStatus[], at: string): TimelineLine | null {
+export function deskAgentLine(
+  agents: AgentStatus[],
+  at: string
+): TimelineLine | null {
   const first = agents[0]
   if (!first) {
     return null

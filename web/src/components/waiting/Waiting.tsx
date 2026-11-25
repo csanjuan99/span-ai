@@ -13,7 +13,9 @@ export function Waiting(props: {
   onAnswer: (answers: { question: string; body: string }[]) => Promise<unknown>
   onReload: () => Promise<unknown>
 }) {
-  const [bodies, setBodies] = useState<string[]>(() => props.questions.map(() => ""))
+  const [bodies, setBodies] = useState<string[]>(() =>
+    props.questions.map(() => "")
+  )
   const [busy, setBusy] = useState(false)
   // The engine refuses an empty answer, so every question is required: say so before the request fails.
   const open = bodies.filter((body) => body.trim() === "").length
@@ -22,7 +24,12 @@ export function Waiting(props: {
     event.preventDefault()
     setBusy(true)
     try {
-      await props.onAnswer(props.questions.map((question, index) => ({ question, body: bodies[index] ?? "" })))
+      await props.onAnswer(
+        props.questions.map((question, index) => ({
+          question,
+          body: bodies[index] ?? "",
+        }))
+      )
     } finally {
       setBusy(false)
     }
@@ -38,10 +45,14 @@ export function Waiting(props: {
   }
 
   return (
-    <form className="flex flex-col gap-3" onSubmit={(event) => void answer(event)}>
-      <p className="text-pretty text-sm text-muted-foreground">
-        Frame reads the story in the language it is written and carries what it already decides into this run. Answer here
-        when the story does not say it.
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => void answer(event)}
+    >
+      <p className="text-sm text-pretty text-muted-foreground">
+        Frame reads the story in the language it is written and carries what it
+        already decides into this run. Answer here when the story does not say
+        it.
       </p>
       {props.questions.map((question, index) => (
         <div className="flex flex-col gap-2" key={`${index}-${question}`}>
@@ -63,16 +74,33 @@ export function Waiting(props: {
         </div>
       ))}
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" className="self-start" disabled={busy || open > 0}>
+        <Button
+          type="submit"
+          className="self-start"
+          disabled={busy || open > 0}
+        >
           Answer and continue
         </Button>
-        <Button type="button" variant="secondary" className="self-start" disabled={busy} onClick={() => void reload()}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="self-start"
+          disabled={busy}
+          onClick={() => void reload()}
+        >
           Read the story again
         </Button>
-        <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
-          {open === 0 ? "All answered" : `${props.questions.length - open} of ${props.questions.length} answered`}
+        <p
+          className="text-sm text-muted-foreground tabular-nums"
+          aria-live="polite"
+        >
+          {open === 0
+            ? "All answered"
+            : `${props.questions.length - open} of ${props.questions.length} answered`}
         </p>
-        {props.note !== "" ? <p className="text-pretty text-sm">{props.note}</p> : null}
+        {props.note !== "" ? (
+          <p className="text-sm text-pretty">{props.note}</p>
+        ) : null}
       </div>
     </form>
   )

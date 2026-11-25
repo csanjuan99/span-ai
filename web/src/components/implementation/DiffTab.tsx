@@ -4,6 +4,7 @@ import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { useState } from "react"
 
 import { cn } from "cn"
+import { CheckField } from "@/components/list-controls/CheckField"
 import { CopyChip } from "@/components/ledger/CopyChip"
 import { DiffCode } from "@/components/implementation/DiffCode"
 import { FileStatusChip } from "@/components/files-changed/FileStatusChip"
@@ -173,15 +174,12 @@ export function DiffTab({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-input px-3 text-[13px] max-sm:h-11">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={viewed}
-              onChange={(event) => onViewed(file.path, event.target.checked)}
-            />
-            Viewed
-          </label>
+          <CheckField
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-input px-3 text-[13px] max-sm:h-11"
+            checked={viewed}
+            label="Viewed"
+            onChange={(next) => onViewed(file.path, next)}
+          />
           <CopyChip
             label="path"
             value={file.path}

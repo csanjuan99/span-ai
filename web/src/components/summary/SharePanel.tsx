@@ -3,6 +3,7 @@
 import { CheckIcon, CopyIcon, UploadIcon } from "lucide-react"
 import { useState } from "react"
 
+import { CheckField } from "@/components/list-controls/CheckField"
 import { Button } from "@/components/ui/button"
 import { sections, toMarkdown, type Section, type Summary } from "@/lib/summary"
 
@@ -59,18 +60,14 @@ export function SharePanel({ summary }: { summary: Summary }) {
       </p>
       <div className="flex flex-col gap-1">
         {sections.map((section) => (
-          <label
+          <CheckField
             key={section}
             className="flex min-h-8 items-center gap-2 text-[13px]"
-          >
-            <input
-              type="checkbox"
-              className="size-[18px] accent-primary"
-              checked={include.has(section)}
-              onChange={() => toggle(section)}
-            />
-            {names[section]}
-          </label>
+            inputClassName="size-[18px] accent-primary"
+            checked={include.has(section)}
+            label={names[section]}
+            onChange={() => toggle(section)}
+          />
         ))}
       </div>
       <pre

@@ -8,17 +8,20 @@ import { cn } from "@/lib/utils"
 export function PillToggle({
   on,
   onClick,
+  ariaLabel,
   className,
   children,
 }: {
   on: boolean
   onClick: () => void
+  ariaLabel?: string
   className?: string
   children: ReactNode
 }) {
   return (
     <button
       type="button"
+      aria-label={ariaLabel}
       aria-pressed={on}
       onClick={onClick}
       className={cn(

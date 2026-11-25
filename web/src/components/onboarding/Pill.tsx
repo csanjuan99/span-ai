@@ -16,17 +16,21 @@ const tones: Record<PillTone, string> = {
 /** The small rounded label next to a heading or a row: a state, a count, or "Optional". */
 export function Pill({
   tone,
+  size = "sm",
   children,
   className,
 }: {
   tone: PillTone
+  /** `md` is the taller pill of a page header. */
+  size?: "sm" | "md"
   children: ReactNode
   className?: string
 }) {
   return (
     <span
       className={cn(
-        "inline-flex h-5 w-fit items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap",
+        "inline-flex w-fit items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap",
+        size === "sm" ? "h-5 px-2" : "h-6 px-2.5 tracking-wide",
         tones[tone],
         className
       )}

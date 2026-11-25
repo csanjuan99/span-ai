@@ -4,6 +4,9 @@ import { PlusIcon, SearchIcon } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router"
 
+import { FilterChips } from "@/components/list-controls/FilterChips"
+import { IdChip } from "@/components/list-controls/IdChip"
+import { SearchField } from "@/components/list-controls/SearchField"
 import { DeleteRun } from "@/components/run-list/DeleteRun"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
@@ -53,13 +56,7 @@ function Row({
     run.title !== "" ? run.title : run.label !== "" ? run.label : run.id
   return (
     <li className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-2 border-t border-border p-4 first:border-t-0 md:grid-cols-[96px_minmax(0,1fr)_230px_104px_124px] md:gap-4 md:px-5 md:py-3">
-      <span>
-        {run.issue !== "" ? (
-          <span className="inline-block rounded-md border border-border bg-muted px-1.5 font-mono text-xs leading-[18px] whitespace-nowrap text-foreground">
-            {run.issue}
-          </span>
-        ) : null}
-      </span>
+      <span>{run.issue !== "" ? <IdChip>{run.issue}</IdChip> : null}</span>
       <div className="col-span-2 flex min-w-0 flex-col md:col-span-1">
         <Link
           to={`/spans/${run.id}`}
@@ -137,38 +134,18 @@ export function RunsDesk({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <label className="flex h-11 min-w-0 flex-[1_1_280px] items-center gap-2 rounded-[10px] border border-input bg-card px-3 shadow-sm md:h-10">
-          <span className="sr-only">Search runs</span>
-          <SearchIcon
-            aria-hidden="true"
-            className="size-4 shrink-0 text-muted-foreground"
-          />
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by key, title or branch"
-            className="h-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-          />
-        </label>
-        <div
-          role="group"
-          aria-label="Filter runs"
-          className="flex flex-wrap gap-2"
-        >
-          {filters.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              aria-pressed={filter === item.key}
-              onClick={() => setFilter(item.key)}
-              className="inline-flex h-11 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-[13px] aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-primary md:h-8"
-            >
-              {item.label}
-              <span className="font-mono text-xs">{counts[item.key]}</span>
-            </button>
-          ))}
-        </div>
+        <SearchField
+          label="Search runs"
+          placeholder="Search by key, title or branch"
+          value={query}
+          onChange={setQuery}
+        />
+        <FilterChips
+          label="Filter runs"
+          chips={filters.map((item) => ({ ...item, count: counts[item.key] }))}
+          value={filter}
+          onChange={setFilter}
+        />
         <Button
           type="button"
           className="h-11 rounded-[10px] px-4 md:h-10"

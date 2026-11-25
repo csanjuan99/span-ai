@@ -1,7 +1,10 @@
 import { CircleCheckIcon, ClockIcon, GitMergeIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
+import { FigureCell } from "@/components/list-controls/FigureCell"
+import { IdChip } from "@/components/list-controls/IdChip"
 import { Pill } from "@/components/onboarding/Pill"
+import { dayLabel } from "@/lib/clock"
 import { durationText, type FileLetter, type Summary } from "@/lib/summary"
 import { cn } from "@/lib/utils"
 
@@ -37,24 +40,6 @@ function Block({ name, children }: { name: string; children: ReactNode }) {
   )
 }
 
-function Cell({
-  label,
-  value,
-  note,
-}: {
-  label: string
-  value: ReactNode
-  note: ReactNode
-}) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1 border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{note}</div>
-    </div>
-  )
-}
-
 function letterCounts(files: Summary["files"]): string {
   const counts = new Map<FileLetter, number>()
   for (const file of files) {
@@ -66,13 +51,6 @@ function letterCounts(files: Summary["files"]): string {
     .join(" · ")
 }
 
-function when(finishedAt: string): string {
-  const date = new Date(finishedAt)
-  return Number.isNaN(date.getTime())
-    ? ""
-    : date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })
-}
-
 /** The header of a summary: the story, whether it landed, and where and when. */
 export function SummaryHead({
   summary,
@@ -82,15 +60,11 @@ export function SummaryHead({
   done: boolean
 }) {
   const took = durationText(summary.durationMs)
-  const day = when(summary.finishedAt)
+  const day = dayLabel(summary.finishedAt)
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-3">
-        {summary.issue !== "" ? (
-          <span className="rounded-md border border-border bg-muted px-1.5 font-mono text-xs">
-            {summary.issue}
-          </span>
-        ) : null}
+        {summary.issue !== "" ? <IdChip>{summary.issue}</IdChip> : null}
         <Pill tone={done ? "pass" : "hold"}>
           {done ? (
             <CircleCheckIcon aria-hidden="true" className="size-3.5" />
@@ -158,7 +132,8 @@ export function SummaryView({ summary }: { summary: Summary }) {
           aria-label="Proof"
           className="grid overflow-hidden rounded-[14px] border border-border bg-card shadow-sm sm:grid-cols-3"
         >
-          <Cell
+          <FigureCell
+            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
             label="Diff"
             value={
               <>
@@ -168,25 +143,27 @@ export function SummaryView({ summary }: { summary: Summary }) {
                 <span className="text-fail">−{summary.totals.removed}</span>
               </>
             }
-            note={letterCounts(summary.files)}
+            caption={letterCounts(summary.files)}
           />
-          <Cell
+          <FigureCell
+            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
             label="Tests"
             value={
               summary.tests === null
                 ? "No count"
                 : `${summary.tests.passed} passed · ${summary.tests.failed} failed`
             }
-            note={
+            caption={
               summary.tests === null
                 ? "The checks printed no test count."
                 : "From what the checks printed."
             }
           />
-          <Cell
+          <FigureCell
+            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
             label="Risks"
             value={`${summary.risks.length} noted`}
-            note={
+            caption={
               summary.risks.length === 0
                 ? "None found in the diff."
                 : "Read from the diff."

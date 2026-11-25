@@ -10,25 +10,51 @@ describe("Waiting", () => {
     const onAnswer = vi.fn(() => Promise.resolve())
     const onReload = vi.fn(() => Promise.resolve())
     render(
-      <Waiting questions={["Which permission atom is Pago.Ver?"]} note="" onAnswer={onAnswer} onReload={onReload} />,
+      <Waiting
+        questions={["Which permission atom is Pago.Ver?"]}
+        note=""
+        onAnswer={onAnswer}
+        onReload={onReload}
+      />
     )
-    fireEvent.change(screen.getByLabelText("Which permission atom is Pago.Ver?"), { target: { value: "Pago.Ver is new." } })
+    fireEvent.change(
+      screen.getByLabelText("Which permission atom is Pago.Ver?"),
+      { target: { value: "Pago.Ver is new." } }
+    )
     fireEvent.click(screen.getByRole("button", { name: "Answer and continue" }))
     await screen.findByRole("button", { name: "Answer and continue" })
-    expect(onAnswer).toHaveBeenCalledWith([{ question: "Which permission atom is Pago.Ver?", body: "Pago.Ver is new." }])
-    fireEvent.click(screen.getByRole("button", { name: "Read the story again" }))
+    expect(onAnswer).toHaveBeenCalledWith([
+      {
+        question: "Which permission atom is Pago.Ver?",
+        body: "Pago.Ver is new.",
+      },
+    ])
+    fireEvent.click(
+      screen.getByRole("button", { name: "Read the story again" })
+    )
     await screen.findByRole("button", { name: "Read the story again" })
     expect(onReload).toHaveBeenCalledOnce()
   })
 
   it("asks for every answer: nothing is sent until each question has one", () => {
     const onAnswer = vi.fn(() => Promise.resolve())
-    render(<Waiting questions={["One?", "Two?"]} note="" onAnswer={onAnswer} onReload={() => Promise.resolve()} />)
-    const send = screen.getByRole("button", { name: "Answer and continue" }) as HTMLButtonElement
+    render(
+      <Waiting
+        questions={["One?", "Two?"]}
+        note=""
+        onAnswer={onAnswer}
+        onReload={() => Promise.resolve()}
+      />
+    )
+    const send = screen.getByRole("button", {
+      name: "Answer and continue",
+    }) as HTMLButtonElement
     expect(screen.getAllByText("Required")).toHaveLength(2)
     expect(screen.getByText("0 of 2 answered")).toBeTruthy()
     expect(send.disabled).toBe(true)
-    fireEvent.change(screen.getByLabelText("One?"), { target: { value: "yes" } })
+    fireEvent.change(screen.getByLabelText("One?"), {
+      target: { value: "yes" },
+    })
     expect(screen.getByText("1 of 2 answered")).toBeTruthy()
     expect(send.disabled).toBe(true)
     fireEvent.change(screen.getByLabelText("Two?"), { target: { value: "  " } })

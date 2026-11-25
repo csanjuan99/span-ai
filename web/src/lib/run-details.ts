@@ -1,3 +1,4 @@
+import { hhmm } from "@/lib/clock"
 import { duration } from "@/lib/metrics"
 import type { Statement } from "@/lib/types"
 
@@ -7,16 +8,15 @@ export interface RunDetails {
   time: { started: string; took: string } | null
 }
 
-function clock(date: Date): string {
-  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`
-}
-
 /**
  * Reads the end-of-run facts from the ledger and the agent choices. The time runs from the
  * first stamped statement to the last, which is when Span wrote them, not when a person
  * started or stopped looking.
  */
-export function runDetails(statements: Statement[], stageAgents: Record<string, string> | undefined): RunDetails {
+export function runDetails(
+  statements: Statement[],
+  stageAgents: Record<string, string> | undefined
+): RunDetails {
   const stamps = statements
     .map((item) => new Date(item.time ?? ""))
     .filter((date) => !Number.isNaN(date.getTime()))
@@ -27,6 +27,9 @@ export function runDetails(statements: Statement[], stageAgents: Record<string, 
     time:
       first === undefined || last === undefined || stamps.length < 2
         ? null
-        : { started: clock(first), took: duration((last.getTime() - first.getTime()) / 1000) },
+        : {
+            started: hhmm(first),
+            took: duration((last.getTime() - first.getTime()) / 1000),
+          },
   }
 }

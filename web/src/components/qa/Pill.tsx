@@ -1,13 +1,13 @@
-import { cn } from "cn"
 import type { ReactNode } from "react"
 
+import { Pill, type PillTone } from "@/components/onboarding/Pill"
 import type { QaVerdict } from "@/lib/qa"
 
-const tones: Record<QaVerdict, string> = {
-  pass: "bg-pass-soft text-pass",
-  fail: "bg-fail-soft text-fail",
-  held: "bg-hold-soft text-hold",
-  notrun: "border border-border bg-muted text-muted-foreground",
+const tones: Record<QaVerdict, PillTone> = {
+  pass: "pass",
+  fail: "fail",
+  held: "hold",
+  notrun: "mut",
 }
 
 const words: Record<QaVerdict, string> = {
@@ -25,14 +25,5 @@ export function VerdictPill({
   verdict: QaVerdict
   children?: ReactNode
 }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex h-5 items-center rounded-full px-2 text-xs font-medium whitespace-nowrap",
-        tones[verdict]
-      )}
-    >
-      {children ?? words[verdict]}
-    </span>
-  )
+  return <Pill tone={tones[verdict]}>{children ?? words[verdict]}</Pill>
 }

@@ -36,8 +36,24 @@ const choosing: Conflict = {
       summary: "Both sides changed the total.",
       chosen: "",
       options: [
-        { id: "a", title: "Keep the branch", summary: "", risk: "low", action: "ours", command: "", diff: "" },
-        { id: "b", title: "Take the base", summary: "", risk: "medium", action: "theirs", command: "", diff: "" },
+        {
+          id: "a",
+          title: "Keep the branch",
+          summary: "",
+          risk: "low",
+          action: "ours",
+          command: "",
+          diff: "",
+        },
+        {
+          id: "b",
+          title: "Take the base",
+          summary: "",
+          risk: "medium",
+          action: "theirs",
+          command: "",
+          diff: "",
+        },
       ],
     },
   ],
@@ -67,7 +83,13 @@ function held(over: Partial<Cursor>): SpanState {
   const span: Snapshot = {
     cursor: cursor(over),
     statements: [
-      { stage: "merge", iteration: 1, verdict: "hold", reason: "the change has conflicts", commands: [] },
+      {
+        stage: "merge",
+        iteration: 1,
+        verdict: "hold",
+        reason: "the change has conflicts",
+        commands: [],
+      },
     ],
     acceptance: [],
     gate: null,
@@ -94,13 +116,16 @@ function renderPage() {
       <Routes>
         <Route path="/spans/:id" element={<SpanPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   )
 }
 
 describe("SpanPage on a merge conflict", () => {
   it("shows the conflict panel and not the generic failure card", () => {
-    state = held({ reason: "conflict: choose how to resolve", conflict: choosing })
+    state = held({
+      reason: "conflict: choose how to resolve",
+      conflict: choosing,
+    })
     renderPage()
     expect(screen.getByRole("region", { name: /hits a conflict/ })).toBeTruthy()
     expect(screen.queryByRole("region", { name: "Failing check" })).toBeNull()

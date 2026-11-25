@@ -88,17 +88,35 @@ describe("ProofSummary", () => {
 
 describe("ProofSummary at a position in the run", () => {
   it("says the run is held at the stage instead of rating its risk", () => {
-    render(<ProofSummary proof={proof} run={{ kind: "held", stage: "prove", sealed: 3 }} />)
-    const text = screen.getByRole("region", { name: "Proof of work" }).textContent
+    render(
+      <ProofSummary
+        proof={proof}
+        run={{ kind: "held", stage: "prove", sealed: 3 }}
+      />
+    )
+    const text = screen.getByRole("region", {
+      name: "Proof of work",
+    }).textContent
     expect(text).toContain("Held at prove")
     expect(text).toContain("1 of 2 checks not green")
     expect(text).not.toContain("medium risk")
   })
 
   it("says there is no code and no tests yet before build", () => {
-    const empty = { ...proof, diff: { files: 0, added: 0, removed: 0, kinds: "" }, checks: { ...proof.checks, passed: 0, total: 0, failing: "" } }
-    render(<ProofSummary proof={empty} run={{ kind: "paused", stage: "frame", sealed: 1 }} />)
-    const text = screen.getByRole("region", { name: "Proof of work" }).textContent
+    const empty = {
+      ...proof,
+      diff: { files: 0, added: 0, removed: 0, kinds: "" },
+      checks: { ...proof.checks, passed: 0, total: 0, failing: "" },
+    }
+    render(
+      <ProofSummary
+        proof={empty}
+        run={{ kind: "paused", stage: "frame", sealed: 1 }}
+      />
+    )
+    const text = screen.getByRole("region", {
+      name: "Proof of work",
+    }).textContent
     expect(text).toContain("Frame paused")
     expect(text).toContain("No code yet")
     expect(text).toContain("frame does not touch the repo")

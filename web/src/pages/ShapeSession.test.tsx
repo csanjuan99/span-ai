@@ -4,31 +4,51 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { ShapePreview, ShapeSession as Session } from "@/lib/types"
+import type {
+  ShapePreview,
+  ShapeQuestion,
+  ShapeSession as Session,
+} from "@/lib/types"
 
-const getShape = vi.fn()
-const answerShape = vi.fn()
-const acceptShapeContext = vi.fn()
-const sealShape = vi.fn()
-const previewShapeIssue = vi.fn()
-const createShapeIssue = vi.fn()
-const startRun = vi.fn()
+const mocks = {
+  getShape: vi.fn(),
+  answerShape: vi.fn(),
+  settleShapeContext: vi.fn(),
+  previewShapeContext: vi.fn(),
+  decideShapeSplit: vi.fn(),
+  forkShape: vi.fn(),
+  getShapeSource: vi.fn(),
+  resumeShape: vi.fn(),
+  sealShape: vi.fn(),
+  previewShapeIssue: vi.fn(),
+  createShapeIssue: vi.fn(),
+  startRun: vi.fn(),
+}
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>()
   return {
-    ApiError: actual.ApiError,
-    getShape: (...args: unknown[]) => getShape(...args),
-    answerShape: (...args: unknown[]) => answerShape(...args),
-    acceptShapeContext: (...args: unknown[]) => acceptShapeContext(...args),
-    sealShape: (...args: unknown[]) => sealShape(...args),
-    previewShapeIssue: (...args: unknown[]) => previewShapeIssue(...args),
-    createShapeIssue: (...args: unknown[]) => createShapeIssue(...args),
-    startRun: (form: FormData) => startRun(form),
+    ...actual,
+    getJSON: () => Promise.reject(new Error("no agents here")),
+    getShape: (...args: unknown[]) => mocks.getShape(...args),
+    answerShape: (...args: unknown[]) => mocks.answerShape(...args),
+    settleShapeContext: (...args: unknown[]) =>
+      mocks.settleShapeContext(...args),
+    previewShapeContext: (...args: unknown[]) =>
+      mocks.previewShapeContext(...args),
+    decideShapeSplit: (...args: unknown[]) => mocks.decideShapeSplit(...args),
+    forkShape: (...args: unknown[]) => mocks.forkShape(...args),
+    getShapeSource: (...args: unknown[]) => mocks.getShapeSource(...args),
+    resumeShape: (...args: unknown[]) => mocks.resumeShape(...args),
+    sealShape: (...args: unknown[]) => mocks.sealShape(...args),
+    previewShapeIssue: (...args: unknown[]) => mocks.previewShapeIssue(...args),
+    createShapeIssue: (...args: unknown[]) => mocks.createShapeIssue(...args),
+    startRun: (form: FormData) => mocks.startRun(form),
   }
 })
 
@@ -44,59 +64,90 @@ vi.stubGlobal("ResizeObserver", NoResize)
 
 afterEach(cleanup)
 
+const question = (
+  id: string,
+  status: ShapeQuestion["status"],
+  over: Partial<ShapeQuestion> = {}
+): ShapeQuestion => ({
+  id,
+  text: `Question ${id}?`,
+  blocks: "R1",
+  assume: `assume ${id}`,
+  status,
+  answer: status === "open" ? "" : `answer ${id}`,
+  answerId: "",
+  ...over,
+})
+
 function session(over: Partial<Session> = {}): Session {
   return {
     id: "sh-1",
     workspace: "/w",
     repo: "api",
-    idea: "let people pay",
+    idea: "let people refund",
     status: "interviewing",
     rules: [
       {
         id: "R1",
         text: "Only admins refund",
-        source: { kind: "code", ref: "internal/refund.go" },
+        source: { kind: "code", ref: "internal/refund.go:12" },
+      },
+      {
+        id: "R2",
+        text: "A refund is logged",
+        source: { kind: "prompt", ref: "" },
       },
     ],
     examples: [
       {
         id: "E1",
         rule: "R1",
-        text: "An agent tries to refund and is refused",
+        text: "An agent is refused",
         source: { kind: "answer", ref: "Q1" },
       },
-    ],
-    questions: [
       {
-        id: "Q1",
-        text: "Who can refund?",
-        blocks: "R1",
-        assume: "Admins",
-        status: "open",
-        answer: "",
-      },
-      {
-        id: "Q2",
-        text: "Is there a limit?",
-        blocks: "R2",
-        assume: "No limit",
-        status: "open",
-        answer: "",
+        id: "E2",
+        rule: "R2",
+        text: "The log has the amount",
+        source: { kind: "prompt", ref: "" },
       },
     ],
+    questions: [question("Q1", "open"), question("Q2", "open")],
     split: [],
     proposals: [],
     story: "",
     digest: "",
     jira: null,
+    ref: "SES-AB12CD",
+    agent: "claude-code",
+    model: "",
     ...over,
   }
 }
 
+const ready = (over: Partial<Session> = {}) =>
+  session({
+    status: "ready",
+    story: "# Refund\n\n## Why\nBecause.",
+    questions: [
+      question("Q1", "answered", { answerId: "A1" }),
+      question("Q2", "assumed", { answerId: "A2" }),
+    ],
+    ...over,
+  })
+
+const sealed = (over: Partial<Session> = {}) =>
+  ready({
+    status: "sealed",
+    digest: "abcdef0123456789ffff",
+    sealedAt: "2026-11-23T16:20:00Z",
+    ...over,
+  })
+
 const preview: ShapePreview = {
   project: "PRJ",
   board: { id: 7, name: "PRJ Kanban" },
-  backlogStatuses: ["Backlog"],
+  backlogStatuses: ["Backlog", "Ready for grooming"],
   summary: "Refund payments",
   description: "As an admin I refund",
 }
@@ -113,278 +164,599 @@ function open() {
 }
 
 beforeEach(() => {
-  for (const mock of [
-    getShape,
-    answerShape,
-    acceptShapeContext,
-    sealShape,
-    previewShapeIssue,
-    createShapeIssue,
-    startRun,
-  ]) {
+  for (const mock of Object.values(mocks)) {
     mock.mockReset()
   }
-  getShape.mockResolvedValue(session())
+  mocks.getShape.mockResolvedValue(session())
 })
 
-describe("example map and questions", () => {
-  it("shows each fact with its source, examples under their rule, and the proposed assumption", async () => {
+const click = (name: string | RegExp) =>
+  fireEvent.click(screen.getByRole("button", { name }))
+
+const clickWhenReady = async (name: string | RegExp) =>
+  fireEvent.click(await screen.findByRole("button", { name }))
+
+describe("header and steps", () => {
+  it("names the session, how it stands and where the person is", async () => {
+    open()
+    expect(
+      await screen.findByRole("heading", { name: "let people refund" })
+    ).toBeTruthy()
+    expect(screen.getByText("SES-AB12CD")).toBeTruthy()
+    expect(screen.getByText("Interviewing")).toBeTruthy()
+    expect(screen.getByText("claude-code · Auto")).toBeTruthy()
+    const current = screen
+      .getAllByRole("listitem")
+      .find((item) => item.getAttribute("aria-current") === "step")
+    expect(current?.textContent).toContain("Questions")
+  })
+})
+
+describe("questions", () => {
+  it("sends every choice in one request, after each question is settled", async () => {
+    mocks.answerShape.mockResolvedValue(ready())
+    open()
+    await screen.findByText("2 questions block the story")
+    const next = screen.getByRole("button", { name: "Continue to example map" })
+    expect((next as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      screen.getByText("Settle 2 more questions to continue.")
+    ).toBeTruthy()
+    click("Use the assumption for Q1")
+    click("Answer Q2")
+    fireEvent.change(screen.getByLabelText("Your answer to Q2"), {
+      target: { value: "  3 per hour  " },
+    })
+    expect((next as HTMLButtonElement).disabled).toBe(true)
+    click("Save answer for Q2")
+    expect((next as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(next)
+    await waitFor(() =>
+      expect(mocks.answerShape).toHaveBeenCalledWith(
+        "sh-1",
+        "/w",
+        [{ question: "Q2", text: "3 per hour" }],
+        ["Q1"]
+      )
+    )
+  })
+
+  it("lets a staged choice be changed before it is sent", async () => {
+    open()
+    await screen.findByText("2 questions block the story")
+    click("Use the assumption for Q1")
+    click("Change Q1")
+    expect(
+      screen.getByRole("button", { name: "Use the assumption for Q1" })
+    ).toBeTruthy()
+  })
+
+  it("shows the working state while the agent runs, then the result", async () => {
+    let finish: (value: Session) => void = () => {}
+    mocks.answerShape.mockReturnValue(
+      new Promise<Session>((resolve) => (finish = resolve))
+    )
+    open()
+    await screen.findByText("2 questions block the story")
+    click("Use the assumption for Q1")
+    click("Use the assumption for Q2")
+    click("Continue to example map")
+    expect(
+      await screen.findByText("The agent is reading and drafting")
+    ).toBeTruthy()
+    finish(ready())
+    expect(await screen.findByText("Example map")).toBeTruthy()
+  })
+
+  it("settled questions show who settled them, and an assumed one can be answered instead", async () => {
+    mocks.getShape.mockResolvedValue(
+      session({
+        questions: [
+          question("Q1", "answered", { answerId: "A1" }),
+          question("Q2", "assumed", { answerId: "A2" }),
+          question("Q3", "open"),
+        ],
+      })
+    )
+    mocks.answerShape.mockResolvedValue(ready())
+    open()
+    await screen.findByText("1 question blocks the story")
+    expect(screen.getByText("Answered by you")).toBeTruthy()
+    expect(screen.getByText("Your answer · A1")).toBeTruthy()
+    expect(screen.getByText("The agent assumed")).toBeTruthy()
+    click("Use the assumption for Q3")
+    click("Answer Q2 instead")
+    fireEvent.change(screen.getByLabelText("Your answer to Q2"), {
+      target: { value: "admins" },
+    })
+    click("Save answer for Q2")
+    click("Continue to example map")
+    await waitFor(() =>
+      expect(mocks.answerShape).toHaveBeenCalledWith(
+        "sh-1",
+        "/w",
+        [{ question: "Q2", text: "admins" }],
+        ["Q3"]
+      )
+    )
+  })
+})
+
+describe("failure and drafting", () => {
+  it("offers to run the turn again when the last one stopped", async () => {
+    mocks.getShape.mockResolvedValue(
+      session({
+        failure: {
+          at: "2026-11-25T09:30:00Z",
+          agent: "claude-code",
+          kind: "usage_limit",
+          message: "limit reached",
+        },
+      })
+    )
+    mocks.resumeShape.mockResolvedValue(session())
+    open()
+    expect(await screen.findByText("The agent hit a usage limit.")).toBeTruthy()
+    expect(
+      screen.getByText(/answers and the map so far are kept/i)
+    ).toBeTruthy()
+    click("Try the turn again")
+    await waitFor(() =>
+      expect(mocks.resumeShape).toHaveBeenCalledWith("sh-1", "/w")
+    )
+  })
+
+  it("lets a session with no question and no story be drafted", async () => {
+    mocks.getShape.mockResolvedValue(session({ questions: [] }))
+    mocks.resumeShape.mockResolvedValue(ready())
+    open()
+    await clickWhenReady("Draft the story")
+    expect(await screen.findByText("Example map")).toBeTruthy()
+    expect(mocks.resumeShape).toHaveBeenCalledWith("sh-1", "/w")
+  })
+})
+
+describe("example map", () => {
+  beforeEach(() => {
+    mocks.getShape.mockResolvedValue(ready())
+    mocks.getShapeSource.mockResolvedValue({
+      path: "internal/refund.go",
+      line: 12,
+      lines: [
+        { n: 11, text: "func a() {", hit: false },
+        { n: 12, text: "  refuse()", hit: true },
+      ],
+    })
+  })
+
+  it("shows each fact with its source, and an example resting on an assumption", async () => {
     open()
     expect(await screen.findByText("Only admins refund")).toBeTruthy()
-    expect(screen.getByText("code internal/refund.go")).toBeTruthy()
     expect(
-      screen.getByText("An agent tries to refund and is refused")
+      screen.getByRole("button", {
+        name: "Source: code · internal/refund.go:12",
+      })
     ).toBeTruthy()
-    expect(screen.getByText("answer Q1")).toBeTruthy()
-    expect(screen.getByText("Assumption: Admins")).toBeTruthy()
-    expect(screen.getByText("Blocks R2")).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Source: answer · A1" })
+    ).toBeTruthy()
+    expect(
+      screen.getByText("2 rules, 2 examples. Every item shows its source.")
+    ).toBeTruthy()
   })
 
-  it("sends the typed answer and the accepted assumption in one request", async () => {
-    answerShape.mockResolvedValue(session({ status: "ready" }))
+  it("opens the code behind a source", async () => {
     open()
-    fireEvent.change(await screen.findByLabelText("Answer Q1"), {
-      target: { value: "Only admins" },
-    })
     fireEvent.click(
-      screen.getByRole("button", { name: "Accept assumption for Q2" })
+      await screen.findByRole("button", {
+        name: "Source: code · internal/refund.go:12",
+      })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Send answers" }))
-    await waitFor(() => expect(answerShape).toHaveBeenCalledTimes(1))
-    expect(answerShape).toHaveBeenCalledWith(
+    expect(await screen.findByText("refuse()")).toBeTruthy()
+    expect(mocks.getShapeSource).toHaveBeenCalledWith(
       "sh-1",
       "/w",
-      [{ question: "Q1", text: "Only admins" }],
-      ["Q2"]
+      "internal/refund.go:12"
     )
+    expect(screen.getByText("Source for R1")).toBeTruthy()
   })
 
-  it("shows a pending state and blocks a second submit while the turn runs", async () => {
-    answerShape.mockReturnValue(new Promise(() => undefined))
+  it("explains a source that is not code in words", async () => {
     open()
     fireEvent.click(
-      await screen.findByRole("button", { name: "Accept assumption for Q1" })
+      await screen.findByRole("button", { name: "Source: answer · A1" })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Send answers" }))
-    const pending = await screen.findByRole("button", { name: "Thinking…" })
-    expect((pending as HTMLButtonElement).disabled).toBe(true)
-    fireEvent.click(pending)
-    expect(answerShape).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/Question Q1\? → answer Q1/)).toBeTruthy()
+    expect(mocks.getShapeSource).not.toHaveBeenCalled()
+  })
+
+  it("goes to the seal when there is no split and no note", async () => {
+    open()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Looks right: continue" })
+    )
+    expect(await screen.findByText("The story")).toBeTruthy()
+    expect(screen.getByText("Draft · not sealed")).toBeTruthy()
   })
 })
 
 describe("split", () => {
-  it("lists the split, asks to narrow the story and offers no seal", async () => {
-    getShape.mockResolvedValue(
-      session({
-        status: "split",
-        questions: [],
-        split: [{ story: "Refund by admins", leftOut: "Partial refunds" }],
-      })
-    )
+  const split = (over: Partial<Session> = {}) =>
+    session({
+      status: "split",
+      questions: [],
+      split: [
+        { story: "Show why it failed", leftOut: "The Retry button" },
+        { story: "Retry a delivery", leftOut: "Failure reasons" },
+      ],
+      ...over,
+    })
+
+  async function toSplit() {
     open()
-    expect(await screen.findByText("Refund by admins")).toBeTruthy()
-    expect(screen.getByText(/narrow the story/i)).toBeTruthy()
-    expect(screen.getByText(/Partial refunds/)).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Seal story" })).toBeNull()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Looks right: continue" })
+    )
+    await screen.findByText("The agent suggests splitting this story")
+  }
+
+  it("splits into linked sessions and lists them", async () => {
+    mocks.getShape.mockResolvedValue(split())
+    mocks.decideShapeSplit.mockResolvedValue(
+      split({ children: ["c-1", "c-2"] })
+    )
+    await toSplit()
+    click("Split into 2 stories")
+    expect(
+      await screen.findByText("Split into 2 stories", { selector: "h2" })
+    ).toBeTruthy()
+    expect(mocks.decideShapeSplit).toHaveBeenCalledWith("sh-1", "/w", "split")
+    const links = screen.getAllByRole("link", { name: "Open this story" })
+    expect(links[1]?.getAttribute("href")).toBe("/shaping/c-2?workspace=%2Fw")
+  })
+
+  it("keeps one story and runs the agent again", async () => {
+    mocks.getShape.mockResolvedValue(split())
+    mocks.decideShapeSplit.mockResolvedValue(ready({ splitKept: true }))
+    await toSplit()
+    click("Keep as one story")
+    expect(await screen.findByText("Draft · not sealed")).toBeTruthy()
+    expect(mocks.decideShapeSplit).toHaveBeenCalledWith("sh-1", "/w", "keep")
   })
 })
 
-describe("context proposals", () => {
-  it("sends only the ticked proposals", async () => {
-    getShape.mockResolvedValue(
-      session({
+describe("context notes", () => {
+  const notes = (over: Partial<Session> = {}) =>
+    ready({
+      proposals: [
+        {
+          id: "P1",
+          section: "Webhooks",
+          text: "Retry 3 per hour.",
+          status: "proposed",
+        },
+        {
+          id: "P2",
+          section: "Access",
+          text: "Any user can retry.",
+          status: "proposed",
+        },
+      ],
+      ...over,
+    })
+
+  async function toContext() {
+    mocks.getShape.mockResolvedValue(notes())
+    open()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Looks right: continue" })
+    )
+    await screen.findByText("2 notes for your product context")
+  }
+
+  it("previews what accepting writes and sends the decisions on continue", async () => {
+    mocks.previewShapeContext.mockResolvedValue({
+      path: "span/context/product.md",
+      lines: [
+        { n: 41, kind: "ctx", text: "## Webhooks" },
+        { n: 42, kind: "add", text: "Retry 3 per hour." },
+      ],
+    })
+    mocks.settleShapeContext.mockResolvedValue(
+      notes({
         proposals: [
           {
             id: "P1",
-            section: "Glossary",
-            text: "Refund: money back",
-            status: "proposed",
+            section: "Webhooks",
+            text: "Retry 3 per hour.",
+            status: "accepted",
           },
-          { id: "P2", section: "Personas", text: "Admin", status: "proposed" },
         ],
       })
     )
-    acceptShapeContext.mockResolvedValue(session())
-    open()
-    fireEvent.click(await screen.findByRole("checkbox", { name: /Admin/ }))
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add to product context" })
-    )
-    await waitFor(() =>
-      expect(acceptShapeContext).toHaveBeenCalledWith("sh-1", "/w", ["P2"])
-    )
+    await toContext()
+    click("Accept P1")
+    click("Skip P2")
+    const diff = await screen.findByRole("region", { name: "Context change" })
+    expect(within(diff).getByText("Retry 3 per hour.")).toBeTruthy()
+    expect(mocks.previewShapeContext).toHaveBeenCalledWith("sh-1", "/w", ["P1"])
+    expect(screen.getByText("1 accepted, 0 still proposed.")).toBeTruthy()
+    expect(mocks.settleShapeContext).not.toHaveBeenCalled()
+    click("Continue to seal")
+    expect(await screen.findByText("Draft · not sealed")).toBeTruthy()
+    expect(mocks.settleShapeContext).toHaveBeenCalledWith("sh-1", "/w", {
+      accept: ["P1"],
+      skip: ["P2"],
+    })
+  })
+
+  it("undoes a staged decision and says what is dropped when continuing", async () => {
+    await toContext()
+    click("Skip P1")
+    click("Undo P1")
+    expect(screen.getByRole("button", { name: "Accept P1" })).toBeTruthy()
+    expect(
+      screen.getByText(
+        /2 still proposed. They are dropped if you continue now./
+      )
+    ).toBeTruthy()
+    click("Continue to seal")
+    expect(await screen.findByText("Draft · not sealed")).toBeTruthy()
+    expect(mocks.settleShapeContext).not.toHaveBeenCalled()
   })
 })
 
-describe("ready and seal", () => {
-  const ready = () =>
-    session({
-      status: "ready",
-      questions: [],
-      story: "# Refund story\n\nAs an admin",
-    })
+describe("seal", () => {
+  async function toSeal(value: Session) {
+    mocks.getShape.mockResolvedValue(value)
+    open()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Looks right: continue" })
+    )
+    await screen.findByText("Draft · not sealed")
+  }
 
-  it("shows the story and seals it", async () => {
-    getShape.mockResolvedValue(ready())
-    sealShape.mockResolvedValue(
-      session({
-        status: "sealed",
-        story: "# Refund story",
-        digest: "abcdef0123456789ffff",
+  it("lists what sealing locks in, then seals", async () => {
+    mocks.sealShape.mockResolvedValue(sealed())
+    await toSeal(
+      ready({
+        proposals: [{ id: "P1", section: "A", text: "t", status: "accepted" }],
       })
     )
-    open()
-    expect(await screen.findByText(/# Refund story/)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Seal story" }))
-    expect(await screen.findByText("abcdef012345")).toBeTruthy()
+    expect(screen.getByText("No open questions.")).toBeTruthy()
+    expect(screen.getByText("1 assumption will be sealed in")).toBeTruthy()
+    fireEvent.click(screen.getByRole("tab", { name: "Preview" }))
+    expect(screen.getByText("Because.")).toBeTruthy()
+    click("Seal story: cannot be changed")
+    expect(await screen.findByText(/This story cannot change./)).toBeTruthy()
+    expect(mocks.sealShape).toHaveBeenCalledWith("sh-1", "/w")
   })
 
-  it("shows the open question ids when the seal is refused", async () => {
-    getShape.mockResolvedValue(ready())
-    sealShape.mockRejectedValue(
-      new ApiError(
-        "shape_not_ready",
-        "story is not ready, open questions: Q3, Q4"
+  it("lets an assumption be answered instead, which runs the agent again", async () => {
+    mocks.answerShape.mockResolvedValue(
+      ready({
+        questions: [
+          question("Q1", "answered", { answerId: "A1" }),
+          question("Q2", "answered", { answerId: "A2" }),
+        ],
+      })
+    )
+    await toSeal(ready())
+    click("Answer an assumption instead")
+    click("Answer Q2 instead")
+    fireEvent.change(screen.getByLabelText("Your answer to Q2"), {
+      target: { value: "five" },
+    })
+    click("Save answer for Q2")
+    click("Continue to example map")
+    await waitFor(() =>
+      expect(mocks.answerShape).toHaveBeenCalledWith(
+        "sh-1",
+        "/w",
+        [{ question: "Q2", text: "five" }],
+        []
       )
     )
-    open()
-    fireEvent.click(await screen.findByRole("button", { name: "Seal story" }))
-    expect(await screen.findByText(/open questions: Q3, Q4/)).toBeTruthy()
+  })
+
+  it("shows why the seal was refused", async () => {
+    mocks.sealShape.mockRejectedValue(
+      new ApiError("shape_not_ready", "open questions: Q3")
+    )
+    await toSeal(ready())
+    click("Seal story: cannot be changed")
+    expect(await screen.findByText("open questions: Q3")).toBeTruthy()
   })
 })
 
-describe("sealed story and Jira", () => {
-  const sealed = (jira: Session["jira"] = null) =>
-    session({
-      status: "sealed",
-      questions: [],
-      story: "# Refund story",
-      digest: "abcdef0123456789ffff",
-      jira,
-    })
-
-  it("previews first and creates only after the confirm button", async () => {
-    getShape.mockResolvedValue(sealed())
-    previewShapeIssue.mockResolvedValue(preview)
-    createShapeIssue.mockResolvedValue(
-      sealed({ key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" })
-    )
+describe("sealed story", () => {
+  it("is read-only, with a digest and four views of the session", async () => {
+    mocks.getShape.mockResolvedValue(sealed())
     open()
-    fireEvent.change(await screen.findByLabelText("Project key"), {
-      target: { value: "PRJ" },
-    })
-    fireEvent.change(screen.getByLabelText("Board id (optional)"), {
-      target: { value: "7" },
-    })
-    expect(screen.queryByRole("button", { name: "Create in Jira" })).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    expect(await screen.findByText("Refund payments")).toBeTruthy()
-    expect(screen.getByText("PRJ Kanban")).toBeTruthy()
-    expect(screen.getByText("Backlog")).toBeTruthy()
-    expect(previewShapeIssue).toHaveBeenCalledWith("sh-1", "/w", "PRJ", "7")
-    expect(createShapeIssue).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Create in Jira" }))
-    const link = await screen.findByRole("link", { name: "PRJ-9" })
-    expect(link.getAttribute("href")).toBe("https://j/PRJ-9")
-    expect(createShapeIssue).toHaveBeenCalledWith("sh-1", "/w", "PRJ", "7")
-  })
-
-  it("names a disabled backlog", async () => {
-    getShape.mockResolvedValue(sealed())
-    previewShapeIssue.mockRejectedValue(
-      new ApiError(
-        "jira_backlog_disabled",
-        "the Backlog column has no statuses"
-      )
-    )
-    open()
-    fireEvent.change(await screen.findByLabelText("Project key"), {
-      target: { value: "PRJ" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    expect(await screen.findByText(/backlog is not enabled/i)).toBeTruthy()
-  })
-
-  it("shows the board list of an ambiguous project", async () => {
-    getShape.mockResolvedValue(sealed())
-    previewShapeIssue.mockRejectedValue(
-      new ApiError("jira_board_ambiguous", "boards: 7 Alpha, 8 Beta")
-    )
-    open()
-    fireEvent.change(await screen.findByLabelText("Project key"), {
-      target: { value: "PRJ" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    expect(await screen.findByText(/boards: 7 Alpha, 8 Beta/)).toBeTruthy()
-  })
-
-  it("says the issue exists when it could not reach the backlog", async () => {
-    getShape.mockResolvedValueOnce(sealed())
-    previewShapeIssue.mockResolvedValue(preview)
-    createShapeIssue.mockRejectedValue(
-      new ApiError("jira_not_in_backlog", "PRJ-9 is in To Do")
-    )
-    getShape.mockResolvedValue(
-      sealed({ key: "PRJ-9", url: "https://j/PRJ-9", status: "To Do" })
-    )
-    open()
-    fireEvent.change(await screen.findByLabelText("Project key"), {
-      target: { value: "PRJ" },
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create in Jira" })
-    )
-    expect(await screen.findByText(/PRJ-9 is in To Do/)).toBeTruthy()
-    expect(screen.getByText(/issue exists/i)).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Create in Jira" })).toBeNull()
-  })
-
-  it("never offers create again once the session has a key", async () => {
-    getShape.mockResolvedValue(
-      sealed({ key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" })
-    )
-    open()
-    expect(await screen.findByRole("link", { name: "PRJ-9" })).toBeTruthy()
-    expect(screen.queryByLabelText("Project key")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Preview" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Create in Jira" })).toBeNull()
+    expect(await screen.findByText(/This story cannot change./)).toBeTruthy()
+    expect(screen.getByText("Read-only")).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: /Copy digest/ }).getAttribute("title")
+    ).toBe("sha256:abcdef0123456789ffff")
+    expect(screen.getByText(/1 assumption was sealed in: Q2/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Seal story/ })).toBeNull()
+    fireEvent.click(screen.getByRole("tab", { name: "Questions" }))
+    expect(screen.getByText("Answered · A1")).toBeTruthy()
+    fireEvent.click(screen.getByRole("tab", { name: "Example map" }))
+    expect(screen.getByText("Only admins refund")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Source:/ })).toBeNull()
   })
 
   it("starts a run with the story and the Jira key", async () => {
-    getShape.mockResolvedValue(
-      sealed({ key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" })
+    mocks.getShape.mockResolvedValue(
+      sealed({
+        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+      })
     )
-    startRun.mockResolvedValue({
+    mocks.startRun.mockResolvedValue({
       id: "run-1",
       stage: "intake",
-      runs: [{ id: "run-1", stage: "intake", repo: "api" }],
+      runs: [],
       partial: false,
       notes: "",
     })
     open()
-    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    await clickWhenReady("Create run")
     expect(await screen.findByText("run page")).toBeTruthy()
-    const form = startRun.mock.calls[0]?.[0] as FormData
-    expect(form.get("story")).toBe("# Refund story")
+    const form = mocks.startRun.mock.calls[0]?.[0] as FormData
+    expect(form.get("story")).toBe("# Refund\n\n## Why\nBecause.")
     expect(form.get("issue")).toBe("PRJ-9")
     expect(form.get("workspace")).toBe("/w")
     expect(form.get("repo")).toBe("api")
   })
 
   it("starts a run without an issue when Jira was skipped", async () => {
-    getShape.mockResolvedValue(sealed())
-    startRun.mockResolvedValue({
+    mocks.getShape.mockResolvedValue(sealed())
+    mocks.startRun.mockResolvedValue({
       id: "run-1",
       stage: "intake",
-      runs: [{ id: "run-1", stage: "intake", repo: "" }],
+      runs: [],
       partial: false,
       notes: "",
     })
     open()
-    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    await clickWhenReady("Create run")
     await screen.findByText("run page")
-    expect((startRun.mock.calls[0]?.[0] as FormData).has("issue")).toBe(false)
+    expect((mocks.startRun.mock.calls[0]?.[0] as FormData).has("issue")).toBe(
+      false
+    )
+  })
+
+  it("starts a new session from the sealed story and opens it", async () => {
+    mocks.getShape.mockResolvedValue(sealed())
+    mocks.forkShape.mockResolvedValue(session({ id: "sh-2" }))
+    open()
+    await clickWhenReady("New session from this story")
+    expect(mocks.forkShape).toHaveBeenCalledWith("sh-1", "/w")
+    await waitFor(() =>
+      expect(mocks.getShape).toHaveBeenCalledWith("sh-2", "/w")
+    )
+  })
+
+  it("links the Jira issue instead of offering a second preview", async () => {
+    mocks.getShape.mockResolvedValue(
+      sealed({
+        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+      })
+    )
+    open()
+    const link = await screen.findByRole("link", { name: "Open PRJ-9" })
+    expect(link.getAttribute("href")).toBe("https://j/PRJ-9")
+    expect(screen.queryByRole("button", { name: "Preview in Jira" })).toBeNull()
+  })
+})
+
+describe("jira", () => {
+  async function toJira() {
+    mocks.getShape.mockResolvedValue(sealed())
+    open()
+    click(
+      await screen
+        .findByRole("button", { name: "Preview in Jira" })
+        .then(() => "Preview in Jira")
+    )
+    await screen.findByText("Nothing sent yet")
+  }
+
+  async function loadPreview() {
+    fireEvent.change(screen.getByLabelText("Project key"), {
+      target: { value: "PRJ" },
+    })
+    fireEvent.change(screen.getByLabelText("Board id (optional)"), {
+      target: { value: "7" },
+    })
+    click("Preview")
+  }
+
+  it("previews the exact request first and creates only after the confirm button", async () => {
+    mocks.previewShapeIssue.mockResolvedValue(preview)
+    mocks.createShapeIssue.mockResolvedValue(
+      sealed({
+        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+      })
+    )
+    await toJira()
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Create in Jira",
+        }) as HTMLButtonElement
+      ).disabled
+    ).toBe(true)
+    await loadPreview()
+    expect(await screen.findByText("PRJ Kanban")).toBeTruthy()
+    expect(screen.getByText("Ready for grooming")).toBeTruthy()
+    expect(
+      within(screen.getByRole("region", { name: "Payload" })).getByText(
+        /"labels": \[/
+      )
+    ).toBeTruthy()
+    expect(mocks.previewShapeIssue).toHaveBeenCalledWith(
+      "sh-1",
+      "/w",
+      "PRJ",
+      "7"
+    )
+    expect(mocks.createShapeIssue).not.toHaveBeenCalled()
+    click("Create in Jira")
+    expect(await screen.findByText("Created PRJ-9.")).toBeTruthy()
+    expect(
+      screen
+        .getByRole("link", { name: "https://j/PRJ-9".replace("https://", "") })
+        .getAttribute("href")
+    ).toBe("https://j/PRJ-9")
+    expect(mocks.createShapeIssue).toHaveBeenCalledWith(
+      "sh-1",
+      "/w",
+      "PRJ",
+      "7"
+    )
+  })
+
+  it("says when the backlog is off and lets the person pick another project", async () => {
+    mocks.previewShapeIssue.mockRejectedValue(
+      new ApiError(
+        "jira_backlog_disabled",
+        "the Backlog column has no statuses"
+      )
+    )
+    await toJira()
+    await loadPreview()
+    expect(await screen.findByText(/backlog is not enabled/i)).toBeTruthy()
+    expect(screen.getByText("Jira refused")).toBeTruthy()
+    click("Choose another project")
+    expect(screen.queryByText("Jira refused")).toBeNull()
+  })
+
+  it("shows the board list of an ambiguous project", async () => {
+    mocks.previewShapeIssue.mockRejectedValue(
+      new ApiError("jira_board_ambiguous", "boards: 7 Alpha, 8 Beta")
+    )
+    await toJira()
+    await loadPreview()
+    expect(await screen.findByText(/boards: 7 Alpha, 8 Beta/)).toBeTruthy()
+  })
+
+  it("says the issue exists when it could not reach the backlog", async () => {
+    mocks.previewShapeIssue.mockResolvedValue(preview)
+    mocks.createShapeIssue.mockRejectedValue(
+      new ApiError("jira_not_in_backlog", "PRJ-9 is in To Do")
+    )
+    await toJira()
+    mocks.getShape.mockResolvedValue(
+      sealed({
+        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "To Do" },
+      })
+    )
+    await loadPreview()
+    await screen.findByText("PRJ Kanban")
+    click("Create in Jira")
+    expect(await screen.findByText(/PRJ-9 is in To Do/)).toBeTruthy()
+    expect(await screen.findByText("Created PRJ-9.")).toBeTruthy()
   })
 })

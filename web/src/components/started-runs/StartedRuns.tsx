@@ -15,15 +15,28 @@ interface StartedRunsProps {
  */
 export function StartedRuns({ runs, partial, notes }: StartedRunsProps) {
   return (
-    <section className="mt-3 flex flex-col gap-2" aria-label="Runs started" role="status">
+    <section
+      className="mt-3 flex flex-col gap-2"
+      aria-label="Runs started"
+      role="status"
+    >
       {partial ? (
-        <p className="text-pretty text-sm text-hold">Some repos did not start. The others are running.</p>
+        <p className="text-sm text-pretty text-hold">
+          Some repos did not start. The others are running.
+        </p>
       ) : null}
-      {notes.trim() !== "" ? <p className="whitespace-pre-line text-pretty text-sm text-hold">{notes.trim()}</p> : null}
+      {notes.trim() !== "" ? (
+        <p className="text-sm text-pretty whitespace-pre-line text-hold">
+          {notes.trim()}
+        </p>
+      ) : null}
       <ul className="flex flex-col gap-1">
         {runs.map((run) => (
           <li key={run.id}>
-            <Link className="text-primary underline-offset-4 hover:underline tabular-nums" to={`/spans/${run.id}`}>
+            <Link
+              className="text-primary tabular-nums underline-offset-4 hover:underline"
+              to={`/spans/${run.id}`}
+            >
               {run.repo !== "" ? `${run.repo} · ${run.id}` : run.id}
             </Link>
           </li>

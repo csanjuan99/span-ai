@@ -1,7 +1,6 @@
 "use client"
 
-import { ChevronRightIcon } from "lucide-react"
-
+import { DisclosureChevron } from "@/components/code-view/DisclosureChevron"
 import { CommandLine } from "@/components/problem/CommandLine"
 
 /** One action of a board with the route that serves it and the command that does the same from a shell. */
@@ -27,10 +26,7 @@ export function ApiCli({
   return (
     <details className="group rounded-[14px] border border-border bg-card shadow-sm">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[13px] font-medium focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90"
-        />
+        <DisclosureChevron />
         API / CLI
         <span className="font-normal text-muted-foreground">
           Everything here also works from a terminal

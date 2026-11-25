@@ -10,7 +10,7 @@ function show(props: Parameters<typeof StartedRuns>[0]) {
   render(
     <MemoryRouter>
       <StartedRuns {...props} />
-    </MemoryRouter>,
+    </MemoryRouter>
   )
 }
 
@@ -24,8 +24,12 @@ describe("StartedRuns", () => {
       partial: false,
       notes: "",
     })
-    expect(screen.getByRole("link", { name: /api.*span-1/ }).getAttribute("href")).toBe("/spans/span-1")
-    expect(screen.getByRole("link", { name: /web.*span-2/ }).getAttribute("href")).toBe("/spans/span-2")
+    expect(
+      screen.getByRole("link", { name: /api.*span-1/ }).getAttribute("href")
+    ).toBe("/spans/span-1")
+    expect(
+      screen.getByRole("link", { name: /web.*span-2/ }).getAttribute("href")
+    ).toBe("/spans/span-2")
   })
 
   it("says which repos did not start when the start was partial", () => {
@@ -39,7 +43,11 @@ describe("StartedRuns", () => {
   })
 
   it("does not claim a partial start when everything started", () => {
-    show({ runs: [{ id: "span-1", stage: "intake", repo: "" }], partial: false, notes: "" })
+    show({
+      runs: [{ id: "span-1", stage: "intake", repo: "" }],
+      partial: false,
+      notes: "",
+    })
     expect(screen.queryByText(/did not start/i)).toBeNull()
     expect(screen.getByRole("link", { name: /span-1/ })).toBeTruthy()
   })

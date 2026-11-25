@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 
-import { cn } from "@/lib/utils"
+import { Pill } from "@/components/onboarding/Pill"
 
 /** The small pill that says a value moved: amber for changed from the default, violet for unsaved. */
 export function ChangedBadge({
@@ -10,14 +10,5 @@ export function ChangedBadge({
   children: ReactNode
   tone?: "hold" | "accent"
 }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex h-5 w-fit items-center rounded-full px-2 text-xs font-medium whitespace-nowrap",
-        tone === "hold" ? "bg-hold-soft text-hold" : "bg-accent text-primary"
-      )}
-    >
-      {children}
-    </span>
-  )
+  return <Pill tone={tone === "hold" ? "hold" : "acc"}>{children}</Pill>
 }

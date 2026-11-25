@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react"
 
+import { CheckField } from "@/components/list-controls/CheckField"
 import type { DecisionEntry, Reasoning } from "@/lib/implementation-api"
 
 function Card({
@@ -74,17 +75,14 @@ function Decision({
         ) : null}
       </p>
       {decision.assumed ? (
-        <label className="inline-flex min-h-9 items-center gap-2 text-[13px] max-sm:min-h-11">
-          <input
-            type="checkbox"
-            className="size-4 accent-primary"
-            checked={decision.checked}
-            disabled={decision.checked || busy}
-            aria-label={`I checked ${decision.id}`}
-            onChange={() => onCheck(decision.id)}
-          />
-          I checked this
-        </label>
+        <CheckField
+          className="inline-flex min-h-9 items-center gap-2 text-[13px] max-sm:min-h-11"
+          checked={decision.checked}
+          disabled={decision.checked || busy}
+          ariaLabel={`I checked ${decision.id}`}
+          label="I checked this"
+          onChange={() => onCheck(decision.id)}
+        />
       ) : null}
     </li>
   )

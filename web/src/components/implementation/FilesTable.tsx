@@ -3,6 +3,8 @@
 import { useState } from "react"
 
 import { cn } from "cn"
+import { FilterChips } from "@/components/list-controls/FilterChips"
+import { CheckField } from "@/components/list-controls/CheckField"
 import { FileStatusChip } from "@/components/files-changed/FileStatusChip"
 import type { DiffFile } from "@/lib/diff"
 import { purposeLabels } from "@/lib/overview"
@@ -66,31 +68,20 @@ export function FilesTable({
         </span>
       </div>
       {kinds.length > 1 ? (
-        <div
-          role="group"
-          aria-label="Filter files"
-          className="flex flex-wrap gap-2 px-4 pb-3"
-        >
-          {(["all", ...kinds] as const).map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={filter === kind}
-              className={cn(
-                "inline-flex h-8 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-[13px] focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none max-sm:h-11",
-                filter === kind &&
-                  "border-primary bg-accent font-semibold text-primary"
-              )}
-              onClick={() => setFilter(kind)}
-            >
-              {kind === "all" ? "All" : purposeLabels[kind]}
-              <span className="font-mono text-xs">
-                {kind === "all"
+        <div className="px-4 pb-3">
+          <FilterChips
+            label="Filter files"
+            value={filter}
+            onChange={setFilter}
+            chips={(["all", ...kinds] as const).map((kind) => ({
+              key: kind,
+              label: kind === "all" ? "All" : purposeLabels[kind],
+              count:
+                kind === "all"
                   ? files.length
-                  : files.filter((file) => kindOf(file.path) === kind).length}
-              </span>
-            </button>
-          ))}
+                  : files.filter((file) => kindOf(file.path) === kind).length,
+            }))}
+          />
         </div>
       ) : null}
       <div className="grid grid-cols-[28px_minmax(0,1fr)_44px] items-center gap-3 border-t border-border bg-muted px-4 py-1.5 text-xs font-medium text-muted-foreground sm:grid-cols-[28px_minmax(0,1fr)_150px_44px] sm:px-5">
@@ -133,15 +124,13 @@ export function FilesTable({
               </>
             )}
           </span>
-          <label className="inline-flex size-11 items-center justify-center max-sm:col-start-3 max-sm:row-span-2 max-sm:row-start-1 sm:-my-0">
-            <input
-              type="checkbox"
-              className="size-5 accent-primary"
-              checked={flags[file.path]?.viewed === true}
-              aria-label={`Viewed ${file.path}`}
-              onChange={(event) => onViewed(file.path, event.target.checked)}
-            />
-          </label>
+          <CheckField
+            className="inline-flex size-11 items-center justify-center max-sm:col-start-3 max-sm:row-span-2 max-sm:row-start-1 sm:-my-0"
+            inputClassName="size-5 accent-primary"
+            checked={flags[file.path]?.viewed === true}
+            ariaLabel={`Viewed ${file.path}`}
+            onChange={(viewed) => onViewed(file.path, viewed)}
+          />
         </div>
       ))}
     </section>

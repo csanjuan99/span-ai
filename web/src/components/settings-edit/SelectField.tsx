@@ -37,7 +37,9 @@ export function SelectField({
   onChange: (value: string) => void
 }) {
   return (
-    <span className={cn("relative inline-flex w-fit max-w-full", wrapperClassName)}>
+    <span
+      className={cn("relative inline-flex w-fit max-w-full", wrapperClassName)}
+    >
       <select
         aria-label={label}
         className={cn(

@@ -11,10 +11,22 @@ describe("QACases", () => {
         command="go test ./..."
         exitCode={0}
         lines={[
-          { id: "AC-1", text: "A charge records the amount.", result: "pass", file: "pay_test.go", line: 3 },
-          { id: "AC-2", text: "A refund records the reason.", result: "unverified", file: "", line: 0 },
+          {
+            id: "AC-1",
+            text: "A charge records the amount.",
+            result: "pass",
+            file: "pay_test.go",
+            line: 3,
+          },
+          {
+            id: "AC-2",
+            text: "A refund records the reason.",
+            result: "unverified",
+            file: "",
+            line: 0,
+          },
         ]}
-      />,
+      />
     )
     expect(screen.getByText("AC-1")).toBeTruthy()
     expect(screen.getByText("pay_test.go:3")).toBeTruthy()

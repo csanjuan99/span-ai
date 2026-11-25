@@ -3,7 +3,12 @@ import type { ReactNode } from "react"
 
 import { DiffTotals } from "@/components/diff-totals/DiffTotals"
 import { levelTone } from "@/components/implementation/report/tone"
-import { diffCopy, testsCopy, verdictCopy, type RunPosition } from "@/lib/proof-copy"
+import {
+  diffCopy,
+  testsCopy,
+  verdictCopy,
+  type RunPosition,
+} from "@/lib/proof-copy"
 import type { Proof } from "@/lib/proof"
 
 function Cell({
@@ -29,7 +34,13 @@ function Cell({
 }
 
 /** The proof of the run at a glance: how risky, how big, and what the checks said. */
-export function ProofSummary({ proof, run }: { proof: Proof; run?: RunPosition }) {
+export function ProofSummary({
+  proof,
+  run,
+}: {
+  proof: Proof
+  run?: RunPosition
+}) {
   const tone = levelTone[proof.verdict.level]
   const { diff, checks } = proof
   const allPassed = checks.total > 0 && checks.passed === checks.total

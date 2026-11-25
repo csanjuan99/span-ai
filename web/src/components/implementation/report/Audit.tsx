@@ -1,5 +1,4 @@
-import { ChevronRightIcon } from "lucide-react"
-
+import { DisclosureChevron } from "@/components/code-view/DisclosureChevron"
 import { shortHash, toneOf } from "@/lib/ledger"
 import { clockOf } from "@/lib/timeline"
 import { cn } from "cn"
@@ -37,10 +36,7 @@ export function Audit({
   return (
     <details className="group rounded-md border border-border">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="size-3.5 text-muted-foreground transition-transform group-open:rotate-90"
-        />
+        <DisclosureChevron />
         <span>
           <span className="text-primary">$ </span>audit trail
         </span>

@@ -8,7 +8,7 @@ function mount() {
   render(
     <ThemeProvider>
       <ThemeToggle />
-    </ThemeProvider>,
+    </ThemeProvider>
   )
 }
 
@@ -32,7 +32,9 @@ describe("ThemeToggle", () => {
 
   it("starts by following the system and offers light next", () => {
     mount()
-    expect(screen.getByRole("button", { name: "Theme: system. Switch to light" })).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Theme: system. Switch to light" })
+    ).toBeTruthy()
   })
 
   it("cycles system, light, dark and puts the theme on the page", () => {

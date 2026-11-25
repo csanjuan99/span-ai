@@ -3,8 +3,18 @@
 import { useState } from "react"
 
 import { setStageAgent } from "@/lib/api"
-import { agentStages, agentForStage, defaultAgentStage } from "@/lib/stage-agents"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  agentStages,
+  agentForStage,
+  defaultAgentStage,
+} from "@/lib/stage-agents"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const agents = [
   { id: "cursor", label: "Cursor" },
@@ -27,7 +37,9 @@ export function StageAgent({
   choices: Record<string, string> | undefined
 }) {
   const [stage, setStage] = useState(() => defaultAgentStage(current))
-  const [agent, setAgent] = useState(() => agentForStage(defaultAgentStage(current), choices))
+  const [agent, setAgent] = useState(() =>
+    agentForStage(defaultAgentStage(current), choices)
+  )
   const [note, setNote] = useState("")
 
   // The stage the run stopped at is the one a person came here to change. When the run moves
@@ -53,7 +65,9 @@ export function StageAgent({
     setNote("")
     try {
       await setStageAgent(id, stage, chosen)
-      setNote(`${stage} will use ${chosen === "" ? "the policy default" : chosen} the next time it starts.`)
+      setNote(
+        `${stage} will use ${chosen === "" ? "the policy default" : chosen} the next time it starts.`
+      )
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : "the choice was not saved")
     }
@@ -65,7 +79,11 @@ export function StageAgent({
         <div className="flex items-center gap-1 text-sm font-medium whitespace-nowrap">
           <span>Agent for</span>
           <Select value={stage} onValueChange={pickStage}>
-            <SelectTrigger aria-label="Stage to choose an agent for" size="sm" className="h-6 gap-1 border-0 px-1 text-sm font-medium shadow-none">
+            <SelectTrigger
+              aria-label="Stage to choose an agent for"
+              size="sm"
+              className="h-6 gap-1 border-0 px-1 text-sm font-medium shadow-none"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -83,8 +101,14 @@ export function StageAgent({
             : "Only frame, build and inspect call a model. Applies the next time that stage starts."}
         </p>
       </div>
-      <Select value={agent === "" ? "any" : agent} onValueChange={(value) => void pick(value)}>
-        <SelectTrigger aria-label={`Choose agent for ${stage}`} className="w-40 shrink-0 text-[13px]">
+      <Select
+        value={agent === "" ? "any" : agent}
+        onValueChange={(value) => void pick(value)}
+      >
+        <SelectTrigger
+          aria-label={`Choose agent for ${stage}`}
+          className="w-40 shrink-0 text-[13px]"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

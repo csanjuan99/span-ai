@@ -18,6 +18,12 @@ import { Metrics } from "@/pages/Metrics"
 import { Onboarding } from "@/pages/Onboarding"
 import { ProjectSettings } from "@/pages/ProjectSettings"
 import { ShapeSession } from "@/pages/ShapeSession"
+import { ShapeBoard } from "@/pages/ShapeBoard"
+import { ShapeHistory } from "@/pages/ShapeHistory"
+import { ShapeShared } from "@/pages/ShapeShared"
+import { ShapeTransfer } from "@/pages/ShapeTransfer"
+import { ShapeCompare } from "@/pages/ShapeCompare"
+import { ShapeVersions } from "@/pages/ShapeVersions"
 import { Shaping } from "@/pages/Shaping"
 import { SpanPage } from "@/pages/SpanPage"
 import { Summary } from "@/pages/Summary"
@@ -86,6 +92,62 @@ export function App() {
           element={
             <Guarded>
               <Shaping />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/board"
+          element={
+            <Guarded>
+              <ShapeBoard />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/import"
+          element={
+            <Guarded>
+              <ShapeTransfer />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/:id/history"
+          element={
+            <Guarded>
+              <ShapeHistory />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/:id/transfer"
+          element={
+            <Guarded>
+              <ShapeTransfer />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/:id/shared/:token"
+          element={
+            <Guarded>
+              <ShapeShared />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/compare"
+          element={
+            <Guarded>
+              <ShapeCompare />
+            </Guarded>
+          }
+        />
+        <Route
+          path="/shaping/:id/versions"
+          element={
+            <Guarded>
+              <ShapeVersions />
             </Guarded>
           }
         />

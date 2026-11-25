@@ -4,7 +4,13 @@ import type { Risk } from "@/lib/report"
 import type { RunDetails } from "@/lib/run-details"
 
 /** The two things worth reading after a run is over: what could still hurt, and how it was run. */
-export function FinishedRecord({ risks, details }: { risks: Risk[]; details: RunDetails }) {
+export function FinishedRecord({
+  risks,
+  details,
+}: {
+  risks: Risk[]
+  details: RunDetails
+}) {
   return (
     <>
       {risks.length > 0 ? (
@@ -13,12 +19,21 @@ export function FinishedRecord({ risks, details }: { risks: Risk[]; details: Run
           <ul className="flex flex-col gap-1.5 text-sm">
             {risks.map((risk) => (
               <li key={risk.id} className="flex gap-2">
-                <span className={cn("shrink-0 font-mono text-xs", levelTone[risk.level].text)} aria-hidden="true">
+                <span
+                  className={cn(
+                    "shrink-0 font-mono text-xs",
+                    levelTone[risk.level].text
+                  )}
+                  aria-hidden="true"
+                >
                   !
                 </span>
                 <span className="min-w-0 text-pretty">
                   {risk.title}
-                  <span className="text-muted-foreground"> · {levelTone[risk.level].label}</span>
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {levelTone[risk.level].label}
+                  </span>
                 </span>
               </li>
             ))}
@@ -32,7 +47,9 @@ export function FinishedRecord({ risks, details }: { risks: Risk[]; details: Run
             {details.agents.length > 0 ? (
               <>
                 <dt className="text-muted-foreground">Agents</dt>
-                <dd className="font-mono text-xs">{details.agents.join(", ")}</dd>
+                <dd className="font-mono text-xs">
+                  {details.agents.join(", ")}
+                </dd>
               </>
             ) : null}
             {details.time !== null ? (

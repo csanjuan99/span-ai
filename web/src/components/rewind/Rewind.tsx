@@ -8,7 +8,13 @@ import { rewindRun } from "@/lib/api"
 import { stages } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
 /** intake only writes the brief. A restart starts at a stage that does work. */
@@ -35,7 +41,11 @@ export function Rewind({
 }) {
   const [open, setOpen] = useState(startOpen || requested !== "")
   const [stage, setStage] = useState(() =>
-    requested !== "" ? requested : current === "" || current === "intake" ? "build" : current,
+    requested !== ""
+      ? requested
+      : current === "" || current === "intake"
+        ? "build"
+        : current
   )
   // A request that arrives later opens the form on that stage; adjusted while rendering, not in an effect.
   const [seen, setSeen] = useState(requested)
@@ -57,7 +67,9 @@ export function Rewind({
       await rewindRun(id, stage, note)
       setMessage(`The run will start again at ${stage}. Resume it to continue.`)
     } catch (err: unknown) {
-      setMessage(err instanceof Error ? err.message : "the run was not restarted")
+      setMessage(
+        err instanceof Error ? err.message : "the run was not restarted"
+      )
     } finally {
       setBusy(false)
     }
@@ -77,9 +89,11 @@ export function Rewind({
   return (
     <ControlBlock>
       <Label htmlFor="rewind-stage">Restart from a stage</Label>
-      <p className="text-pretty text-sm text-muted-foreground">
-        When what the branch produced is not what the handoff asked for, start again at the stage that has to change.
-        The attempt so far stays on disk as its own iteration, and the instruction below is what that stage reads.
+      <p className="text-sm text-pretty text-muted-foreground">
+        When what the branch produced is not what the handoff asked for, start
+        again at the stage that has to change. The attempt so far stays on disk
+        as its own iteration, and the instruction below is what that stage
+        reads.
       </p>
       <Select value={stage} onValueChange={setStage} disabled={blocked !== ""}>
         <SelectTrigger id="rewind-stage" className="w-40">
@@ -102,11 +116,20 @@ export function Rewind({
         disabled={blocked !== ""}
       />
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="secondary" disabled={busy || blocked !== ""} onClick={() => void restart()}>
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy || blocked !== ""}
+          onClick={() => void restart()}
+        >
           Start again at {stage}
         </Button>
-        {message !== "" ? <p className="text-pretty text-sm">{message}</p> : null}
-        {blocked !== "" ? <p className="text-pretty text-sm text-muted-foreground">{blocked}</p> : null}
+        {message !== "" ? (
+          <p className="text-sm text-pretty">{message}</p>
+        ) : null}
+        {blocked !== "" ? (
+          <p className="text-sm text-pretty text-muted-foreground">{blocked}</p>
+        ) : null}
       </div>
     </ControlBlock>
   )

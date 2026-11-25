@@ -1,29 +1,43 @@
 "use client"
 
-import { useEffect, useState, type FormEvent } from "react"
-import { Link, useNavigate } from "react-router"
+import { useEffect, useState } from "react"
+import { useNavigate, useSearchParams } from "react-router"
 
-import { createShape, getJSON, listShapes } from "@/lib/api"
+import { FirstSession } from "@/components/shape-entry/FirstSession"
+import { RecentSessions } from "@/components/shape-entry/RecentSessions"
+import {
+  noFilter,
+  SessionsBoard,
+  type ListFilter,
+} from "@/components/shape-entry/SessionsBoard"
+import {
+  issueOf,
+  StartForm,
+  type StartInput,
+} from "@/components/shape-entry/StartForm"
+import { useShapeSessions } from "@/components/shape-entry/useShapeSessions"
+import { Shell } from "@/components/shell/Shell"
 import { useBusyAction } from "@/hooks/use-busy-action"
+import { createShape, getJSON } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import { repoNames } from "@/lib/repos"
-import { Shell } from "@/components/shell/Shell"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import type { ShapeSession } from "@/lib/types"
-import { PromptHeading } from "@/components/shell/PromptHeading"
+import { noteText } from "@/components/shaping/styles"
 
-/** The shaping sessions of a folder and the form that starts a new one. */
+/**
+ * Shape a story, entry side: the start panel with the latest sessions (SH1), the first
+ * session of a folder (SH9), and every session with search and filters (SH12). The folder
+ * is `?workspace=`, "." (where Span runs) when absent; `?view=sessions` opens the full list.
+ */
 export function Shaping() {
   const navigate = useNavigate()
-  const [workspace, setWorkspace] = useState(".")
-  const [sessions, setSessions] = useState<ShapeSession[]>([])
+  const [params] = useSearchParams()
+  const workspace = params.get("workspace") ?? "."
+  const listing = params.get("view") === "sessions"
+  const [filter, setFilter] = useState<ListFilter>(noFilter)
   const [repos, setRepos] = useState<string[]>([])
-  const [repo, setRepo] = useState("")
-  const [idea, setIdea] = useState("")
+  const [firstIdea, setFirstIdea] = useState("")
   const [note, setNote] = useState("")
+  const sessions = useShapeSessions(workspace, filter)
   // A started session leaves this page, so busy stays on once it works.
   const { busy, run: begin } = useBusyAction({
     keepBusyOnSuccess: true,
@@ -33,15 +47,15 @@ export function Shaping() {
 
   useEffect(() => {
     let live = true
-    void listShapes(workspace)
-      .then((rows) => {
+    void getJSON(`/repos?path=${encodeURIComponent(workspace)}`)
+      .then((body) => {
         if (live) {
-          setSessions(rows)
+          setRepos(repoNames(body))
         }
       })
-      .catch((err: unknown) => {
+      .catch(() => {
         if (live) {
-          setNote(reasonText(err, "the sessions could not be read"))
+          setRepos([])
         }
       })
     return () => {
@@ -49,144 +63,91 @@ export function Shaping() {
     }
   }, [workspace])
 
-  async function findRepos() {
-    setNote("")
-    try {
-      setRepos(
-        repoNames(await getJSON(`/repos?path=${encodeURIComponent(workspace)}`))
-      )
-    } catch (err: unknown) {
-      setNote(reasonText(err, "the folder could not be read"))
-    }
-  }
-
-  function start(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (busy || idea.trim() === "") {
-      return
-    }
+  function start(input: StartInput) {
     void begin(async () => {
-      const text = idea.trim()
-      const created = await createShape(
-        repo === ""
-          ? { workspace, idea: text }
-          : { workspace, repo, idea: text }
-      )
+      const issue = issueOf(input.idea)
+      const created = await createShape({
+        workspace,
+        ...(input.repo === "" ? {} : { repo: input.repo }),
+        ...(issue === "" ? { idea: input.idea } : { issue, idea: "" }),
+        ...(input.agent === "" ? {} : { agent: input.agent }),
+        ...(input.model === "" ? {} : { model: input.model }),
+      })
       void navigate(
         `/shaping/${created.id}?workspace=${encodeURIComponent(workspace)}`
       )
     }, "the session did not start")
   }
 
+  const here = `/shaping?workspace=${encodeURIComponent(workspace)}`
+  const now = new Date()
+  const empty = sessions.loaded && sessions.all.length === 0
+  const shownNote = note !== "" ? note : sessions.note
+
+  let body
+  if (listing && !empty) {
+    body = (
+      <SessionsBoard
+        all={sessions.all}
+        rows={sessions.rows}
+        filter={filter}
+        workspace={workspace}
+        now={now}
+        onFilter={setFilter}
+        onNew={() => void navigate(here)}
+        onChanged={sessions.reload}
+      />
+    )
+  } else {
+    body = (
+      <>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl leading-8 font-semibold tracking-tight">
+            Shape a story
+          </h1>
+          <p className={noteText}>
+            {empty
+              ? "No sessions yet"
+              : "Bring a rough idea. End with a story you can run or put in Jira."}
+          </p>
+        </div>
+        {empty ? (
+          <FirstSession
+            idea={firstIdea}
+            busy={busy}
+            note={shownNote}
+            onIdea={setFirstIdea}
+            onStart={() =>
+              start({ idea: firstIdea.trim(), repo: "", agent: "", model: "" })
+            }
+          />
+        ) : (
+          <>
+            <StartForm
+              workspace={workspace}
+              repos={repos}
+              busy={busy}
+              note={shownNote}
+              onStart={start}
+            />
+            {sessions.all.length > 0 ? (
+              <RecentSessions
+                sessions={sessions.all}
+                total={sessions.all.length}
+                workspace={workspace}
+                now={now}
+                allHref={`${here}&view=sessions`}
+              />
+            ) : null}
+          </>
+        )}
+      </>
+    )
+  }
+
   return (
     <Shell path="~/span/shaping" status="shaping">
-      <header>
-        <PromptHeading as="h1">shape a story</PromptHeading>
-        <p className="text-pretty text-muted-foreground">
-          Start from an idea. Span asks what it needs to know, then seals one
-          story you can create in Jira and run.
-        </p>
-        <p className="mt-1 text-sm">
-          <Link
-            className="text-primary underline-offset-4 hover:underline"
-            to="/"
-          >
-            Desk
-          </Link>
-        </p>
-      </header>
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => void start(event)}
-      >
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="shape-workspace">Folder</Label>
-          <Input
-            id="shape-workspace"
-            value={workspace}
-            onChange={(event) => setWorkspace(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => void findRepos()}
-          >
-            Find repos
-          </Button>
-          {repos.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="shape-repo">Repository</Label>
-              <select
-                id="shape-repo"
-                className="h-8 border border-border bg-background px-2 text-sm"
-                value={repo}
-                onChange={(event) => setRepo(event.target.value)}
-              >
-                <option value="">Whole folder</option>
-                {repos.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="shape-idea">Idea</Label>
-          <Textarea
-            id="shape-idea"
-            rows={5}
-            value={idea}
-            onChange={(event) => setIdea(event.target.value)}
-          />
-        </div>
-        <Button
-          type="submit"
-          className="self-start"
-          disabled={busy || idea.trim() === ""}
-        >
-          {busy ? "Thinking…" : "Start shaping"}
-        </Button>
-        {busy ? (
-          <p className="text-sm text-pretty text-muted-foreground">
-            The agent is reading your idea and the repository. This can take a
-            minute.
-          </p>
-        ) : null}
-        {note !== "" ? (
-          <p role="alert" className="text-sm text-pretty text-destructive">
-            {note}
-          </p>
-        ) : null}
-      </form>
-      <section>
-        <PromptHeading>sessions</PromptHeading>
-        {sessions.length === 0 ? (
-          <p className="mt-2 text-pretty text-muted-foreground">
-            No sessions in this folder yet.
-          </p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-1">
-            {sessions.map((item) => (
-              <li key={item.id}>
-                <Link
-                  className="text-primary underline-offset-4 hover:underline"
-                  to={`/shaping/${item.id}?workspace=${encodeURIComponent(workspace)}`}
-                >
-                  {item.idea}
-                </Link>
-                <span className="text-muted-foreground">
-                  {"  "}
-                  {item.status}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {body}
     </Shell>
   )
 }

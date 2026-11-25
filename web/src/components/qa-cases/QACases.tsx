@@ -23,7 +23,11 @@ export function QACases({
   exitCode: number
 }) {
   if (skipped) {
-    return <p className="text-pretty text-muted-foreground">This story has no acceptance lines, so the gate was skipped.</p>
+    return (
+      <p className="text-pretty text-muted-foreground">
+        This story has no acceptance lines, so the gate was skipped.
+      </p>
+    )
   }
   return (
     <div className="flex flex-col gap-3">
@@ -42,7 +46,9 @@ export function QACases({
           <li key={line.id} className="border-b border-border py-3">
             <div className="flex flex-wrap items-baseline gap-x-3">
               <span className="tabular-nums">{line.id}</span>
-              <span className={tone(line.result)}>{line.result === "" ? "unverified" : line.result}</span>
+              <span className={tone(line.result)}>
+                {line.result === "" ? "unverified" : line.result}
+              </span>
             </div>
             <p className="mt-2 text-pretty">{line.text}</p>
             {line.result !== "unverified" && line.file !== "" ? (
