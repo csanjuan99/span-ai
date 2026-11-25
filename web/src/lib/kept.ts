@@ -6,6 +6,8 @@ export interface Kept {
   sealed: number
   branch: string
   head: string
+  /** Commits the branch added to its base, as the server counted them; 0 when it did not. */
+  commits: number
   files: { files: number; plus: number; minus: number } | null
 }
 
@@ -34,13 +36,13 @@ function changed(stat: string): Kept["files"] {
 
 /**
  * The work that stays whatever the person does next, from data the run already holds. It
- * counts stages, not commits: the run does not record a commit count, so none is invented.
+ * counts stages, and commits only when the server counted them (`git rev-list base..head`).
  * Null before the first stage is sealed, when nothing is kept yet.
  */
-export function keptWork(input: { statements: Statement[]; branch: string; head: string; stat: string }): Kept | null {
+export function keptWork(input: { statements: Statement[]; branch: string; head: string; stat: string; commits?: number }): Kept | null {
   const sealed = new Set(input.statements.filter((item) => item.verdict === "advance").map((item) => item.stage))
   if (sealed.size === 0) {
     return null
   }
-  return { sealed: sealed.size, branch: input.branch, head: input.head.slice(0, 7), files: changed(input.stat) }
+  return { sealed: sealed.size, branch: input.branch, head: input.head.slice(0, 7), commits: input.commits ?? 0, files: changed(input.stat) }
 }

@@ -32,7 +32,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T9 | S8 | inline | Relative times beside held and waiting | done, see git log |
 | T10 | S8 | inline | Transcript and command log as closed code-view entries (no dialog primitive exists, so they open in place) | done, see git log |
 | T11 | S8 | inline | Required marker and progress on open questions (the engine refuses an empty answer) | done, see git log |
-| T12 | S8 | deferred | Backend: commit count | |
+| T12 | S8 | inline | Backend: commit count on the implementation view (`git rev-list --count base..head`) | done, see git log |
 | T13 | S8 | inline | No backend needed: the hold reason already names the holder (`pid N run <id>`), so the page links to it | done, see git log |
 | T14 | S8 | deferred | Backend: note and resume in one call | |
 | T6 | S7 | inline | Mobile layout, in the order the design draws it | done, see git log |

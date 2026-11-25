@@ -280,6 +280,8 @@ export interface ImplementationView {
   stat: string
   patch: string
   truncated: boolean
+  /** Commits the branch added to its base; 0 when the server did not count. */
+  commits: number
 }
 
 /** One socket frame. The span field replaces the page on reconnect. */

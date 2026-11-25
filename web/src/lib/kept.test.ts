@@ -27,7 +27,7 @@ describe("keptWork", () => {
 
   it("names the branch and a short head, and leaves out what it does not know", () => {
     const result = keptWork({ statements: [sealed("intake")], branch: "span/x", head: "abcdef1234567", stat: "" })
-    expect(result).toEqual({ sealed: 1, branch: "span/x", head: "abcdef1", files: null })
+    expect(result).toEqual({ sealed: 1, branch: "span/x", head: "abcdef1", commits: 0, files: null })
     expect(keptWork({ statements: [sealed("intake")], branch: "", head: "", stat: "" })?.branch).toBe("")
   })
 
@@ -52,5 +52,11 @@ describe("keptWork", () => {
       plus: 2,
       minus: 1,
     })
+  })
+
+  it("carries the commit count the server read, and none when it did not", () => {
+    const base = { statements: [sealed("intake")], branch: "span/x", head: "abcdef0123", stat: "" }
+    expect(keptWork({ ...base, commits: 3 })?.commits).toBe(3)
+    expect(keptWork(base)?.commits).toBe(0)
   })
 })

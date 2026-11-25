@@ -262,6 +262,7 @@ export function SpanPage() {
     branch: cursor?.branch ?? "",
     head: cursor?.gitSHA ?? "",
     stat: state.implementation?.stat ?? "",
+    commits: state.implementation?.commits ?? 0,
   })
   // The engine refuses to restart a stage while the checkout is in the middle of a merge.
   const restartBlocked =

@@ -13,7 +13,8 @@ export function SafeAndKept({ kept, className }: { kept: Kept; className?: strin
   if (kept.branch !== "") {
     rows.push(
       <span className="min-w-0 break-words">
-        branch <span className="font-mono text-xs">{kept.branch}</span>
+        {kept.commits > 0 ? `${kept.commits} ${kept.commits === 1 ? "commit" : "commits"} on` : "branch"}{" "}
+        <span className="font-mono text-xs">{kept.branch}</span>
         {kept.head !== "" ? <span className="font-mono text-xs text-muted-foreground"> at {kept.head}</span> : null}
       </span>,
     )

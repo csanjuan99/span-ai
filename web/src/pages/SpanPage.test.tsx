@@ -182,7 +182,7 @@ describe("the proof at the top of the page", () => {
   const patch = "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
 
   it("shows the proof once the diff is known", () => {
-    state = { ...held({ stage: "prove" }), implementation: { stat: " pay.go | 1 +\n", patch, truncated: false } }
+    state = { ...held({ stage: "prove" }), implementation: { stat: " pay.go | 1 +\n", patch, truncated: false, commits: 0 } }
     page()
     const proof = screen.getByRole("region", { name: "Proof of work" })
     expect(proof.textContent).toContain("1 file")

@@ -391,6 +391,7 @@ export function implementationView(value: unknown): ImplementationView {
     stat: text(value.stat),
     patch: text(value.patch),
     truncated: flag(value.truncated),
+    commits: count(value.commits),
   }
 }
 
