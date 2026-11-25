@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"span/internal/agent"
@@ -237,6 +238,8 @@ type Diff struct {
 	Stat      string `json:"stat"`
 	Patch     string `json:"patch"`
 	Truncated bool   `json:"truncated"`
+	// Commits is how many commits head has that base does not.
+	Commits int `json:"commits"`
 }
 
 // Diff reads git diff base...head without a shell.
@@ -257,7 +260,15 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 	if err != nil {
 		return Diff{}, err
 	}
-	return Diff{Stat: stat, Patch: patch, Truncated: truncated}, nil
+	counted, err := g.output(ctx, "rev-list", "--count", base+".."+head, "--")
+	if err != nil {
+		return Diff{}, err
+	}
+	commits, err := strconv.Atoi(strings.TrimSpace(counted))
+	if err != nil {
+		return Diff{}, fmt.Errorf("count commits %q..%q: %w", base, head, err)
+	}
+	return Diff{Stat: stat, Patch: patch, Truncated: truncated, Commits: commits}, nil
 }
 
 // ErrBroadChange means the branch deleted, renamed, copied or retyped a path. What used to
