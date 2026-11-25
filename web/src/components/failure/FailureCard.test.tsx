@@ -110,7 +110,7 @@ describe("FailureCard evidence", () => {
   })
 
   it("offers no full log when the command kept none", () => {
-    const { logPath: _omit, ...bare } = long.command
+    const bare = { ...long.command, logPath: undefined }
     render(<FailureCard id="span-1" failure={{ ...long, command: bare }} />)
     expect(screen.queryByRole("button", { name: "Open full log" })).toBeNull()
   })

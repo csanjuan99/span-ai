@@ -33,7 +33,10 @@ func TestAnotherProcessDrivingTheRunRefusesAResume(t *testing.T) {
 	if !errors.As(err, &busy) || busy.Scope != runlock.Run {
 		t.Fatalf("err = %v, want a run BusyError", err)
 	}
-	after, _ := readCursorFile(filepath.Join(opt.Root, id))
+	after, err := readCursorFile(filepath.Join(opt.Root, id))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if after.Hold != before.Hold || after.Stage != before.Stage || after.Reason != before.Reason {
 		t.Fatalf("a refused resume rewrote the cursor of a run someone else drives: %+v -> %+v", before, after)
 	}
@@ -64,7 +67,10 @@ func TestASecondRunInTheSameCheckoutHoldsInsteadOfEditingIt(t *testing.T) {
 	if len(agents.prompts) != 0 {
 		t.Fatal("the run edited a checkout another run owns")
 	}
-	cur, _ := readCursorFile(filepath.Join(opt.Root, id))
+	cur, err := readCursorFile(filepath.Join(opt.Root, id))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !cur.Hold || cur.Stage != intake {
 		t.Fatalf("cursor %+v", cur)
 	}
@@ -260,7 +266,7 @@ func TestResumingARunWhoseFolderIsGoneDoesNotRecreateIt(t *testing.T) {
 	}
 	gone := filepath.Join(t.TempDir(), "deleted")
 	opt.Workspace = gone
-	r, release, err := acquire(opt, id)
+	_, r, release, err := acquire(context.Background(), opt, id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +292,11 @@ func TestClaimingAReadOnlyCheckoutDoesNotBlockTheWork(t *testing.T) {
 	if err := os.Chmod(ws, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(ws, 0o755) })
+	t.Cleanup(func() {
+		if err := os.Chmod(ws, 0o755); err != nil {
+			t.Error(err)
+		}
+	})
 	lock, err := ClaimWorkspace(ws, "starting a run")
 	if err != nil {
 		t.Fatalf("a read-only checkout refused the launch: %v", err)

@@ -141,6 +141,14 @@ export const shortcuts: { group: string; items: Shortcut[] }[] = [
       { label: "Close a panel", keys: ["Esc"] },
     ],
   },
+  {
+    group: "On Desk",
+    items: [
+      { label: "Next row", keys: ["J"] },
+      { label: "Previous row", keys: ["K"] },
+      { label: "Open row", keys: ["↵"] },
+    ],
+  },
 ]
 
 /** Whether a key press happens while the person types, when a shortcut must stay out of the way. */

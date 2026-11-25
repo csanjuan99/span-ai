@@ -72,6 +72,8 @@ func main() {
 		os.Exit(logCmd(os.Args[2:]))
 	case "pause":
 		os.Exit(pauseCmd(os.Args[2:]))
+	case "stop":
+		os.Exit(stopCmd(os.Args[2:]))
 	case "rewind":
 		os.Exit(rewindCmd(os.Args[2:]))
 	case "note":
@@ -702,7 +704,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		} else {
 			fmt.Fprintf(out, "configured %t\nproject %s\nsite %s\nemail %s\nauth %s\n", view.Configured, project, view.BaseURL, view.Email, view.Auth)
 		}
-		if err != nil {
+		if err != nil && !asJSON {
 			fmt.Fprintln(errw, err)
 			return 1
 		}
@@ -963,7 +965,7 @@ const usageText = `./span repos [--path .]
 ./span decision show|choose <run> ...
 ./span implementation <run> --files|--diff <path>|--viewed <path>|--commits|--commit <sha>|--reasoning|--check|--audit [--json]   (./span implementation for each flag)
 ./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
-./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
+./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
 ./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
 ./span start precheck|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--json]
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]

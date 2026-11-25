@@ -854,12 +854,22 @@ func AcceptQA(root, id, reason string) (QAAcceptance, error) {
 	return accepted, nil
 }
 
+// writeQAReadErr answers a failed QA reading: a run that is not on this desk is a JSON 404 like
+// every other QA route, anything else keeps the status its own code carries.
+func writeQAReadErr(w http.ResponseWriter, id string, err error) {
+	if errors.Is(err, os.ErrNotExist) {
+		writeErr(w, &requestError{"not_found", "run " + id + " is not on this desk"})
+		return
+	}
+	writeErr(w, err)
+}
+
 // qaRoutes mounts the QA readings and actions.
 func qaRoutes(mux *http.ServeMux, root string) {
 	mux.HandleFunc("GET /spans/{id}/qa", func(w http.ResponseWriter, r *http.Request) {
 		view, err := ReadQA(root, r.PathValue("id"))
 		if err != nil {
-			http.NotFound(w, r)
+			writeQAReadErr(w, r.PathValue("id"), err)
 			return
 		}
 		writeJSON(w, http.StatusOK, view)
@@ -870,7 +880,7 @@ func qaRoutes(mux *http.ServeMux, root string) {
 			Status: query.Get("status"), Group: query.Get("group"), Query: query.Get("q"),
 		})
 		if err != nil {
-			http.NotFound(w, r)
+			writeQAReadErr(w, r.PathValue("id"), err)
 			return
 		}
 		writeJSON(w, http.StatusOK, body)
@@ -878,7 +888,7 @@ func qaRoutes(mux *http.ServeMux, root string) {
 	mux.HandleFunc("GET /spans/{id}/qa/cases/{case}", func(w http.ResponseWriter, r *http.Request) {
 		body, err := ReadQACase(root, r.PathValue("id"), r.PathValue("case"))
 		if err != nil {
-			writeErr(w, err)
+			writeQAReadErr(w, r.PathValue("id"), err)
 			return
 		}
 		writeJSON(w, http.StatusOK, body)

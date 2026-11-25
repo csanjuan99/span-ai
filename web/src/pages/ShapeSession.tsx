@@ -35,6 +35,7 @@ import {
 } from "@/lib/shape-session"
 import type { ShapeSession as Session } from "@/lib/types"
 import { errorText } from "@/components/shaping/styles"
+import { loadProgress, saveProgress } from "@/lib/shape-draft"
 
 const readFailure = "the session could not be read"
 
@@ -60,13 +61,19 @@ export function ShapeSession() {
   const [session, setSession] = useState<Session | null>(null)
   const [note, setNote] = useState("")
   // What the person did on this page: the server only knows the session's status.
-  const [seen, setSeen] = useState<SessionProgress & { id: string }>({ id })
+  // The map and context steps are remembered per session, so a reload lands where the person was.
+  const [seen, setSeen] = useState<SessionProgress & { id: string }>(() => ({
+    ...loadProgress(id),
+    id,
+  }))
   const [revisit, setRevisit] = useState(false)
   const [running, setRunning] = useState(false)
 
-  const progress: SessionProgress = seen.id === id ? seen : {}
+  const progress: SessionProgress = seen.id === id ? seen : loadProgress(id)
   function advance(change: SessionProgress) {
-    setSeen({ ...progress, ...change, id })
+    const next = { ...progress, ...change, id }
+    saveProgress(id, next)
+    setSeen(next)
   }
 
   useEffect(() => {
@@ -186,6 +193,7 @@ export function ShapeSession() {
             busy={busy}
             onSubmit={(answers, assume) => {
               turn(() => answerShape(current.id, workspace, answers, assume))
+              saveProgress(id, {})
               setSeen({ id })
             }}
           />

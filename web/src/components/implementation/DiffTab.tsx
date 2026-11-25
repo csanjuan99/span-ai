@@ -1,6 +1,6 @@
 "use client"
 
-import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
+import { ChevronLeftIcon, ChevronRightIcon, CopyIcon, Eye } from "lucide-react"
 import { useState } from "react"
 
 import { cn } from "@/lib/utils"
@@ -15,7 +15,7 @@ import { readFileDiff, type DecisionEntry } from "@/lib/implementation-api"
 import { reasonText } from "@/lib/guards"
 import { LineCounts } from "@/components/files-changed/LineCounts"
 import { ActionButton } from "@/components/implementation/ActionButton"
-import { SideNote } from "@/components/implementation/SideNote"
+import { Consequences } from "@/components/status-block/Consequences"
 
 /** How many lines of a very large file the reader sees when they ask for a part of it. */
 const firstLines = 300
@@ -218,26 +218,32 @@ export function DiffTab({
         />
       </section>
       <aside className="flex min-w-0 flex-col gap-4">
-        <SideNote
-          title="When you mark it viewed"
-          rows={[
-            {
-              term: "Changes",
-              body: `Nothing in the code. ${name} is marked viewed on this run.`,
-            },
-            {
-              term: "Kept",
-              body: "The diff, its decisions and your place in the list.",
-            },
-            {
-              term: "Next",
-              body:
-                next === undefined
-                  ? "That was the last file."
-                  : `Opens ${splitPath(next.path).name}, file ${index + 2} of ${files.length}.`,
-            },
-          ]}
-        />
+        <section
+          aria-label="When you mark it viewed"
+          className="rounded-[14px] border border-border bg-card p-4 shadow-sm"
+        >
+          <Consequences
+            title="When you mark it viewed"
+            icon={Eye}
+            rows={[
+              {
+                label: "Changes",
+                body: `Nothing in the code. ${name} is marked viewed on this run.`,
+              },
+              {
+                label: "Kept",
+                body: "The diff, its decisions and your place in the list.",
+              },
+              {
+                label: "Next",
+                body:
+                  next === undefined
+                    ? "That was the last file."
+                    : `Opens ${splitPath(next.path).name}, file ${index + 2} of ${files.length}.`,
+              },
+            ]}
+          />
+        </section>
         <section
           aria-label="Files"
           className="overflow-hidden rounded-[14px] border border-border bg-card shadow-sm"

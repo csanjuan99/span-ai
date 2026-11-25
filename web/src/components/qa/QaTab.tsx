@@ -9,6 +9,8 @@ import { PillToggle } from "@/components/qa/PillToggle"
 import { Transcript } from "@/components/qa/Transcript"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { designField } from "@/lib/field-class"
+import { cn } from "@/lib/utils"
 import { useRunResource } from "@/hooks/use-run-resource"
 import { acceptQa, readQa } from "@/lib/qa"
 import { reasonText } from "@/lib/guards"
@@ -106,6 +108,7 @@ export function QaTab({ id }: { id: string }) {
               </label>
               <Input
                 id="qa-accept"
+                className={cn("h-auto", designField)}
                 placeholder="Why is the risk acceptable?"
                 value={reason}
                 onChange={(event) => setReason(event.target.value)}

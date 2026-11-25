@@ -10,6 +10,9 @@ export interface RunActions {
   transcript?: () => void
   diff?: () => void
   copySummary?: () => void
+  ledger?: () => void
+  implementation?: () => void
+  qa?: () => void
 }
 
 const table: { name: keyof RunActions; command: Omit<RunCommand, "run"> }[] = [
@@ -21,6 +24,9 @@ const table: { name: keyof RunActions; command: Omit<RunCommand, "run"> }[] = [
   { name: "transcript", command: { id: "transcript", title: "Open the agent transcript", hint: "Raw output of the run", key: "t" } },
   { name: "diff", command: { id: "diff", title: "Open the diff", hint: "Implementation tab", key: "d" } },
   { name: "copySummary", command: { id: "copy-summary", title: "Copy the summary", hint: "Markdown, to paste where you share it", key: "c" } },
+  { name: "ledger", command: { id: "tab-ledger", title: "Show the ledger", hint: "Stage by stage, what happened", key: "1" } },
+  { name: "implementation", command: { id: "tab-implementation", title: "Show the implementation", hint: "Diff, commits, reasoning and audit", key: "2" } },
+  { name: "qa", command: { id: "tab-qa", title: "Show QA", hint: "The cases and how they ran", key: "3" } },
 ]
 
 /** The palette context of a run: its name and one command per action it can take, or null when it has none. */

@@ -32,7 +32,7 @@ export function ModelBrowser({
   }
   return (
     <details className="group w-full max-w-xl">
-      <summary className="cursor-pointer text-sm text-primary underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+      <summary className="cursor-pointer text-sm max-md:flex max-md:min-h-11 max-md:items-center text-primary underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
         Browse {models.length} {models.length === 1 ? "model" : "models"}
       </summary>
       <div className="mt-2 flex flex-col gap-2 border border-border p-2">
@@ -57,7 +57,7 @@ export function ModelBrowser({
                   type="button"
                   aria-pressed={model.id === selected}
                   className={cn(
-                    "flex w-full flex-wrap items-baseline gap-x-3 px-2 py-1 text-left text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+                    "flex w-full flex-wrap items-baseline gap-x-3 px-2 py-1 text-left max-md:min-h-11 max-md:items-center text-sm hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
                     model.id === selected ? "text-primary" : "",
                   )}
                   onClick={() => onPick(model.id)}

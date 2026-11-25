@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -14,6 +15,7 @@ import type { Cursor, Snapshot, Statement } from "@/lib/types"
 
 const approveStage = vi.fn()
 const resumeRun = vi.fn()
+const pauseRun = vi.fn()
 const saveInstruction = vi.fn()
 let state: SpanState
 
@@ -25,6 +27,7 @@ vi.mock("@/lib/api", async (original) => {
     approveStage: (id: string, stage: string, environment: string) =>
       approveStage(id, stage, environment),
     resumeRun: (id: string) => resumeRun(id),
+    pauseRun: (id: string) => pauseRun(id),
     saveInstruction: (id: string, stage: string, body: string) =>
       saveInstruction(id, stage, body),
   }
@@ -98,6 +101,7 @@ function page() {
 beforeEach(() => {
   approveStage.mockReset()
   resumeRun.mockReset()
+  pauseRun.mockReset()
   saveInstruction.mockReset()
   approveStage.mockResolvedValue(undefined)
 })
@@ -346,6 +350,57 @@ describe("the card while the run goes on by itself", () => {
         ?.textContent
     ).toBe("Pause after this stage")
     expect(screen.getByRole("button", { name: "Stop now" })).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Ends the run. Sealed stages and the branch stay as they are."
+      )
+    ).toBeTruthy()
+  })
+
+  it("shows a requested pause as pending, with the button spent", () => {
+    state = working()
+    if (state.span !== null) {
+      state.span.pauseRequested = true
+    }
+    page()
+    const card = screen.getByRole("region", { name: "Running" })
+    const spent = within(card).getByRole("button", { name: "Pause requested" })
+    expect(spent.hasAttribute("disabled")).toBe(true)
+    expect(
+      within(card).queryByRole("button", { name: "Pause after this stage" })
+    ).toBeNull()
+    expect(card.textContent).toContain("The run holds after build seals")
+  })
+
+  it("marks the pause pending as soon as the server accepts it", async () => {
+    pauseRun.mockResolvedValue({
+      paused: true,
+      reason: "the run holds before the next stage",
+    })
+    state = working()
+    page()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause after this stage" })
+    )
+    expect(
+      await screen.findByRole("button", { name: "Pause requested" })
+    ).toBeTruthy()
+  })
+
+  it("keeps the pause button when nothing was running to pause", async () => {
+    pauseRun.mockResolvedValue({
+      paused: false,
+      reason: "this span is not running",
+    })
+    state = working()
+    page()
+    fireEvent.click(
+      screen.getByRole("button", { name: "Pause after this stage" })
+    )
+    await waitFor(() => expect(pauseRun).toHaveBeenCalled())
+    expect(
+      screen.queryByRole("button", { name: "Pause requested" })
+    ).toBeNull()
   })
 
   it("is not drawn when the run waits on a person", () => {
@@ -831,7 +886,9 @@ describe("the run's actions in the command palette", () => {
       },
     }
     page()
-    expect(screen.getByRole("heading", { name: "claude-code is out of quota" })).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "claude-code is out of quota" })
+    ).toBeTruthy()
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Relaunch" })).toBeTruthy()
     expect(
@@ -842,13 +899,35 @@ describe("the run's actions in the command palette", () => {
     expect(
       screen.getByText("Build runs with the agent you choose in Run controls.")
     ).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: /Restart from a stage/ }).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByRole("button", { name: /Restart from a stage/ }).length
+    ).toBeGreaterThan(0)
   })
 
   it("offers only the reading actions once the run is done", () => {
     state = held({ done: true, hold: false, reason: "" }, [advance("build")])
     page()
-    expect(ids()).toEqual(["transcript", "diff", "copy-summary"])
+    expect(ids()).toEqual([
+      "transcript",
+      "diff",
+      "copy-summary",
+      "tab-ledger",
+      "tab-implementation",
+      "tab-qa",
+    ])
+  })
+
+  it("switches the tab from the palette keys 1, 2 and 3", () => {
+    state = held({ done: true, hold: false, reason: "" }, [advance("build")])
+    page()
+    act(() => {
+      getRunContext()
+        ?.commands.find((command) => command.id === "tab-qa")
+        ?.run()
+    })
+    expect(
+      screen.getByRole("tab", { name: "QA" }).getAttribute("aria-selected")
+    ).toBe("true")
   })
 
   it("copies the summary as markdown", async () => {

@@ -30,7 +30,7 @@ export function TabStrip<T extends string>({
           aria-selected={option.value === value}
           onClick={() => onChange(option.value)}
           className={cn(
-            "h-11 flex-1 rounded-[10px] px-3 text-[13px] font-medium text-muted-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:h-9",
+            "h-11 flex-1 rounded-[10px] px-3 text-sm font-medium text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:h-9",
             option.value === value &&
               "bg-card font-semibold text-primary shadow-sm"
           )}

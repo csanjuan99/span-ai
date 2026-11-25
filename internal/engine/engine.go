@@ -327,6 +327,9 @@ type Snapshot struct {
 	Title string `json:"title,omitempty"`
 	// Repo is the folder the run writes in.
 	Repo string `json:"repo,omitempty"`
+	// PauseRequested is true while a pause waits for the next stage boundary: the run still
+	// goes on, and holds there. It is false once the run holds, stops or finishes.
+	PauseRequested bool `json:"pauseRequested,omitempty"`
 }
 
 // Start creates a span and walks until it holds, stops, or finishes.
@@ -379,7 +382,7 @@ func Open(opt Options) (string, error) {
 
 // Resume continues a span from its cursor. A stopped or finished span stays there.
 func Resume(ctx context.Context, opt Options, id string) (Result, error) {
-	r, release, err := acquire(opt, id)
+	ctx, r, release, err := acquire(ctx, opt, id)
 	if err != nil {
 		return Result{}, err
 	}
@@ -428,7 +431,7 @@ func Waiting(cur Cursor) bool {
 
 // Continue records the answers and runs the waiting span again.
 func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Result, error) {
-	r, release, err := acquire(opt, id)
+	ctx, r, release, err := acquire(ctx, opt, id)
 	if err != nil {
 		return Result{}, err
 	}
@@ -457,7 +460,7 @@ func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Re
 
 // Reload replaces the brief with the story and runs the waiting span again.
 func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) {
-	r, release, err := acquire(opt, id)
+	ctx, r, release, err := acquire(ctx, opt, id)
 	if err != nil {
 		return Result{}, err
 	}
@@ -2463,7 +2466,7 @@ func (r *runner) decisionFor(stage string) string {
 // Decide answers the open decision of a run and continues where the answer says. An answer
 // that is not one of the options changes nothing.
 func Decide(ctx context.Context, opt Options, id string, answer decision.Answer) (Result, error) {
-	r, release, err := acquire(opt, id)
+	ctx, r, release, err := acquire(ctx, opt, id)
 	if err != nil {
 		return Result{}, err
 	}

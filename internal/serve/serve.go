@@ -289,11 +289,20 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		// A click here is always valid: the answer says whether there was anything to stop.
 		// A 4xx would read as "the button is broken" when the run simply is not in flight.
-		if hub == nil || !hub.Stop(id) {
-			writeJSON(w, http.StatusOK, map[string]any{"stopped": false, "reason": "nothing is running this span"})
+		if hub != nil && hub.Stop(id) {
+			writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stage in flight was cancelled; the run holds with the error"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stage in flight was cancelled; the run holds with the error"})
+		// Another process (`span resume`, `span run`) may drive the run: it reads the marker.
+		if _, driven := engine.RunBusy(root, id); driven {
+			if err := engine.RequestStop(root, id); err != nil {
+				writeErr(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stop was requested; the process driving this span cancels the stage in flight"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"stopped": false, "reason": "nothing is running this span"})
 	})
 	mux.HandleFunc("POST /spans/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")

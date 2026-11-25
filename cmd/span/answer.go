@@ -65,12 +65,19 @@ var continueRun = func(ctx context.Context, spans, id string, answer *decision.A
 	return engine.Resume(ctx, opt, id)
 }
 
+// What an answering verb did: it only recorded the answer, or recorded it and continued the run.
+const (
+	outcomeRecorded  = "recorded"
+	outcomeContinued = "continued"
+)
+
 // outcome is what an answering verb reports. Exit 0 means the answer was recorded and, unless
 // --no-resume, the run went on until it next stopped; the verdict says where it stopped.
 type outcome struct {
 	ID      string `json:"id"`
 	Action  string `json:"action"`
 	Stage   string `json:"stage"`
+	Outcome string `json:"outcome"`
 	Resumed bool   `json:"resumed"`
 	Verdict string `json:"verdict,omitempty"`
 	Reason  string `json:"reason,omitempty"`
@@ -84,7 +91,7 @@ func answered(out, errw io.Writer, v *verbFlags, id, action string, answer *deci
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	res := outcome{ID: id, Action: action, Stage: snap.Cursor.Stage}
+	res := outcome{ID: id, Action: action, Stage: snap.Cursor.Stage, Outcome: outcomeRecorded}
 	if !v.noResume {
 		ctx, stop := interruptContext()
 		defer stop()
@@ -94,6 +101,7 @@ func answered(out, errw io.Writer, v *verbFlags, id, action string, answer *deci
 			return 1
 		}
 		res.Resumed, res.Stage, res.Verdict, res.Reason = true, result.Stage, result.Verdict, result.Reason
+		res.Outcome = outcomeContinued
 	}
 	return reportOutcome(out, errw, v.asJSON, res)
 }

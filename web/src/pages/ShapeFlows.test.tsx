@@ -192,6 +192,31 @@ const history: HistoryView = {
 }
 
 describe("history", () => {
+  beforeEach(() => {
+    getShape.mockResolvedValue({
+      id: "a1",
+      ref: "SES-0137",
+      workspace: ".",
+      repo: "acme/billing-api",
+      idea: "Show tax per line",
+      status: "ready",
+      agent: "claude-code",
+      model: "",
+      startedAt: "2026-11-23T09:18:00Z",
+    })
+  })
+
+  it("carries the session header with its actions and meta line", async () => {
+    flows.getHistory.mockResolvedValue(history)
+    at("/shaping/a1/history", "/shaping/:id/history", <ShapeHistory />)
+    expect(await screen.findByText("Show tax per line")).toBeTruthy()
+    for (const label of ["History", "Compare", "Export"]) {
+      expect(screen.getByRole("link", { name: label })).toBeTruthy()
+    }
+    expect(screen.getByText("acme/billing-api")).toBeTruthy()
+    expect(screen.getByText("claude-code · Auto")).toBeTruthy()
+  })
+
   it("shows what an undo changes and undoes it with the steps that depend on it", async () => {
     flows.getHistory.mockResolvedValue(history)
     const plan: UndoPlan = {

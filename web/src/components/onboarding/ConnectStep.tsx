@@ -48,6 +48,7 @@ export function ConnectStep({
   const [jiraSkipped, setJiraSkipped] = useState(false)
   // Whether the person arrived with a folder from an earlier visit.
   const [returning] = useState(folder.trim() !== "" && savedAt > 0)
+  const [now] = useState(() => Date.now())
   const probe = useFolderProbe(folder, again)
   const path = folder.trim()
 
@@ -106,7 +107,7 @@ export function ConnectStep({
             in.
           </span>
           <span className="ml-auto text-xs text-muted-foreground">
-            {savedAgo(savedAt, Date.now())}
+            {savedAgo(savedAt, now)}
           </span>
         </div>
       ) : null}

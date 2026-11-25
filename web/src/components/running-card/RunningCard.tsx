@@ -1,19 +1,24 @@
 "use client"
 
-import { Loader, PauseIcon, Route } from "lucide-react"
+import { CheckIcon, Loader, PauseIcon, Route } from "lucide-react"
 
 import { Consequences } from "@/components/status-block/Consequences"
 import { Lede } from "@/components/status-block/Lede"
 import { StatusBlock } from "@/components/status-block/StatusBlock"
 import { Button } from "@/components/ui/button"
+import { quietButton, wideButton } from "@/lib/button-class"
 import type { Running } from "@/lib/running"
+import { cn } from "@/lib/utils"
 
 /** Shown while the run goes on by itself: nothing is asked, and the one thing to do is pause. */
 export function RunningCard({
   running,
+  pausePending,
   onPause,
 }: {
   running: Running
+  /** A pause was asked for and waits for the stage boundary: the button is spent. */
+  pausePending: boolean
   onPause: () => void
 }) {
   return (
@@ -53,11 +58,16 @@ export function RunningCard({
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 w-full"
+                className={cn(wideButton, quietButton)}
+                disabled={pausePending}
                 onClick={onPause}
               >
-                <PauseIcon aria-hidden="true" />
-                Pause after this stage
+                {pausePending ? (
+                  <CheckIcon aria-hidden="true" />
+                ) : (
+                  <PauseIcon aria-hidden="true" />
+                )}
+                {pausePending ? "Pause requested" : "Pause after this stage"}
               </Button>
               <p className="text-xs text-pretty text-muted-foreground">
                 {running.pause}

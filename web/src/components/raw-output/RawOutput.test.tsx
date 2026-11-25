@@ -24,8 +24,8 @@ describe("RawOutput", () => {
         statements={statements}
       />
     )
-    expect(screen.getByText("2 lines")).toBeTruthy()
-    expect(screen.getByText("1 command")).toBeTruthy()
+    expect(screen.getByText("2 lines · opens in code view")).toBeTruthy()
+    expect(screen.getByText("1 command · opens in code view")).toBeTruthy()
     for (const entry of document.querySelectorAll("details")) {
       expect(entry.open).toBe(false)
     }

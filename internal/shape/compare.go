@@ -134,6 +134,8 @@ type cState struct {
 	// sameOf maps an item to the group number it belongs to, or -1.
 	sameOf map[int]int
 	groups [][]int
+	// questions groups the settled questions two sessions both answer with the same words.
+	questions [][]int
 }
 
 var stopwords = map[string]bool{
@@ -377,6 +379,11 @@ func compareState(workspace string, refs []string) (*cState, error) {
 	st.groups = clusters(n, func(i, j int) bool {
 		sc, ok := score(i, j)
 		return ok && st.items[i].kind == st.items[j].kind && st.items[i].kind != ItemQuestion && sc >= sameScore
+	})
+	st.questions = clusters(n, func(i, j int) bool {
+		sc, ok := score(i, j)
+		a, b := st.items[i], st.items[j]
+		return ok && a.kind == ItemQuestion && sc >= questionScore && normalized(a.value) == normalized(b.value)
 	})
 	inConflict := map[int]bool{}
 	conflictEdge := func(i, j int) bool {
@@ -885,6 +892,9 @@ func (st *cState) plan(into int, merging map[int]bool, winners map[int]int, targ
 		}
 	}
 	for _, ids := range st.groups {
+		settle(ids, func(int) bool { return true })
+	}
+	for _, ids := range st.questions {
 		settle(ids, func(int) bool { return true })
 	}
 	for ci, ids := range st.conflicts {

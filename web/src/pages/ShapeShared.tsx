@@ -48,7 +48,7 @@ export function ShapeShared() {
             <span className={monoCaption}>
               {story.ref} · {story.repo}
             </span>
-            <h1 className="text-2xl font-semibold tracking-tight text-balance">
+            <h1 className="text-2xl font-semibold tracking-[-0.01em] text-balance">
               {story.title}
             </h1>
           </header>

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { clockTime } from "@/lib/clock"
 import { type HistoryEvent } from "@/lib/shape-flows"
 import { monoCaption } from "@/components/shaping/styles"
-import { touchButtonXs } from "@/lib/button-class"
+import { touchButtonSm } from "@/lib/button-class"
 
 function who(actor: string): string {
   return actor === "you" ? "you" : actor
@@ -74,7 +74,7 @@ export function HistoryList({
                 type="button"
                 size="sm"
                 variant="outline"
-                className={touchButtonXs}
+                className={touchButtonSm}
                 aria-label={`Undo ${event.id}`}
                 onClick={() => onSelect(event.id)}
               >

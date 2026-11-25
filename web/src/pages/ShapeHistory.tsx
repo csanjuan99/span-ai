@@ -6,13 +6,15 @@ import { LockIcon } from "lucide-react"
 
 import { ApiCli, type ApiAction } from "@/components/implementation/ApiCli"
 import { FilterChips } from "@/components/list-controls/FilterChips"
-import { IdChip } from "@/components/list-controls/IdChip"
 import { Shell } from "@/components/shell/Shell"
+import { SessionHeader } from "@/components/shaping/SessionHeader"
 import { HistoryList } from "@/components/shaping/history/HistoryList"
 import { UndoPanel } from "@/components/shaping/history/UndoPanel"
-import { Panel, Pill, wideColumns } from "@/components/shaping/session-ui"
+import { Panel, wideColumns } from "@/components/shaping/session-ui"
 import { useNotedAction } from "@/components/shaping/use-noted-action"
+import { getShape } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
+import type { ShapeSession } from "@/lib/types"
 import {
   getHistory,
   getUndoPlan,
@@ -20,7 +22,7 @@ import {
   type HistoryView,
   type UndoPlan,
 } from "@/lib/shape-flows"
-import { emptyPanelText, errorText, wrapRow } from "@/components/shaping/styles"
+import { emptyPanelText, errorText } from "@/components/shaping/styles"
 
 const exits =
   "0 ok · 1 failed · 2 usage · 3 not found · 4 refused, such as a sealed session or a step others depend on · 5 agent failed"
@@ -57,7 +59,27 @@ export function ShapeHistory() {
   const [view, setView] = useState<HistoryView | null>(null)
   const [selected, setSelected] = useState("")
   const [plan, setPlan] = useState<UndoPlan | null>(null)
+  const [session, setSession] = useState<ShapeSession | null>(null)
   const { note, setNote, busy, run } = useNotedAction()
+
+  // The header is the session's own: the same chip, status, links and meta line as its page.
+  useEffect(() => {
+    let live = true
+    void getShape(id, workspace)
+      .then((loaded) => {
+        if (live) {
+          setSession(loaded)
+        }
+      })
+      .catch((err: unknown) => {
+        if (live) {
+          setNote(reasonText(err, "the session could not be read"))
+        }
+      })
+    return () => {
+      live = false
+    }
+  }, [id, workspace, setNote])
 
   // load is the effect's dependency and the refresh the actions below call: a stable identity
   // keeps the effect from re-running on every render.
@@ -113,43 +135,29 @@ export function ShapeHistory() {
 
   return (
     <Shell path={`~/span/shaping/${id}/history`} status="history">
-      <header className="flex flex-col gap-2">
-        <div className={wrapRow}>
-          <IdChip>{ref}</IdChip>
-          {view === null ? null : (
-            <Pill tone={view.sealed ? "pass" : "hold"}>
-              {view.sealed
-                ? "Sealed"
-                : view.status.charAt(0).toUpperCase() + view.status.slice(1)}
-            </Pill>
-          )}
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">
-          {view?.title ?? "History"}
-        </h1>
-        <nav
-          aria-label="Breadcrumb"
-          className="flex gap-2 text-[13px] text-muted-foreground"
+      {session === null ? null : <SessionHeader session={session} />}
+      <nav
+        aria-label="Breadcrumb"
+        className="flex gap-2 text-[13px] text-muted-foreground"
+      >
+        <Link
+          to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
+          className="hover:underline"
         >
-          <Link
-            to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
-            className="hover:underline"
-          >
-            Sessions
-          </Link>
-          <span aria-hidden="true">/</span>
-          <Link
-            to={`/shaping/${id}?workspace=${encodeURIComponent(workspace)}`}
-            className="hover:underline"
-          >
-            {ref}
-          </Link>
-          <span aria-hidden="true">/</span>
-          <b aria-current="page" className="font-medium text-foreground">
-            History
-          </b>
-        </nav>
-      </header>
+          Sessions
+        </Link>
+        <span aria-hidden="true">/</span>
+        <Link
+          to={`/shaping/${id}?workspace=${encodeURIComponent(workspace)}`}
+          className="hover:underline"
+        >
+          {ref}
+        </Link>
+        <span aria-hidden="true">/</span>
+        <b aria-current="page" className="font-medium text-foreground">
+          History
+        </b>
+      </nav>
       {view?.sealed === true ? (
         <p
           role="note"

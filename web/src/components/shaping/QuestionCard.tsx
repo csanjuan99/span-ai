@@ -14,10 +14,10 @@ import {
   smallTitleText,
 } from "@/components/shaping/styles"
 import { touchButton } from "@/lib/button-class"
+import type { Staged } from "@/lib/shape-draft"
 import { labelled } from "@/lib/shape-session"
 
-/** What the person decided for a question on this page, before it is sent. */
-export type Staged = { kind: "assume" } | { kind: "answer"; text: string }
+export type { Staged } from "@/lib/shape-draft"
 
 function Assumption({ label, text }: { label: string; text: string }) {
   return (

@@ -2,13 +2,15 @@
 
 import { useState, type FormEvent } from "react"
 
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Check } from "lucide-react"
 
 import { RadioCard } from "@/components/list-controls/RadioCard"
 import { Consequences } from "@/components/status-block/Consequences"
 import { whereKeptRows } from "@/components/status-block/whereKept"
 import { Button } from "@/components/ui/button"
 import { wideButton } from "@/lib/button-class"
+import { designField, quietDisabled } from "@/lib/field-class"
+import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { optionLetter } from "@/lib/option-letter"
@@ -147,9 +149,10 @@ export function Decision(props: {
         )}
         <Button
           type="submit"
-          className={wideButton}
+          className={cn(wideButton, quietDisabled)}
           disabled={busy || option === ""}
         >
+          <Check aria-hidden="true" />
           Choose and continue
         </Button>
         {props.note !== "" ? (
@@ -166,6 +169,7 @@ export function Decision(props: {
             id="decision-text"
             value={text}
             onChange={(event) => setText(event.target.value)}
+            className={designField}
             rows={3}
           />
         </div>

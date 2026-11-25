@@ -1185,7 +1185,8 @@ next resume runs that stage again from its start.
 `Stop now` and **Pause after this stage** are different on purpose: pause waits for a clean
 stage boundary and loses nothing; stop is immediate and assumes the stage will be repeated.
 `POST /spans/{id}/stop` backs the control and answers `nothing is running this span` when
-there is no flight.
+there is no flight. `./span stop <run>` does the same from a terminal, and from any machine
+that can reach the run's folder: see "Stop from the CLI" below.
 
 ### Resume
 
@@ -1525,6 +1526,7 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | Audit trail and its chain check (`1` when the chain is broken) | `GET /spans/<id>/events` | `./span runs events <run> [--json]` |
 | "Open full log" | `GET /spans/<id>/log?path=` | `./span log <run> <path> [--json]` |
 | Pause after the stage in flight | `POST /spans/<id>/pause` | `./span pause <run>` |
+| Stop now: cancel the stage in flight | `POST /spans/<id>/stop` | `./span stop <run> [--json]` |
 | Restart from a stage, with a note | `POST /spans/<id>/rewind` | `./span rewind <run> <stage> [--note "..."] [--no-resume]` |
 | Leave a note for a stage | `POST /spans/<id>/instructions/<stage>` | `./span note <run> <stage> --text "..." \| --file path` |
 | Agent for a stage (`any` clears it) | `POST /spans/<id>/agent` | `./span stage-agent <run> <stage> <agent\|any>` |
@@ -1535,14 +1537,19 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | Decision panel | `GET /spans/<id>`, `POST /spans/<id>/decide` | `./span decision show\|choose` |
 | Conflict panel | `GET /spans/<id>`, `POST /spans/<id>/conflict/*` | `./span conflict show\|choose\|hint\|abort` |
 
-What a verb reads is what the route answers, field for field: `--json` prints the route's body. `runs list --json` prints `{"spans": [...]}`. `decision show --json` is `cursor.decision` and `conflict show --options --json` is `cursor.conflict` (without `--options` the diffs are left out). `conflict choose`, `hint`, `abort` and `decision choose` record the same choice the route records, then continue the run in this process unless `--no-resume`. Their `--json` is that outcome (`id`, `action`, `stage`, `resumed`, and when the run went on, `verdict` and `reason`). The route answers `202` with `id` and `stage` and wakes `serve` instead, because the continuation happens in the server.
+What a verb reads is what the route answers, field for field: `--json` prints the route's body. `runs list --json` prints `{"spans": [...]}`. `decision show --json` is `cursor.decision` and `conflict show --options --json` is `cursor.conflict` (without `--options` the diffs are left out). `conflict choose`, `hint`, `abort` and `decision choose` record the same choice the route records, then continue the run in this process unless `--no-resume`. Their `--json` is that outcome: `id` and `stage` (the same two fields the route answers), `action`, `outcome` (`recorded` when only the answer was stored, `continued` when the run went on in this process), `resumed`, and, when the run went on, `verdict` and `reason`. The route answers `202 {id, stage}` and the run continues inside `serve`, because the continuation happens in the server; the CLI waits for it and prints the result. `jira status --json` prints the body of `GET /jira` and exits 0 whether or not an account is saved (read `configured`); without `--json` it exits 1 when no account is saved. A QA reading of a run that is not on the desk is a JSON `404 {error: "not_found", message}`, like every other QA route.
 
 The log of a command. A statement stores the path of each command's log (`iter/1/logs/prove-1.log`) and `lines`, how many lines the command printed, so the page can say "5 of 142 lines" over the last lines it shows. `./span log` and the route read the same file with the same limits: a clean relative `.log` path under `iter/`, resolved inside the run, a regular file, and the last 512 KiB (`truncated: true` when it was longer; the plain output then says so on stderr).
 
-Two page actions have no verb, and why:
+One page action has no verb, and why:
 
-- **Stop the stage in flight** (`POST /spans/<id>/stop`) cancels the worker of the `serve` process that drives the run. It lives in that process's memory and leaves no file another process could write. A run driven by `./span run` or `./span resume` stops with Ctrl-C or `SIGTERM`, which holds it with the error; to cancel a stage of a run in `serve`, use `./span pause` (the run holds before the next stage) or stop the server.
 - **Read the Jira story again** (`POST /spans/<id>/story`) needs the server's Jira login and rebuilds the brief; run `./span quickstart --issue <key>` for a new run from the current story.
+
+#### Stop from the CLI
+
+`./span stop <run> [--json]` is **Stop now**. It writes a `stop` marker in the run's folder, the same way a pause is requested, and every process that drives a run (`serve`, `span run`, `span resume`, `span answer`) looks for it about every 300 ms. When it finds the marker it consumes it and cancels the flight, which is what the button does: the command or agent is killed and the run comes back held with the error. So a stop reaches a run driven by another process, and by a `serve` on a remote server when the CLI runs there against the same `--spans`.
+
+The route and the verb answer alike. When nothing drives the run (nobody holds its lock) there is no stage to cancel: the route answers `{"stopped": false, "reason": "nothing is running this span"}` and the verb prints `done: false` with `nothing is running this run`, both exit 0, and neither leaves a marker. A marker left from before a flight started is discarded when the flight starts, so an old request never cancels a later resume. Exit codes: 0 asked or nothing running, 1 error, 2 usage, 3 the run is finished (refused), 4 no such run. `--json` prints `{id, action: "stop", done, reason}`.
 
 `./span pause` writes the pause request the running process reads at its next stage boundary, so it also reaches a run driven by `serve`. The route answers `paused: false` for a run nothing is running; the verb cannot see another process's workers, so it only refuses a finished run, and a request made while nothing runs waits until the next resume discards it.
 

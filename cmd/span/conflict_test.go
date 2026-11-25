@@ -248,3 +248,27 @@ func TestDecisionShowAndChoose(t *testing.T) {
 		t.Errorf("an answer for another decision: exit %d, want 1", code)
 	}
 }
+
+func TestConflictChooseJSONCarriesTheRouteFieldsAndAnOutcome(t *testing.T) {
+	root := conflictRun(t, twoOptions())
+	fakeContinue(t)
+	var out, errw bytes.Buffer
+	if code := conflictMain([]string{"choose", "run-1", "g1", "ours", "--no-resume", "--json", "--spans", root}, &out, &errw); code != 0 {
+		t.Fatalf("exit %d: %s", code, errw.String())
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["id"] != "run-1" || got["stage"] == "" || got["outcome"] != "recorded" {
+		t.Errorf("--no-resume json = %v, want id, stage and outcome recorded", got)
+	}
+	out.Reset()
+	if code := conflictMain([]string{"choose", "run-1", "g1", "ours", "--json", "--spans", root}, &out, &errw); code != 0 {
+		t.Fatalf("exit %d: %s", code, errw.String())
+	}
+	got = map[string]any{}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got["outcome"] != "continued" || got["id"] != "run-1" {
+		t.Errorf("resumed json = %v (%v), want outcome continued", got, err)
+	}
+}

@@ -4,6 +4,8 @@ import { PlusIcon, SearchIcon } from "lucide-react"
 import { useState } from "react"
 import { Link } from "react-router"
 
+import { useRowKeys } from "@/hooks/use-row-keys"
+
 import { FilterChips } from "@/components/list-controls/FilterChips"
 import { IdChip } from "@/components/list-controls/IdChip"
 import { SearchField } from "@/components/list-controls/SearchField"
@@ -60,7 +62,8 @@ function Row({
       <div className="col-span-2 flex min-w-0 flex-col md:col-span-1">
         <Link
           to={`/spans/${run.id}`}
-          className="text-sm leading-[22px] font-semibold hover:underline md:truncate"
+          data-row-link
+          className="text-sm leading-[22px] font-semibold hover:underline max-md:flex max-md:min-h-11 max-md:items-center md:truncate"
           title={run.id}
         >
           {name}
@@ -117,6 +120,7 @@ export function RunsDesk({
   onNew: () => void
   onDeleted: (id: string) => void
 }) {
+  useRowKeys()
   const [filter, setFilter] = useState<DeskFilter>("all")
   const [query, setQuery] = useState("")
   const counts = deskCounts(runs, now)

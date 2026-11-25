@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { ArrowRightIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionPanel, Pill, twoColumns } from "@/components/shaping/session-ui"
-import { QuestionCard, type Staged } from "@/components/shaping/QuestionCard"
+import { QuestionCard } from "@/components/shaping/QuestionCard"
 import { SessionSummary } from "@/components/shaping/SessionSummary"
+import { loadStaged, saveStaged, type Staged } from "@/lib/shape-draft"
 import type { ShapeSession } from "@/lib/types"
 import { countText, headingText } from "@/components/shaping/styles"
 
@@ -27,6 +28,18 @@ function Group({
   )
 }
 
+/** The stored decisions that still belong to an open question. */
+function keepOpen(session: ShapeSession, saved: Record<string, Staged>) {
+  const open = new Set(
+    session.questions
+      .filter((question) => question.status === "open")
+      .map((question) => question.id)
+  )
+  return Object.fromEntries(
+    Object.entries(saved).filter(([question]) => open.has(question))
+  )
+}
+
 /**
  * The questions. Each one is settled here, by using its assumption or by typing an answer,
  * and one button sends them all so the agent runs a single turn. An assumed question can be
@@ -44,7 +57,13 @@ export function QuestionsBoard({
     assume: string[]
   ) => void
 }) {
-  const [staged, setStaged] = useState<Record<string, Staged>>({})
+  // A reload keeps what was decided but not yet sent; stale ids are dropped on read.
+  const [staged, setStaged] = useState<Record<string, Staged>>(() =>
+    keepOpen(session, loadStaged(session.id))
+  )
+  useEffect(() => {
+    saveStaged(session.id, staged)
+  }, [session.id, staged])
   const open = session.questions.filter(
     (question) => question.status === "open"
   )

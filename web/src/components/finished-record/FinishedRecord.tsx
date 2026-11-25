@@ -3,6 +3,9 @@ import { cn } from "@/lib/utils"
 import type { Risk } from "@/lib/report"
 import type { RunDetails } from "@/lib/run-details"
 
+const panel =
+  "flex flex-col gap-2 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:p-5"
+
 /** The two things worth reading after a run is over: what could still hurt, and how it was run. */
 export function FinishedRecord({
   risks,
@@ -14,8 +17,10 @@ export function FinishedRecord({
   return (
     <>
       {risks.length > 0 ? (
-        <section aria-label="Risks noted" className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium">Risks noted · {risks.length}</h2>
+        <section aria-label="Risks noted" className={panel}>
+          <h2 className="text-sm font-semibold">
+            Risks noted · {risks.length}
+          </h2>
           <ul className="flex flex-col gap-1.5 text-sm">
             {risks.map((risk) => (
               <li key={risk.id} className="flex gap-2">
@@ -41,21 +46,25 @@ export function FinishedRecord({
         </section>
       ) : null}
       {details.agents.length > 0 || details.time !== null ? (
-        <section aria-label="Run details" className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium">Run details</h2>
-          <dl className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
+        <section aria-label="Run details" className={panel}>
+          <h2 className="text-sm font-semibold">Run details</h2>
+          <dl className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-2.5 text-[13px]">
             {details.agents.length > 0 ? (
               <>
-                <dt className="text-muted-foreground">Agents</dt>
-                <dd className="font-mono text-xs">
+                <dt className="border-t border-border py-2 text-muted-foreground">
+                  Agents
+                </dt>
+                <dd className="border-t border-border py-2 font-mono text-xs">
                   {details.agents.join(", ")}
                 </dd>
               </>
             ) : null}
             {details.time !== null ? (
               <>
-                <dt className="text-muted-foreground">Time</dt>
-                <dd className="tabular-nums">
+                <dt className="border-t border-border py-2 text-muted-foreground">
+                  Time
+                </dt>
+                <dd className="border-t border-border py-2 tabular-nums">
                   {details.time.took}, started {details.time.started}
                 </dd>
               </>
