@@ -172,7 +172,7 @@ describe("Onboarding", () => {
     expect(screen.getByText("Not installed")).toBeTruthy()
     expect(
       screen.getByRole("button", {
-        name: "Copy npm install -g @mariozechner/pi-coding-agent",
+        name: "Copy command npm install -g @mariozechner/pi-coding-agent",
       })
     ).toBeTruthy()
     expect(
@@ -200,7 +200,9 @@ describe("Onboarding", () => {
     })
     show()
     expect(await screen.findByText(/Not a git repository/)).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Copy git init" })).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Copy command git init" })
+    ).toBeTruthy()
     expect(
       screen.getByRole("button", { name: "Continue" }).hasAttribute("disabled")
     ).toBe(true)
