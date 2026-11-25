@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalOf, attemptLine, holdAction, holderOf, isCheckoutBusy } from "@/lib/failure"
 import type { Cursor, Statement } from "@/lib/types"
 
 function cursor(over: Partial<Cursor> = {}): Cursor {
@@ -174,5 +174,17 @@ describe("a run held on a merge conflict", () => {
 
   it("keeps the old behavior when there is no conflict", () => {
     expect(holdAction({ failure, questions: 0, stop: false, done: false, conflict: null })?.label).toBe("Fix and retry")
+  })
+})
+
+describe("holderOf", () => {
+  it("reads the run that holds the checkout from the hold reason", () => {
+    expect(holderOf("another run is active in this checkout (pid 4321 run span-7f3a)")).toBe("span-7f3a")
+  })
+
+  it("is empty when the holder is not a run, or the reason is not about the checkout", () => {
+    expect(holderOf("another run is active in this checkout (pid 4321 shape)")).toBe("")
+    expect(holderOf("another run is active in this checkout (another process)")).toBe("")
+    expect(holderOf("prove exited 1")).toBe("")
   })
 })

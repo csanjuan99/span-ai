@@ -295,3 +295,19 @@ describe("how long the run has waited", () => {
     expect(screen.queryByText(/min ago/)).toBeNull()
   })
 })
+
+describe("a checkout another run holds", () => {
+  const reason = (who: string) => `another run is active in this checkout (${who})`
+
+  it("links to the run that holds it", () => {
+    state = held({ stage: "build", reason: reason("pid 4321 run span-7f3a") })
+    page()
+    expect(screen.getByRole("link", { name: "Open the other run" }).getAttribute("href")).toBe("/spans/span-7f3a")
+  })
+
+  it("offers no link when the holder is not a run", () => {
+    state = held({ stage: "build", reason: reason("pid 4321 shape") })
+    page()
+    expect(screen.queryByRole("link", { name: "Open the other run" })).toBeNull()
+  })
+})

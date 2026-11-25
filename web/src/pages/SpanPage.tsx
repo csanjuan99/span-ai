@@ -6,7 +6,7 @@ import { Link, useParams } from "react-router"
 import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
-import { activeFailure, approvalOf, attemptLine, holdAction, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalOf, attemptLine, holdAction, holderOf, isCheckoutBusy } from "@/lib/failure"
 import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
@@ -98,6 +98,7 @@ export function SpanPage() {
   // the page that there is nothing to do. The agent poll can.
   const idle = state.agent?.summary === "not running"
   const busy = isCheckoutBusy(cursor?.reason ?? "")
+  const holder = holderOf(cursor?.reason ?? "")
   // A conflict hold is answered on the conflict cards, not by fixing a failed check.
   const conflictKind = conflictHold(cursor?.reason ?? "")
   const conflict = cursor?.conflict
@@ -325,6 +326,11 @@ export function SpanPage() {
                 ) : null}
                 {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
                   <ActionWithHint label={action.label} hint={action.hint} onClick={() => void resume()} />
+                ) : null}
+                {holder !== "" ? (
+                  <Link className="self-start text-sm text-primary underline-offset-4 hover:underline" to={`/spans/${holder}`}>
+                    Open the other run
+                  </Link>
                 ) : null}
                 {state.agent?.relaunch ? (
                   <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>

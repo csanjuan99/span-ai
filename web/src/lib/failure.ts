@@ -19,6 +19,17 @@ export function isCheckoutBusy(reason: string): boolean {
   return reason.startsWith(checkoutBusyPrefix)
 }
 
+/**
+ * The run that holds the checkout, when the hold reason names it ("(pid 4321 run span-7f3a)").
+ * Empty when the holder is another kind of process or the reason is about something else.
+ */
+export function holderOf(reason: string): string {
+  if (!isCheckoutBusy(reason)) {
+    return ""
+  }
+  return /\(pid \d+ run ([\w.-]+)\)/.exec(reason)?.[1] ?? ""
+}
+
 /** One action a paused run offers. There is never a paused run with none. */
 export interface HoldAction {
   label: string
