@@ -72,7 +72,7 @@ describe("ProjectSettings", () => {
     expect(screen.getAllByText("Changed").length).toBeGreaterThanOrEqual(3)
     const merge = screen.getByLabelText<HTMLSelectElement>("merge approval")
     expect(merge.value).toBe("hold")
-    expect(screen.queryByText("What changes")).toBeNull()
+    expect(screen.queryByText(/\d+ unsaved/)).toBeNull()
   })
 
   it("says so when the project has no span.yaml", async () => {
@@ -115,8 +115,8 @@ describe("ProjectSettings", () => {
     it("shows what a change would write before anything is saved", async () => {
       await edited()
       const panel = await screen.findByRole("region", { name: "What changes" })
-      expect(await within(panel).findByText("+ hold")).toBeTruthy()
-      expect(within(panel).getByText("- auto")).toBeTruthy()
+      expect(await within(panel).findByText(/merge hold/)).toBeTruthy()
+      expect(within(panel).getByText(/merge auto/)).toBeTruthy()
       expect(within(panel).getByText("1 unsaved")).toBeTruthy()
       expect(previewConfig).toHaveBeenCalledWith(".", { merge: "hold" })
       expect(saveConfig).not.toHaveBeenCalled()
@@ -129,13 +129,13 @@ describe("ProjectSettings", () => {
         config: projectConfig({ ...saved, stages: { merge: "hold" } }),
       })
       const panel = await screen.findByRole("region", { name: "What changes" })
-      await within(panel).findByText("+ hold")
+      await within(panel).findByText(/merge hold/)
       fireEvent.click(screen.getByRole("button", { name: "Save 1 change" }))
       expect(
         await screen.findByText("Saved 1 change to span.yaml.")
       ).toBeTruthy()
       expect(saveConfig).toHaveBeenCalledWith(".", { merge: "hold" })
-      expect(screen.queryByText("What changes")).toBeNull()
+      expect(screen.queryByText(/\d+ unsaved/)).toBeNull()
       expect(
         screen.getByLabelText<HTMLSelectElement>("merge approval").value
       ).toBe("hold")
@@ -146,7 +146,7 @@ describe("ProjectSettings", () => {
       fireEvent.click(
         await screen.findByRole("button", { name: "Discard changes" })
       )
-      expect(screen.queryByText("What changes")).toBeNull()
+      expect(screen.queryByText(/\d+ unsaved/)).toBeNull()
       expect(
         screen.getByLabelText<HTMLSelectElement>("merge approval").value
       ).toBe("auto")
@@ -158,7 +158,7 @@ describe("ProjectSettings", () => {
       fireEvent.change(screen.getByLabelText("merge approval"), {
         target: { value: "auto" },
       })
-      expect(screen.queryByText("What changes")).toBeNull()
+      expect(screen.queryByText(/\d+ unsaved/)).toBeNull()
     })
 
     it("says why a value is refused and keeps Save off", async () => {

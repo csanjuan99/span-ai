@@ -56,7 +56,7 @@ export function TextField({
     >
       <Input
         aria-label={label}
-        className="font-mono"
+        className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 font-mono text-sm shadow-sm dark:bg-card"
         disabled={props.disabled}
         placeholder={placeholder}
         value={state.value}
@@ -86,7 +86,7 @@ export function CommandsField({
     >
       <Textarea
         aria-label={label}
-        className="font-mono"
+        className="rounded-[10px] border-input bg-surface-code px-2.5 py-2 font-mono text-xs"
         disabled={props.disabled}
         placeholder="One command per line"
         rows={2}

@@ -1,7 +1,40 @@
 "use client"
 
+import { SettingsIcon } from "lucide-react"
+
+import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
 import { Button } from "@/components/ui/button"
 import type { ConfigLine } from "@/lib/types"
+
+function DiffRow({
+  number,
+  sign,
+  text,
+}: {
+  number: number
+  sign: "-" | "+"
+  text: string
+}) {
+  return (
+    <div
+      className={
+        sign === "-"
+          ? "grid grid-cols-[36px_16px_minmax(0,1fr)] bg-diff-del pr-3.5 whitespace-pre"
+          : "grid grid-cols-[36px_16px_minmax(0,1fr)] bg-diff-add pr-3.5 whitespace-pre"
+      }
+    >
+      <span className="pr-2 text-right text-muted-foreground tabular-nums">
+        {number}
+      </span>
+      <span>{sign}</span>
+      <span>{text}</span>
+    </div>
+  )
+}
+
+function shown(value: string): string {
+  return value === "" ? "(not set)" : value
+}
 
 /** What a save would write to span.yaml, with the buttons that save or drop it. */
 export function WhatChanges({
@@ -24,50 +57,81 @@ export function WhatChanges({
   return (
     <section
       aria-label="What changes"
-      className="sticky bottom-4 flex flex-col gap-3 rounded-xl border border-primary bg-card p-5 shadow-md"
+      className="flex flex-col gap-3 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:px-5"
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
         <h2 className="text-lg font-semibold">What changes</h2>
-        <span className="rounded-md bg-accent px-2 py-0.5 text-xs text-primary">
-          {count} unsaved
-        </span>
+        {count > 0 ? <ChangedBadge>{count} unsaved</ChangedBadge> : null}
       </div>
       {error !== "" ? (
         <p role="alert" className="text-sm text-pretty text-destructive">
           {error}
         </p>
-      ) : (
-        <ul className="flex flex-col gap-1.5 font-mono text-sm">
-          {lines.map((line) => (
-            <li key={line.key} className="flex flex-col">
-              <span className="text-muted-foreground">{line.key}</span>
-              <span className="break-words text-destructive">
-                - {line.before === "" ? "(not set)" : line.before}
-              </span>
-              <span className="break-words text-pass">
-                + {line.after === "" ? "(not set)" : line.after}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <dl className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-[6rem_minmax(0,1fr)]">
-        <dt>If you save</dt>
-        <dd>Only these values change in {folder}/span.yaml.</dd>
-        <dt>Not touched</dt>
-        <dd>Your comments, the order of keys, and every other setting.</dd>
-      </dl>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={saving || error !== "" || lines.length === 0}
-          onClick={onSave}
+      ) : lines.length > 0 ? (
+        <div
+          role="region"
+          aria-label="Code"
+          tabIndex={0}
+          className="overflow-x-auto rounded-[10px] border border-border bg-surface-code py-1.5 font-mono text-[13px] leading-5"
         >
-          Save {count} {count === 1 ? "change" : "changes"}
-        </Button>
-        <Button variant="outline" disabled={saving} onClick={onDiscard}>
-          Discard changes
-        </Button>
+          {lines.flatMap((line, index) => [
+            <DiffRow
+              key={`${line.key}-before`}
+              number={index + 1}
+              sign="-"
+              text={`${line.key} ${shown(line.before)}`}
+            />,
+            <DiffRow
+              key={`${line.key}-after`}
+              number={index + 1}
+              sign="+"
+              text={`${line.key} ${shown(line.after)}`}
+            />,
+          ])}
+        </div>
+      ) : (
+        <p className="text-sm text-pretty text-muted-foreground">
+          Nothing to save yet. Change a value and it shows here before anything
+          is written.
+        </p>
+      )}
+      <div className="rounded-[10px] bg-muted px-3.5 py-3">
+        <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
+          <SettingsIcon className="size-4" aria-hidden="true" />
+          If you save
+        </div>
+        <div className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2">
+          <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+            Writes to
+          </div>
+          <div className="font-mono text-xs break-all">{folder}/span.yaml</div>
+        </div>
+        <div className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2">
+          <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+            Not touched
+          </div>
+          <div className="text-[13px]">
+            Your comments, the order of keys, and every other setting.
+          </div>
+        </div>
       </div>
+      <Button
+        className="h-10 w-full"
+        disabled={saving || error !== "" || lines.length === 0}
+        onClick={onSave}
+      >
+        {count > 0
+          ? `Save ${count} ${count === 1 ? "change" : "changes"}`
+          : "Save changes"}
+      </Button>
+      <Button
+        className="h-10 w-full"
+        variant="outline"
+        disabled={saving || count === 0}
+        onClick={onDiscard}
+      >
+        Discard changes
+      </Button>
     </section>
   )
 }

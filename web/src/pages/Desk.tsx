@@ -34,7 +34,12 @@ import type {
   SpanHead,
 } from "@/lib/types"
 import { isRecord, reasonText } from "@/lib/guards"
-import { readJiraSession } from "@/lib/jira-session"
+import {
+  jiraSessionOf,
+  noSession,
+  readJiraSession,
+  type JiraSession,
+} from "@/lib/jira-session"
 import { repoNames } from "@/lib/repos"
 import { setupSteps, type StepId } from "@/lib/setup"
 import { PromptHeading } from "@/components/shell/PromptHeading"
@@ -61,13 +66,6 @@ interface Repo {
   checked: boolean
 }
 
-interface JiraSession {
-  configured: boolean
-  email: string
-  baseUrl: string
-}
-
-const noSession: JiraSession = { configured: false, email: "", baseUrl: "" }
 const noBranches: BranchChoice = { branches: [], defaultBase: "dev" }
 
 interface StoryHit {
@@ -78,17 +76,6 @@ interface StoryHit {
 function reposOf(value: unknown): Repo[] {
   const names = repoNames(value)
   return names.map((name) => ({ name, checked: names.length === 1 }))
-}
-
-function sessionOf(value: unknown): JiraSession {
-  if (!isRecord(value)) {
-    return noSession
-  }
-  return {
-    configured: value.configured === true,
-    email: typeof value.email === "string" ? value.email : "",
-    baseUrl: typeof value.baseUrl === "string" ? value.baseUrl : "",
-  }
 }
 
 function storiesOf(value: unknown): StoryHit[] {
@@ -222,7 +209,7 @@ export function Desk() {
     }
     try {
       const body = await readJiraSession(project)
-      setSession(sessionOf(body))
+      setSession(jiraSessionOf(body))
     } catch (err: unknown) {
       // The action that needs the session reports its own failure; this says why the band
       // still shows Jira as not connected.
@@ -276,7 +263,7 @@ export function Desk() {
       )
     }
     if (jiraResult.status === "fulfilled") {
-      setSession(sessionOf(jiraResult.value))
+      setSession(jiraSessionOf(jiraResult.value))
     } else {
       setJiraNote(
         reasonText(jiraResult.reason, "the session could not be read")
@@ -296,7 +283,7 @@ export function Desk() {
       setToken("")
       setJiraNote("Session saved for this folder.")
       const next = await readJiraSession(workspace)
-      setSession(sessionOf(next))
+      setSession(jiraSessionOf(next))
     } catch (err: unknown) {
       setJiraNote(reasonText(err, "the session was not saved"))
     }
@@ -552,15 +539,7 @@ export function Desk() {
                 name="workspace"
                 value={workspace}
                 onChange={(event) => setWorkspace(event.target.value)}
-                onBlur={() => {
-                  void readJiraSession(workspace)
-                    .then((body) => setSession(sessionOf(body)))
-                    .catch((err: unknown) => {
-                      setJiraNote(
-                        reasonText(err, "the session could not be read")
-                      )
-                    })
-                }}
+                onBlur={() => void readSession(workspace)}
               />
             </div>
             <div id="agent-field">

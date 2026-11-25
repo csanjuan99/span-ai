@@ -1,9 +1,7 @@
 "use client"
 
-import { configDefaults } from "@/lib/api"
-
-import { defaultDraft, savedDraft, valueOf } from "./draft"
-import { FieldRow } from "./FieldRow"
+import { ChangedBadge } from "./ChangedBadge"
+import { defaultDraft, valueOf } from "./draft"
 import type { EditProps } from "./fields"
 
 const stages = ["open", "merge", "promote", "plan", "conflict"] as const
@@ -28,17 +26,16 @@ export function ApprovalsFields({ props }: { props: EditProps }) {
     <>
       {stages.map((stage) => {
         const value = valueOf(props.config, props.draft, stage)
+        const changed = value !== defaultDraft[stage]
         return (
-          <FieldRow
+          <div
             key={stage}
-            label={stage}
-            fallback={modeLabel[configDefaults.stages[stage]] ?? ""}
-            changed={value !== defaultDraft[stage]}
-            unsaved={value !== savedDraft(props.config)[stage]}
+            className="grid grid-cols-[96px_minmax(0,1fr)] items-center gap-3 border-t border-border py-2 first:border-t-0 sm:grid-cols-[120px_minmax(0,1fr)_auto]"
           >
+            <span className="text-[13px] font-medium">{stage}</span>
             <select
               aria-label={`${stage} approval`}
-              className="h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:max-w-72 dark:bg-input/30"
+              className="h-8 w-full rounded-[10px] border border-input bg-card px-2.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:max-w-72"
               disabled={props.disabled}
               value={value}
               onChange={(event) => props.onEdit(stage, event.target.value)}
@@ -49,7 +46,14 @@ export function ApprovalsFields({ props }: { props: EditProps }) {
                 </option>
               ))}
             </select>
-          </FieldRow>
+            <span className="col-start-2 sm:col-start-3">
+              {changed ? (
+                <ChangedBadge>Changed</ChangedBadge>
+              ) : (
+                <span className="text-xs text-muted-foreground">Default</span>
+              )}
+            </span>
+          </div>
         )
       })}
     </>

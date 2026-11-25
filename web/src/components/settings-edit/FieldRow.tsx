@@ -1,5 +1,7 @@
 import type { ReactNode } from "react"
 
+import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
+
 /** One setting: its name, what it means when unset, the field, and whether it moved. */
 export function FieldRow({
   label,
@@ -17,27 +19,19 @@ export function FieldRow({
   children: ReactNode
 }) {
   return (
-    <div className="grid gap-1 border-t border-border pt-3 first:border-t-0 first:pt-0 sm:grid-cols-[12rem_minmax(0,1fr)]">
-      <div className="flex flex-col">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">
-          Default: {fallback}
-        </span>
+    <div className="grid gap-2 border-t border-border py-4 first:border-t-0 sm:grid-cols-[200px_minmax(0,1fr)] sm:gap-4">
+      <div className="flex flex-col gap-0.5">
+        <div className="text-sm font-semibold">{label}</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            Default: {fallback}
+          </span>
+          {changed ? <ChangedBadge>Changed</ChangedBadge> : null}
+        </div>
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
         {children}
-        <div className="flex gap-2 empty:hidden">
-          {changed ? (
-            <span className="rounded-md bg-hold-soft px-1.5 py-0.5 text-xs text-hold">
-              Changed
-            </span>
-          ) : null}
-          {unsaved ? (
-            <span className="rounded-md bg-accent px-1.5 py-0.5 text-xs text-primary">
-              Unsaved
-            </span>
-          ) : null}
-        </div>
+        {unsaved ? <ChangedBadge tone="accent">Unsaved</ChangedBadge> : null}
       </div>
     </div>
   )

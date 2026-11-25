@@ -1,37 +1,30 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import { Link } from "react-router"
 
 import { NotificationPrefs } from "@/components/notify/NotificationPrefs"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
 import { ApprovalsFields } from "@/components/settings-edit/ApprovalsFields"
 import { ChecksFields } from "@/components/settings-edit/ChecksFields"
+import { JiraSection } from "@/components/settings-edit/JiraSection"
+import { SettingsNav } from "@/components/settings-edit/SettingsNav"
 import {
   changedEdits,
   editCount,
   type Draft,
   type DraftKey,
 } from "@/components/settings-edit/draft"
+import { FieldRow } from "@/components/settings-edit/FieldRow"
 import { TextField, type EditProps } from "@/components/settings-edit/fields"
 import { useConfigPreview } from "@/components/settings-edit/useConfigPreview"
 import { WhatChanges } from "@/components/settings-edit/WhatChanges"
 import { Shell } from "@/components/shell/Shell"
 import { useOptionalTheme } from "@/components/theme-provider"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { getJSON, projectConfig, saveConfig } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import type { ProjectConfig } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-const sections = [
-  "Project",
-  "Agents",
-  "Checks",
-  "Approvals",
-  "Appearance",
-] as const
 
 const themes = [
   { value: "system", label: "System" },
@@ -52,12 +45,10 @@ function Section({
     <section
       id={name.toLowerCase()}
       aria-label={name}
-      className="flex scroll-mt-4 flex-col gap-3 rounded-xl border border-border bg-card p-5 shadow-sm"
+      className="flex scroll-mt-4 flex-col gap-1 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:p-5"
     >
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold">{name}</h2>
-        <p className="text-sm text-muted-foreground">{hint}</p>
-      </div>
+      <h2 className="text-lg font-semibold">{name}</h2>
+      <p className="mb-1 text-[13px] text-muted-foreground">{hint}</p>
       {children}
     </section>
   )
@@ -72,6 +63,7 @@ export function ProjectSettings() {
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState("")
   const theme = useOptionalTheme()
+  const [current, setCurrent] = useState("Project")
 
   useEffect(() => {
     let live = true
@@ -137,35 +129,14 @@ export function ProjectSettings() {
 
   return (
     <Shell path="~/settings" status="settings" lines={[]}>
-      <header className="flex flex-col gap-2">
-        <Link
-          className="text-sm text-primary underline-offset-4 hover:underline"
-          to="/"
-        >
-          $ desk
-        </Link>
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-pretty text-muted-foreground">
-          The agent, base branch, checks and approvals are saved to span.yaml,
-          and how the page looks is saved in this browser. Changes show up below
-          before anything is written.
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-[13px] text-muted-foreground">
+          Defaults are shown beside each value. Changed values are marked.
         </p>
       </header>
-      <div className="grid gap-6 lg:grid-cols-[10rem_minmax(0,1fr)]">
-        <nav
-          aria-label="Settings sections"
-          className="flex gap-2 overflow-x-auto lg:sticky lg:top-4 lg:flex-col lg:self-start"
-        >
-          {sections.map((name) => (
-            <a
-              key={name}
-              href={`#${name.toLowerCase()}`}
-              className="rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              {name}
-            </a>
-          ))}
-        </nav>
+      <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)_340px]">
+        <SettingsNav current={current} onPick={setCurrent} />
         <div className="flex min-w-0 flex-col gap-6">
           {note !== "" ? (
             <p className="text-sm text-pretty text-destructive">{note}</p>
@@ -174,17 +145,19 @@ export function ProjectSettings() {
             <p className="text-sm text-pretty text-hold">{config.reason}</p>
           ) : null}
           <Section name="Project" hint="Where Span works.">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="settings-folder">Project folder</Label>
+            <FieldRow
+              label="Project folder"
+              fallback="the folder Span was started in"
+              changed={false}
+              unsaved={false}
+            >
               <Input
-                id="settings-folder"
+                aria-label="Project folder"
+                className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
                 value={folder}
                 onChange={(event) => changeFolder(event.target.value)}
               />
-              <span className="text-xs text-muted-foreground">
-                Default: the folder Span was started in
-              </span>
-            </div>
+            </FieldRow>
             <TextField
               props={props}
               name="base"
@@ -212,31 +185,48 @@ export function ProjectSettings() {
             <ApprovalsFields props={props} />
           </Section>
           <Section
+            name="Jira"
+            hint="Optional. Reads stories and moves them when a run finishes."
+          >
+            <JiraSection folder={folder} />
+          </Section>
+          <Section
             name="Appearance"
             hint="How Span looks. Saved in this browser."
           >
             {theme !== undefined ? (
-              <div role="group" aria-label="Theme" className="flex gap-2">
-                {themes.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    aria-pressed={theme.theme === item.value}
-                    onClick={() => theme.setTheme(item.value)}
-                    className={cn(
-                      "h-9 rounded-lg border border-border px-3 text-sm text-muted-foreground",
-                      "aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-primary"
-                    )}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
+              <FieldRow
+                label="Theme"
+                fallback="System"
+                changed={theme.theme !== "system"}
+                unsaved={false}
+              >
+                <div
+                  role="group"
+                  aria-label="Theme"
+                  className="flex w-fit gap-1 rounded-[14px] bg-muted p-1"
+                >
+                  {themes.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      aria-pressed={theme.theme === item.value}
+                      onClick={() => theme.setTheme(item.value)}
+                      className={cn(
+                        "h-9 rounded-[10px] px-4 text-[13px] font-medium text-muted-foreground",
+                        "aria-pressed:bg-card aria-pressed:font-semibold aria-pressed:text-primary aria-pressed:shadow-sm"
+                      )}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Motion follows your system. Reduced motion turns off the
+                  start-up animation and skeleton shimmer.
+                </p>
+              </FieldRow>
             ) : null}
-            <p className="text-xs text-muted-foreground">
-              Motion follows your system. With reduced motion the start-up
-              animation and skeleton shimmer are off.
-            </p>
           </Section>
           <Section
             name="Notifications"
@@ -244,22 +234,22 @@ export function ProjectSettings() {
           >
             <NotificationPrefs />
           </Section>
+        </div>
+        <div className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-4 lg:self-start">
           {done !== "" ? (
             <p role="status" className="text-sm text-pass">
               {done}
             </p>
           ) : null}
-          {count > 0 ? (
-            <WhatChanges
-              folder={folder}
-              count={count}
-              lines={preview.lines}
-              error={preview.error}
-              saving={saving}
-              onSave={save}
-              onDiscard={() => setDraft({})}
-            />
-          ) : null}
+          <WhatChanges
+            folder={folder}
+            count={count}
+            lines={preview.lines}
+            error={preview.error}
+            saving={saving}
+            onSave={save}
+            onDiscard={() => setDraft({})}
+          />
         </div>
       </div>
     </Shell>
