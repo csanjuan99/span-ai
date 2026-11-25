@@ -28,6 +28,7 @@ import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
 import { RawOutput } from "@/components/raw-output/RawOutput"
 import { ConnectionBanner } from "@/components/problem/ConnectionBanner"
+import { ProblemCard } from "@/components/problem/ProblemCard"
 import { PageProblem } from "@/components/problem/PageProblem"
 import { RunSkeleton } from "@/components/problem/RunSkeleton"
 import { useConnectionNotice } from "@/hooks/use-connection-notice"
@@ -50,7 +51,7 @@ import { stageDurations } from "@/lib/stage-times"
 import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
 import { ActionWithHint } from "@/components/action-with-hint/ActionWithHint"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 /** Three readings of one run. The socket wakes the page. The statements stay the record. */
@@ -418,7 +419,22 @@ export function SpanPage() {
               ) : null}
             </TabsContent>
             <TabsContent value="implementation">
-              {state.span !== null && change !== null ? (
+              {done !== null && change !== null && change.files.length === 0 ? (
+                <ProblemCard
+                  label="No diff to read"
+                  tone="info"
+                  title="This run finished, and its diff is gone"
+                  cause="The branch was merged without a merge commit, or deleted, and Span did not keep the patch."
+                  kept={`${done.landed}. The change itself is still in your repository.`}
+                  next="Open the change to read what shipped. Proof and test results are still in the ledger."
+                >
+                  {done.change !== null ? (
+                    <a className={buttonVariants()} href={done.change.href}>
+                      {done.change.label}
+                    </a>
+                  ) : null}
+                </ProblemCard>
+              ) : state.span !== null && change !== null ? (
                 <Implementation
                   change={change}
                   truncated={state.implementation?.truncated ?? false}

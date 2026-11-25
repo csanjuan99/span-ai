@@ -3,6 +3,7 @@
 import type { ReactNode } from "react"
 import { BrowserRouter, Route, Routes, useLocation } from "react-router"
 
+import { StartUp } from "@/components/startup/StartUp"
 import { ErrorBoundary } from "@/components/error-boundary/ErrorBoundary"
 import { Desk } from "@/pages/Desk"
 import { Metrics } from "@/pages/Metrics"
@@ -20,6 +21,7 @@ function Guarded({ children }: { children: ReactNode }) {
 export function App() {
   return (
     <BrowserRouter>
+      <StartUp />
       <Routes>
         <Route
           path="/"

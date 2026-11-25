@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -594,5 +595,31 @@ describe("a run that cannot be shown yet", () => {
       </MemoryRouter>
     )
     expect(screen.getByText(/Reconnecting to Span/)).toBeTruthy()
+  })
+})
+
+describe("a finished run whose diff is gone", () => {
+  it("says so in the Implementation tab and links to the change", () => {
+    state = {
+      ...held(
+        {
+          done: true,
+          hold: false,
+          gitSHA: "c91f3ab0000",
+          base: "main",
+          changeURL: "https://github.com/a/b/pull/8",
+        },
+        [advance("merge")]
+      ),
+      implementation: { stat: "", patch: "", truncated: false, commits: 0 },
+    }
+    page()
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Implementation" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Implementation" }))
+    expect(screen.getByRole("region", { name: "No diff to read" })).toBeTruthy()
+    const card = screen.getByRole("region", { name: "No diff to read" })
+    expect(within(card).getByRole("link", { name: "Open PR #8" }).getAttribute("href")).toBe(
+      "https://github.com/a/b/pull/8"
+    )
   })
 })
