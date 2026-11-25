@@ -84,6 +84,7 @@ function held(over: Partial<Cursor>): SpanState {
     note: () => undefined,
     error: "",
     connected: true,
+    problem: null,
   }
 }
 

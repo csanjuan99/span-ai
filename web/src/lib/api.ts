@@ -449,11 +449,17 @@ async function readBody(response: Response): Promise<unknown> {
 
 /** Fetches JSON and surfaces the server message beside the action that sent it. */
 export async function getJSON(url: string): Promise<unknown> {
-  const response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  let response: Response
+  try {
+    response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  } catch (err: unknown) {
+    // The request never got an answer: the server is down or on another port.
+    throw new ApiError("unreachable", err instanceof Error ? err.message : "the server did not answer")
+  }
   refuseUnauthorized(response)
   const body = await readBody(response)
   if (!response.ok) {
-    throw new Error(messageOf(body))
+    throw new ApiError(isRecord(body) ? text(body.error) : "", messageOf(body))
   }
   return body
 }

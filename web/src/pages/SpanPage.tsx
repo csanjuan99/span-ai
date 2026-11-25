@@ -17,7 +17,7 @@ import { sinceLine } from "@/lib/since"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
-import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
+import { agentLine, clockOf, timelineLines, withAgent } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
 import { useSpan } from "@/hooks/use-span"
 import { ConflictPanel } from "@/components/conflict/ConflictPanel"
@@ -27,6 +27,10 @@ import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
 import { RawOutput } from "@/components/raw-output/RawOutput"
+import { ConnectionBanner } from "@/components/problem/ConnectionBanner"
+import { PageProblem } from "@/components/problem/PageProblem"
+import { RunSkeleton } from "@/components/problem/RunSkeleton"
+import { useConnectionNotice } from "@/hooks/use-connection-notice"
 import { Ledger } from "@/components/ledger/Ledger"
 import { LedgerSummary } from "@/components/ledger/LedgerSummary"
 import { NeedsYou } from "@/components/needs-you/NeedsYou"
@@ -101,6 +105,8 @@ export function SpanPage() {
   )
   const sealed = (state.span?.statements ?? []).filter((item) => item.verdict === "advance").map((item) => item.stage)
   const socket = state.connected ? "socket open" : "socket closed"
+  const notice = useConnectionNotice(state.connected)
+  const lastSeen = clockOf(state.frames.at(-1)?.at ?? state.agentAt)
   const questions = waitingQuestions(cursor ?? null)
   const waiting = questions.length > 0
   const agentBlock = agentBlockLine(cursor?.agentBlock)
@@ -294,6 +300,17 @@ export function SpanPage() {
   const restartBlocked =
     conflict !== undefined || conflictKind !== null ? "Unavailable while a merge conflict is open. Abort the merge first." : ""
 
+  if (state.span === null) {
+    return (
+      <Shell path={`~/spans/${id}`} status={state.problem ?? "loading"} lines={lines}>
+        <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/">
+          $ desk
+        </Link>
+        {state.problem !== null ? <PageProblem problem={state.problem} id={id} /> : <RunSkeleton />}
+      </Shell>
+    )
+  }
+
   return (
     <Shell path={`~/spans/${id}`} status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`} lines={lines}>
       <header className="flex flex-col gap-3">
@@ -319,6 +336,7 @@ export function SpanPage() {
         ) : null}
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
         {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
+        <ConnectionBanner notice={notice} lastSeen={lastSeen} />
       </header>
       {/*
         One column on a narrow screen, in the order the design draws it: what needs the person, the
