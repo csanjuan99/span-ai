@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { ArrowRightIcon, CheckIcon } from "lucide-react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { previewShapeContext } from "@/lib/api"
 import { reasonText } from "@/lib/guards"

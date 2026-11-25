@@ -1,4 +1,4 @@
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Panel, toneText, type Tone } from "@/components/shaping/session-ui"
 import type { ChangeKind, ItemChange, ItemKind } from "@/lib/shape-versions"

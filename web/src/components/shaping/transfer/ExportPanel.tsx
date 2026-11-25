@@ -10,8 +10,9 @@ import {
   wideColumns,
 } from "@/components/shaping/session-ui"
 import { CheckField } from "@/components/list-controls/CheckField"
-import { RadioCards } from "@/components/shaping/RadioCard"
+import { RadioCards } from "@/components/list-controls/RadioCard"
 import { Button } from "@/components/ui/button"
+import { downloadFile } from "@/lib/download"
 import { reasonText } from "@/lib/guards"
 import { exportText, type ExportChoice } from "@/lib/shape-flows"
 import { emptyPanelText, mutedLabelText } from "@/components/shaping/styles"
@@ -64,12 +65,11 @@ export function ExportPanel({
 
   function save() {
     const type = choice.format === "md" ? "text/markdown" : "application/json"
-    const url = URL.createObjectURL(new Blob([preview], { type }))
-    const link = document.createElement("a")
-    link.href = url
-    link.download = choice.format === "md" ? "story.md" : "story.json"
-    link.click()
-    URL.revokeObjectURL(url)
+    downloadFile(
+      choice.format === "md" ? "story.md" : "story.json",
+      preview,
+      type
+    )
   }
 
   if (!sealed) {

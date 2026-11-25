@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { CheckIcon } from "lucide-react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -13,6 +13,8 @@ import {
   labelText,
   smallTitleText,
 } from "@/components/shaping/styles"
+import { touchButton } from "@/lib/button-class"
+import { labelled } from "@/lib/shape-session"
 
 /** What the person decided for a question on this page, before it is sent. */
 export type Staged = { kind: "assume" } | { kind: "answer"; text: string }
@@ -111,9 +113,7 @@ export function QuestionCard({
       ) : null}
       {question.status === "answered" ? (
         <div className="rounded-[10px] bg-muted px-3 py-2.5">
-          <Eyebrow>
-            {`Your answer · ${question.answerId ?? ""}`.replace(/ · $/, "")}
-          </Eyebrow>
+          <Eyebrow>{labelled("Your answer", question.answerId)}</Eyebrow>
           <div className="text-[13px] leading-5">{question.answer}</div>
         </div>
       ) : null}
@@ -154,7 +154,7 @@ export function QuestionCard({
           <>
             <Button
               type="button"
-              className="h-10"
+              className={touchButton}
               disabled={busy || draft.trim() === ""}
               aria-label={`Save answer for ${question.id}`}
               onClick={save}
@@ -164,7 +164,7 @@ export function QuestionCard({
             <Button
               type="button"
               variant="ghost"
-              className="h-10"
+              className={touchButton}
               onClick={() => setEditing(false)}
             >
               Cancel
@@ -174,7 +174,7 @@ export function QuestionCard({
           <Button
             type="button"
             variant="ghost"
-            className="h-10"
+            className={touchButton}
             aria-label={`Change ${question.id}`}
             onClick={onClear}
           >
@@ -186,7 +186,7 @@ export function QuestionCard({
               <Button
                 type="button"
                 variant="outline"
-                className="h-10"
+                className={touchButton}
                 disabled={busy}
                 aria-label={`Use the assumption for ${question.id}`}
                 onClick={() => onStage({ kind: "assume" })}
@@ -198,7 +198,7 @@ export function QuestionCard({
               <Button
                 type="button"
                 variant={question.status === "open" ? "outline" : "ghost"}
-                className="h-10"
+                className={touchButton}
                 disabled={busy}
                 aria-label={
                   question.status === "open"

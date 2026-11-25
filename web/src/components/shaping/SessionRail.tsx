@@ -1,4 +1,4 @@
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Panel } from "@/components/shaping/session-ui"
 import type { SessionStep } from "@/lib/shape-session"

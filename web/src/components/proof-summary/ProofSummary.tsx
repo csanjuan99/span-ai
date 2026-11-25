@@ -1,4 +1,4 @@
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
 import { DiffTotals } from "@/components/diff-totals/DiffTotals"

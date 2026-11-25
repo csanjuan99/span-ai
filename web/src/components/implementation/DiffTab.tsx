@@ -3,7 +3,7 @@
 import { ChevronLeftIcon, ChevronRightIcon, CopyIcon } from "lucide-react"
 import { useState } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { CheckField } from "@/components/list-controls/CheckField"
 import { CopyChip } from "@/components/ledger/CopyChip"
 import { DiffCode } from "@/components/implementation/DiffCode"

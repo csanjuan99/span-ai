@@ -2,7 +2,7 @@
 
 import { AlertTriangleIcon, ShieldCheckIcon } from "lucide-react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { Audit } from "@/lib/implementation-api"
 import { clockOf } from "@/lib/timeline"
 import { ActionButton } from "@/components/implementation/ActionButton"

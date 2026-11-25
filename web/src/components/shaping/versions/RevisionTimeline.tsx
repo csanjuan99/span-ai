@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { PillToggle } from "@/components/qa/PillToggle"
 import { Panel, Pill } from "@/components/shaping/session-ui"

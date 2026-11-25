@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { IdChip } from "@/components/list-controls/IdChip"
 import { Panel } from "@/components/shaping/session-ui"
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { clockTime } from "@/lib/clock"
 import { type HistoryEvent } from "@/lib/shape-flows"
 import { monoCaption } from "@/components/shaping/styles"
+import { touchButtonXs } from "@/lib/button-class"
 
 function who(actor: string): string {
   return actor === "you" ? "you" : actor
@@ -73,6 +74,7 @@ export function HistoryList({
                 type="button"
                 size="sm"
                 variant="outline"
+                className={touchButtonXs}
                 aria-label={`Undo ${event.id}`}
                 onClick={() => onSelect(event.id)}
               >

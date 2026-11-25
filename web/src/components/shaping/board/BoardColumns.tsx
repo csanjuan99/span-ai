@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Link } from "react-router"
 import { BotIcon } from "lucide-react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { FilterChips } from "@/components/list-controls/FilterChips"
 import { IdChip } from "@/components/list-controls/IdChip"

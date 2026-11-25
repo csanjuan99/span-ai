@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import type { ComponentProps, ReactNode } from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Pill as BasePill, type PillTone } from "@/components/onboarding/Pill"
 import { Consequences } from "@/components/status-block/Consequences"

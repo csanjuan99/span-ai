@@ -1,5 +1,5 @@
 import { levelTone, originLabel } from "@/components/implementation/report/tone"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { ReportedRisk } from "@/lib/featuredoc"
 import type { Risk } from "@/lib/report"
 

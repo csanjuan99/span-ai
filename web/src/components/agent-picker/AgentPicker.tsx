@@ -1,3 +1,5 @@
+"use client"
+
 import { useEffect, useState } from "react"
 
 import { agentChoice, getJSON, saveAgent } from "@/lib/api"
@@ -5,21 +7,35 @@ import type { AgentChoice } from "@/lib/types"
 import { ModelPicker } from "@/components/agent-picker/ModelPicker"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
-const empty: AgentChoice = { agents: [], selected: "any", chosen: "", exists: false, reason: "", models: {} }
+const empty: AgentChoice = {
+  agents: [],
+  selected: "any",
+  chosen: "",
+  exists: false,
+  reason: "",
+  models: {},
+}
 
 /**
  * Which CLI writes this project. The page reads the same registry the engine uses,
  * so a row that cannot run says why instead of failing on the next stage.
  */
-export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?: (choice: AgentChoice) => void }) {
+export function AgentPicker({
+  project,
+  onLoaded,
+}: {
+  project: string
+  onLoaded?: (choice: AgentChoice) => void
+}) {
   const [loaded, setLoaded] = useState<AgentChoice>(empty)
-
-  // The setup band reads the same answer, so what it shows is what this picker saved.
-  useEffect(() => {
-    onLoaded?.(loaded)
-  }, [loaded, onLoaded])
   const [picked, setPicked] = useState("")
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
@@ -32,6 +48,11 @@ export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?:
     setPicked("")
   }
   const blank = project.trim() === ""
+
+  // The setup band reads the same answer, so what it shows is what this picker saved.
+  useEffect(() => {
+    onLoaded?.(loaded)
+  }, [loaded, onLoaded])
 
   useEffect(() => {
     if (blank) {
@@ -46,7 +67,9 @@ export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?:
       })
       .catch((err: unknown) => {
         if (live) {
-          setNote(err instanceof Error ? err.message : "the agents could not be read")
+          setNote(
+            err instanceof Error ? err.message : "the agents could not be read"
+          )
         }
       })
     return () => {
@@ -78,8 +101,9 @@ export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?:
   return (
     <div className="flex flex-col gap-2 border border-border p-3">
       <Label htmlFor="agent">Agent</Label>
-      <p className="text-pretty text-sm text-muted-foreground">
-        Cursor, Claude, Codex, or Pi. Span calls the CLI headless and needs that harness to already have Gentle AI.
+      <p className="text-sm text-pretty text-muted-foreground">
+        Cursor, Claude, Codex, or Pi. Span calls the CLI headless and needs that
+        harness to already have Gentle AI.
         {chosen !== undefined ? ` Running now: ${chosen.label}.` : ""}
         {choice.chosen === "" ? " No CLI is ready on this machine." : ""}
       </p>
@@ -98,16 +122,28 @@ export function AgentPicker({ project, onLoaded }: { project: string; onLoaded?:
             ))}
           </SelectContent>
         </Select>
-        <Button type="button" variant="secondary" disabled={busy || !choice.exists} onClick={() => void save()}>
+        <Button
+          type="button"
+          variant="secondary"
+          className="max-sm:h-11"
+          disabled={busy || !choice.exists}
+          onClick={() => void save()}
+        >
           Save agent
         </Button>
       </div>
       {value === "any" ? null : current !== undefined && !current.ready ? (
-        <p className="text-pretty text-sm text-hold">{current.reason}</p>
+        <p className="text-sm text-pretty text-hold">{current.reason}</p>
       ) : null}
-      {choice.reason !== "" ? <p className="text-pretty text-sm text-muted-foreground">{choice.reason}</p> : null}
-      {note !== "" ? <p className="text-pretty text-sm">{note}</p> : null}
-      {choice.agents.length > 0 ? <ModelPicker project={project} choice={choice} onSaved={setLoaded} /> : null}
+      {choice.reason !== "" ? (
+        <p className="text-sm text-pretty text-muted-foreground">
+          {choice.reason}
+        </p>
+      ) : null}
+      {note !== "" ? <p className="text-sm text-pretty">{note}</p> : null}
+      {choice.agents.length > 0 ? (
+        <ModelPicker project={project} choice={choice} onSaved={setLoaded} />
+      ) : null}
     </div>
   )
 }

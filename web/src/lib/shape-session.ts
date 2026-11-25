@@ -238,3 +238,8 @@ export function issuePayload(preview: ShapePreview): string {
     2
   )
 }
+
+/** A label followed by the id it names, or the bare label when there is no id yet. */
+export function labelled(label: string, id: string | undefined): string {
+  return id ? `${label} · ${id}` : label
+}

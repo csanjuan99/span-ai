@@ -1,6 +1,10 @@
+"use client"
+
 import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
+import { wideButton } from "@/lib/button-class"
+import { cn } from "@/lib/utils"
 
 /**
  * Abort behind a confirmation: `git merge --abort` throws away every choice made so far,
@@ -20,7 +24,10 @@ export function AbortMerge({
           <Button
             type="button"
             variant="outline"
-            className="h-10 w-full border-fail text-fail hover:bg-fail-soft hover:text-fail"
+            className={cn(
+              wideButton,
+              "border-fail text-fail hover:bg-fail-soft hover:text-fail"
+            )}
           >
             Abort merge
           </Button>

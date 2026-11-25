@@ -1,4 +1,4 @@
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
 /** The controls of a run in one panel: a title, then compact rows that each bring their own divider. */

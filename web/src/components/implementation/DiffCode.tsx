@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { foldContext } from "@/lib/diff-fold"
 import type { DiffFile, DiffLine, Hunk } from "@/lib/diff"
 import { languageOf, tokenize, type TokenKind } from "@/lib/syntax"

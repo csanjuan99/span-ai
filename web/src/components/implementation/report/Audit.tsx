@@ -1,7 +1,7 @@
 import { DisclosureChevron } from "@/components/code-view/DisclosureChevron"
 import { shortHash, toneOf } from "@/lib/ledger"
 import { clockOf } from "@/lib/timeline"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { JournalState } from "@/hooks/use-events"
 import type { Cursor, Statement } from "@/lib/types"
 

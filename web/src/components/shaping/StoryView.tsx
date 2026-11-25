@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { CodeBlock } from "@/components/shaping/session-ui"
 import { TabStrip } from "@/components/shaping/TabStrip"

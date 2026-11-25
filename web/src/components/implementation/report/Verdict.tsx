@@ -5,7 +5,7 @@ import {
 } from "lucide-react"
 
 import { levelTone } from "@/components/implementation/report/tone"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { Report } from "@/lib/report"
 import { LineCounts } from "@/components/files-changed/LineCounts"
 

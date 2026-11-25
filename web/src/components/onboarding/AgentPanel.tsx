@@ -2,6 +2,7 @@
 
 import { CheckIcon, RotateCwIcon } from "lucide-react"
 
+import { checkedCard, roomyRadio } from "@/components/list-controls/RadioCard"
 import { CheckLine } from "@/components/onboarding/CheckLine"
 import { FixBox } from "@/components/onboarding/FixBox"
 import { Panel } from "@/components/onboarding/Frame"
@@ -105,15 +106,14 @@ export function AgentPanel({
             key={agent.id}
             className={cn(
               "grid cursor-pointer grid-cols-[20px_minmax(0,1fr)] gap-3 rounded-[14px] border border-input bg-card p-3.5 sm:grid-cols-[20px_minmax(0,1fr)_auto]",
-              picked === agent.id &&
-                "border-primary bg-accent ring-1 ring-primary",
+              picked === agent.id && checkedCard,
               !agent.ready && "opacity-95"
             )}
           >
             <input
               type="radio"
               name="agent"
-              className="mt-1 size-4 accent-primary"
+              className={roomyRadio}
               checked={picked === agent.id}
               disabled={!agent.ready}
               onChange={() => onPick(agent.id)}

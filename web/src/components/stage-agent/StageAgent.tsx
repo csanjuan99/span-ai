@@ -107,7 +107,7 @@ export function StageAgent({
       >
         <SelectTrigger
           aria-label={`Choose agent for ${stage}`}
-          className="w-40 shrink-0 text-[13px]"
+          className="w-36 shrink-0 rounded-[10px] text-sm"
         >
           <SelectValue />
         </SelectTrigger>

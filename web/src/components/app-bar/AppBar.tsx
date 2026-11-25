@@ -31,7 +31,10 @@ export function AppBar({ path }: { path: string }) {
   const openPalette = () => window.dispatchEvent(new Event(openPaletteEvent))
   return (
     <header className="relative flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 sm:gap-6 sm:px-10">
-      <Link to="/" className="flex items-center gap-2.5 hover:no-underline">
+      <Link
+        to="/"
+        className="flex items-center gap-2.5 hover:no-underline max-sm:min-h-11"
+      >
         <Brand />
       </Link>
       <nav aria-label="Main" className="hidden gap-1 sm:flex">

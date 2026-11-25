@@ -11,7 +11,7 @@ import {
   Pill,
   wideColumns,
 } from "@/components/shaping/session-ui"
-import { RadioCards } from "@/components/shaping/RadioCard"
+import { RadioCards } from "@/components/list-controls/RadioCard"
 import { SelectField } from "@/components/settings-edit/SelectField"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"

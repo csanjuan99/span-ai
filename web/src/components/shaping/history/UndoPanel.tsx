@@ -5,6 +5,7 @@ import { UndoIcon } from "lucide-react"
 import { ActionPanel } from "@/components/shaping/session-ui"
 import { Button } from "@/components/ui/button"
 import type { UndoPlan } from "@/lib/shape-flows"
+import { touchButtonSm } from "@/lib/button-class"
 
 /**
  * What undoing a step changes, said before it is pressed. A step others depend on offers
@@ -67,15 +68,30 @@ export function UndoPanel({
       ) : null}
       <div className="flex flex-wrap gap-2">
         {dependents.length === 0 ? (
-          <Button type="button" disabled={busy} onClick={() => onUndo(false)}>
+          <Button
+            type="button"
+            className={touchButtonSm}
+            disabled={busy}
+            onClick={() => onUndo(false)}
+          >
             Undo {plan.target.id}
           </Button>
         ) : (
-          <Button type="button" disabled={busy} onClick={() => onUndo(true)}>
+          <Button
+            type="button"
+            className={touchButtonSm}
+            disabled={busy}
+            onClick={() => onUndo(true)}
+          >
             Undo {plan.target.id} and {dependents.length} that depend on it
           </Button>
         )}
-        <Button type="button" variant="ghost" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="ghost"
+          className={touchButtonSm}
+          onClick={onCancel}
+        >
           Cancel
         </Button>
       </div>

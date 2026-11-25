@@ -1,5 +1,5 @@
 import { levelTone } from "@/components/implementation/report/tone"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { Risk } from "@/lib/report"
 import type { RunDetails } from "@/lib/run-details"
 

@@ -1,6 +1,6 @@
 import { CircleCheckIcon, CircleXIcon } from "lucide-react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import type { Evidence as EvidenceData } from "@/lib/report"
 
 /** What was run against the change and what the inspector said. Claims without a command are not evidence. */

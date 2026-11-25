@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 /** The design's tab strip: a row of equal tabs on a muted track, one selected. */
 export function TabStrip<T extends string>({

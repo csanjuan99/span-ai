@@ -1,8 +1,14 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { hintText } from "@/components/shaping/styles"
+
+/** What a chosen card looks like, shared by every radio choice drawn as a card. */
+export const checkedCard = "border-primary bg-accent ring-1 ring-primary"
+
+/** The radio input of a roomy card: large enough to hit, in the accent colour. */
+export const roomyRadio = "mt-1 size-4 accent-primary"
 
 /** One choice of a radio group, drawn as a card. `roomy` is the larger card of a decision. */
 export function RadioCard({
@@ -10,13 +16,15 @@ export function RadioCard({
   checked,
   onSelect,
   title,
+  value,
   roomy = false,
   children,
 }: {
   name: string
   checked: boolean
   onSelect: () => void
-  title: string
+  title: ReactNode
+  value?: string
   roomy?: boolean
   children: ReactNode
 }) {
@@ -27,26 +35,31 @@ export function RadioCard({
         roomy
           ? "grid grid-cols-[20px_minmax(0,1fr)] gap-3 rounded-[14px] border-input bg-card p-4"
           : "flex gap-3 rounded-[10px] border-border",
-        checked &&
-          (roomy
-            ? "border-primary bg-accent ring-1 ring-primary"
-            : "border-primary bg-accent")
+        checked && (roomy ? checkedCard : "border-primary bg-accent")
       )}
     >
       <input
         type="radio"
         name={name}
+        value={value}
         checked={checked}
         onChange={onSelect}
-        className={cn("mt-1", roomy && "size-4 accent-primary")}
+        className={cn("mt-1", roomy && roomyRadio)}
       />
-      <span className={cn("flex flex-col", roomy && "gap-0.5")}>
+      <span className={cn("flex flex-col", roomy && "min-w-0 gap-1.5")}>
         <span
-          className={cn("font-semibold", roomy ? "text-sm" : "text-[13px]")}
+          className={cn(
+            "font-semibold",
+            roomy ? "flex flex-wrap items-center gap-2 text-sm" : "text-[13px]"
+          )}
         >
           {title}
         </span>
-        <span className={cn(hintText, roomy && "leading-5")}>{children}</span>
+        <span
+          className={cn(hintText, roomy && "flex flex-col gap-1.5 leading-5")}
+        >
+          {children}
+        </span>
       </span>
     </label>
   )

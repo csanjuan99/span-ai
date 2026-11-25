@@ -8,7 +8,7 @@ import { CopyChip } from "@/components/ledger/CopyChip"
 import { CodeBlock, Panel } from "@/components/shaping/session-ui"
 import { answerSource, parseSourceRef } from "@/lib/shape-session"
 import type { ShapeSession, ShapeSnippet, ShapeSource } from "@/lib/types"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { errorText, lineNumberCell } from "@/components/shaping/styles"
 
 type Loaded = { ref: string; snippet: ShapeSnippet | null; error: string }

@@ -1,7 +1,9 @@
+"use client"
+
 import { CheckIcon } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 interface Props {
   /** What is copied, named for a screen reader: "commit", "parent digest". */

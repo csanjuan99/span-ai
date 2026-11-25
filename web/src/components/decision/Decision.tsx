@@ -4,9 +4,11 @@ import { useState, type FormEvent } from "react"
 
 import { ArrowRight } from "lucide-react"
 
+import { RadioCard } from "@/components/list-controls/RadioCard"
 import { Consequences } from "@/components/status-block/Consequences"
 import { whereKeptRows } from "@/components/status-block/whereKept"
 import { Button } from "@/components/ui/button"
+import { wideButton } from "@/lib/button-class"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { optionLetter } from "@/lib/option-letter"
@@ -100,38 +102,34 @@ export function Decision(props: {
         <fieldset className="flex flex-col gap-3">
           <legend className="sr-only">Choose how to go on</legend>
           {request.options.map((choice, at) => (
-            <label
-              className="grid cursor-pointer grid-cols-[20px_minmax(0,1fr)] gap-3 rounded-[14px] border border-input bg-card p-4 has-[:checked]:border-primary has-[:checked]:bg-accent has-[:checked]:ring-1 has-[:checked]:ring-primary"
+            <RadioCard
               key={choice.id}
-            >
-              <input
-                type="radio"
-                name="decision-option"
-                className="mt-1 size-4 accent-primary"
-                value={choice.id}
-                checked={option === choice.id}
-                onChange={() => setOption(choice.id)}
-              />
-              <span className="flex min-w-0 flex-col gap-1.5">
-                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold">
+              name="decision-option"
+              value={choice.id}
+              checked={option === choice.id}
+              onSelect={() => setOption(choice.id)}
+              roomy
+              title={
+                <>
                   {optionLetter(at)} · {choice.label}
                   {choice.id === request.recommendation ? (
                     <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-primary">
                       recommended
                     </span>
                   ) : null}
-                </span>
-                <span className="text-sm text-pretty text-muted-foreground">
-                  {choice.consequence}
-                </span>
-                <Tradeoff choice={choice} />
-                {choice.reversible ? null : (
-                  <span className="text-xs text-muted-foreground">
-                    This cannot be undone from here.
-                  </span>
-                )}
+                </>
+              }
+            >
+              <span className="text-sm text-pretty text-muted-foreground">
+                {choice.consequence}
               </span>
-            </label>
+              <Tradeoff choice={choice} />
+              {choice.reversible ? null : (
+                <span className="text-xs text-muted-foreground">
+                  This cannot be undone from here.
+                </span>
+              )}
+            </RadioCard>
           ))}
         </fieldset>
       </div>
@@ -149,7 +147,7 @@ export function Decision(props: {
         )}
         <Button
           type="submit"
-          className="h-10 w-full"
+          className={wideButton}
           disabled={busy || option === ""}
         >
           Choose and continue

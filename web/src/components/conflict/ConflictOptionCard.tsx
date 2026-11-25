@@ -1,7 +1,10 @@
-import { cn } from "cn"
+"use client"
+
+import { cn } from "@/lib/utils"
 
 import { actionLabel, riskLabel } from "@/lib/conflict"
 import type { ConflictOption, ConflictRisk } from "@/lib/types"
+import { checkedCard, roomyRadio } from "@/components/list-controls/RadioCard"
 import { Badge } from "@/components/ui/badge"
 
 /** Each risk differs in words and in weight, so it never reads from color alone. */
@@ -44,7 +47,7 @@ export function ConflictOptionCard({
     <li
       className={cn(
         "flex flex-col gap-2 rounded-[10px] border border-input bg-card p-3",
-        checked && "border-primary bg-accent ring-1 ring-primary"
+        checked && checkedCard
       )}
     >
       <label className="flex cursor-pointer items-start gap-2.5">
@@ -54,7 +57,7 @@ export function ConflictOptionCard({
           value={option.id}
           checked={checked}
           onChange={() => onChoose(option.id)}
-          className="mt-1 size-4 accent-primary"
+          className={roomyRadio}
         />
         <span className="flex flex-col gap-0.5">
           <span className="text-sm font-semibold">{option.title}</span>

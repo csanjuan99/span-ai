@@ -16,6 +16,7 @@ import type { Conflict } from "@/lib/types"
 import { AbortMerge } from "@/components/conflict/AbortMerge"
 import { ConflictGroupSection } from "@/components/conflict/ConflictGroupSection"
 import { Button } from "@/components/ui/button"
+import { wideButton } from "@/lib/button-class"
 import { Consequences } from "@/components/status-block/Consequences"
 import { whereKeptRows } from "@/components/status-block/whereKept"
 import { Label } from "@/components/ui/label"
@@ -235,7 +236,7 @@ function Choosing({
         />
         <Button
           type="button"
-          className="h-10 w-full"
+          className={wideButton}
           disabled={!canApply(conflict, choices)}
           onClick={onApply}
         >
@@ -267,7 +268,7 @@ function Hint({ onHint }: { onHint: (text: string) => void }) {
       <Button
         type="button"
         variant="outline"
-        className="h-10 w-full"
+        className={wideButton}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >

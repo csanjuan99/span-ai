@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { DiffCode } from "@/components/implementation/DiffCode"
 import { FileStatusChip } from "@/components/files-changed/FileStatusChip"
 import { parseDiff, statusOf, type DiffFile } from "@/lib/diff"

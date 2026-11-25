@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { ExternalLinkIcon, FileTextIcon, TerminalIcon } from "lucide-react"
 import { useState } from "react"
 
@@ -86,7 +86,7 @@ export function FailureCard({ id, failure }: { id: string; failure: Failure }) {
               <button
                 type="button"
                 onClick={() => void openLog()}
-                className="ml-auto inline-flex items-center gap-1.5 text-sm text-primary underline-offset-4 hover:underline"
+                className="ml-auto inline-flex items-center gap-1.5 text-[13px] text-primary underline-offset-4 hover:underline"
               >
                 Open full log
                 <ExternalLinkIcon className="size-3.5" aria-hidden="true" />

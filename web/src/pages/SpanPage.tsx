@@ -84,6 +84,8 @@ import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { wideButton } from "@/lib/button-class"
+import { cn } from "@/lib/utils"
 
 /** Three readings of one run. The socket wakes the page. The statements stay the record. */
 const tabs = [
@@ -93,7 +95,7 @@ const tabs = [
 ] as const
 
 const tabClass =
-  "h-9 rounded-[10px] text-[13px] data-active:bg-card data-active:font-semibold data-active:text-primary dark:data-active:border-transparent dark:data-active:bg-card dark:data-active:text-primary"
+  "h-9 rounded-[10px] text-sm data-active:bg-card data-active:font-semibold data-active:text-primary dark:data-active:border-transparent dark:data-active:bg-card dark:data-active:text-primary"
 
 export function SpanPage() {
   const params = useParams()
@@ -580,7 +582,7 @@ export function SpanPage() {
             ...nextRows,
           ]}
         />
-        <Button type="button" className="h-10 w-full" onClick={primary.run}>
+        <Button type="button" className={wideButton} onClick={primary.run}>
           {primary.label}
         </Button>
         {holder !== "" ? (
@@ -600,7 +602,7 @@ export function SpanPage() {
           <Button
             type="button"
             variant="outline"
-            className="h-10 w-full"
+            className={wideButton}
             onClick={() => void relaunch()}
           >
             Relaunch
@@ -615,7 +617,7 @@ export function SpanPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 w-full"
+                className={wideButton}
                 onClick={openNote}
               >
                 <MessageSquare aria-hidden="true" />
@@ -634,7 +636,10 @@ export function SpanPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-10 w-full border-fail text-fail hover:bg-fail/10 hover:text-fail dark:border-fail dark:hover:bg-fail/10"
+                  className={cn(
+                    wideButton,
+                    "border-fail text-fail hover:bg-fail/10 hover:text-fail dark:border-fail dark:hover:bg-fail/10"
+                  )}
                   onClick={() => setRestartAt(restartStage(current))}
                 >
                   <Undo2 aria-hidden="true" />

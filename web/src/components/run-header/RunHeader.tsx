@@ -1,4 +1,4 @@
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { ClockIcon, FolderIcon, GitBranchIcon } from "lucide-react"
 import { Link } from "react-router"
 

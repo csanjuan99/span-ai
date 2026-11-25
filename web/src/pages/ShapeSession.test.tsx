@@ -193,6 +193,14 @@ describe("header and steps", () => {
 })
 
 describe("questions", () => {
+  it("keeps the answer buttons 44px tall on a phone and 40px on a desk", async () => {
+    open()
+    await screen.findByText("2 questions block the story")
+    const answer = screen.getAllByRole("button", { name: /^Answer Q/ })[0]
+    expect(answer.className).toContain("h-11")
+    expect(answer.className).toContain("md:h-10")
+  })
+
   it("sends every choice in one request, after each question is settled", async () => {
     mocks.answerShape.mockResolvedValue(ready())
     open()

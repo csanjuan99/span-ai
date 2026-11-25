@@ -151,7 +151,7 @@ export function ShapeBoard() {
         />
         <Link
           to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
-          className="text-[13px] text-primary hover:underline"
+          className="inline-flex min-h-11 items-center text-[13px] text-primary hover:underline md:min-h-0"
         >
           Open the list
         </Link>

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { ApiCli, type ApiAction } from "@/components/implementation/ApiCli"
 import { AuditTab } from "@/components/implementation/AuditTab"
 import { CommitsTab } from "@/components/implementation/CommitsTab"
@@ -20,6 +20,7 @@ import type { JournalState } from "@/hooks/use-events"
 import type { Change } from "@/lib/change"
 import { totals } from "@/lib/diff"
 import type { FeatureReport } from "@/lib/featuredoc"
+import { downloadFile } from "@/lib/download"
 import { reasonText } from "@/lib/guards"
 import {
   checkDecisions,
@@ -156,14 +157,7 @@ function plainCommits(log: CommitEntry[]): CommitStat[] {
 
 /** Saves the audit log as a file the person can hand to someone else. */
 function download(name: string, body: unknown) {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(body, null, 2)], { type: "application/json" })
-  )
-  const link = document.createElement("a")
-  link.href = url
-  link.download = name
-  link.click()
-  URL.revokeObjectURL(url)
+  downloadFile(name, JSON.stringify(body, null, 2), "application/json")
 }
 
 /**

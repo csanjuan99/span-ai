@@ -18,6 +18,8 @@ import { whenLabel } from "@/lib/clock"
 import { TabStrip } from "@/components/shaping/TabStrip"
 import type { ShapeSession } from "@/lib/types"
 import { monoCaption, noteText } from "@/components/shaping/styles"
+import { touchWideButton } from "@/lib/button-class"
+import { labelled } from "@/lib/shape-session"
 
 type Tab = "story" | "map" | "questions" | "context"
 
@@ -47,7 +49,7 @@ function Questions({ session }: { session: ShapeSession }) {
             <Pill tone={question.status === "assumed" ? "hold" : "pass"} small>
               {question.status === "assumed"
                 ? "Assumed"
-                : `Answered · ${question.answerId ?? ""}`.replace(/ · $/, "")}
+                : labelled("Answered", question.answerId)}
             </Pill>
           </div>
           <p className={noteText}>{question.answer}</p>
@@ -178,7 +180,7 @@ export function SealedBoard({
         >
           <Button
             type="button"
-            className="h-10 w-full"
+            className={touchWideButton}
             disabled={busy}
             onClick={onRun}
           >
@@ -187,7 +189,7 @@ export function SealedBoard({
           </Button>
           {session.jira !== null ? (
             <a
-              className="inline-flex h-10 w-full items-center justify-center rounded-[10px] border border-input bg-card text-sm font-medium"
+              className="inline-flex h-11 w-full items-center justify-center rounded-[10px] border border-input bg-card text-sm font-medium md:h-10"
               href={session.jira.url}
             >
               {`Open ${session.jira.key}`}
@@ -196,7 +198,7 @@ export function SealedBoard({
             <Button
               type="button"
               variant="outline"
-              className="h-10 w-full"
+              className={touchWideButton}
               disabled={busy}
               onClick={onPreview}
             >
@@ -206,7 +208,7 @@ export function SealedBoard({
           <Button
             type="button"
             variant="ghost"
-            className="h-10 w-full"
+            className={touchWideButton}
             disabled={busy}
             onClick={onFork}
           >

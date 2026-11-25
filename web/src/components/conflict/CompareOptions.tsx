@@ -1,7 +1,7 @@
 "use client"
 
 import { Check } from "lucide-react"
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { useId, useRef, useState, type KeyboardEvent } from "react"
 
 import { differingLines, riskLabel } from "@/lib/conflict"

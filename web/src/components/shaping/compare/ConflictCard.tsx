@@ -1,6 +1,6 @@
 "use client"
 
-import { RadioCard } from "@/components/shaping/RadioCard"
+import { RadioCard } from "@/components/list-controls/RadioCard"
 import { Panel, Pill } from "@/components/shaping/session-ui"
 import type { Conflict } from "@/lib/shape-compare"
 import { cardBody, wrapRow } from "@/components/shaping/styles"

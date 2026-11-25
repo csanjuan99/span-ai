@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 import { FilterChips } from "@/components/list-controls/FilterChips"
 import { CheckField } from "@/components/list-controls/CheckField"
 import { FileStatusChip } from "@/components/files-changed/FileStatusChip"

@@ -43,6 +43,7 @@ export function DeleteRun({
           type="button"
           variant="link"
           size="xs"
+          className="max-sm:min-h-11 max-sm:min-w-11"
           aria-label={`Delete ${label}`}
           onClick={() => setAsking(true)}
         >

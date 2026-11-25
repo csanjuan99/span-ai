@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "cn"
+import { cn } from "@/lib/utils"
 
 import { Panel, Pill } from "@/components/shaping/session-ui"
 import { sourceIcons } from "@/components/shaping/source-icons"
@@ -44,7 +44,7 @@ function SourceChip({
       aria-label={`Source: ${label}`}
       className={cn(
         style,
-        "cursor-pointer hover:border-primary",
+        "min-h-11 cursor-pointer hover:border-primary md:min-h-7",
         selected && "border-primary bg-accent"
       )}
       onClick={onPick}

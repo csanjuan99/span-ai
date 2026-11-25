@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { ArrowRightIcon } from "lucide-react"
 
-import { RadioCard } from "@/components/shaping/RadioCard"
+import { RadioCard } from "@/components/list-controls/RadioCard"
 import { Button } from "@/components/ui/button"
 import {
   ActionPanel,
