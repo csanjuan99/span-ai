@@ -11,6 +11,7 @@ import { changeOf } from "@/lib/change"
 import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
 import { proofOf } from "@/lib/proof"
+import { sinceLine } from "@/lib/since"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
@@ -149,6 +150,12 @@ export function SpanPage() {
           changeURL: cursor.changeURL,
         })
       : null
+  // The ledger is the only clock the page has: a hold began when the last statement was written.
+  const lastStamp = [...(state.span?.statements ?? [])].reverse().find((item) => item.time)?.time ?? ""
+  const since =
+    cursor?.done === true
+      ? ""
+      : sinceLine(waiting ? "waiting since" : cursor?.stop ? "stopped" : "held", lastStamp, new Date())
   const attempt = failure === null ? "" : attemptLine(failure)
   const where = needs?.kind === "failed" && attempt !== "" ? `${current} · ${attempt}` : current
 
@@ -278,6 +285,9 @@ export function SpanPage() {
           durations={stageDurations(state.span?.statements ?? [])}
         />
         <p className="text-pretty">{line}</p>
+        {since !== "" && (cursor?.hold || cursor?.stop) ? (
+          <p className="text-pretty text-sm tabular-nums text-muted-foreground">{since}</p>
+        ) : null}
         {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
         {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
       </header>
@@ -323,9 +333,9 @@ export function SpanPage() {
                 {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
               </NeedsYou>
             ) : null}
-              {done !== null ? <DoneCard done={done} /> : null}
-              {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
-              {proof !== null ? <ProofSummary proof={proof} /> : null}
+            {done !== null ? <DoneCard done={done} /> : null}
+            {running !== null ? <RunningCard running={running} onPause={() => void pause()} /> : null}
+            {proof !== null ? <ProofSummary proof={proof} /> : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
             <TabsList>

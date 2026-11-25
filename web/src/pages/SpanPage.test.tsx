@@ -275,3 +275,23 @@ describe("the card once the run is over", () => {
     expect(screen.queryByRole("region", { name: "Done" })).toBeNull()
   })
 })
+
+describe("how long the run has waited", () => {
+  const stamp = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
+
+  it("says when it was held and how long ago", () => {
+    state = held({ stage: "prove" }, [{ ...advance("build"), time: stamp(16) }])
+    page()
+    expect(screen.getByText(/^held \d\d:\d\d · 16 min ago$/)).toBeTruthy()
+  })
+
+  it("says nothing while the run goes on, or when the ledger has no time", () => {
+    state = held({ hold: false, reason: "" }, [{ ...advance("build"), time: stamp(5) }])
+    page()
+    expect(screen.queryByText(/min ago/)).toBeNull()
+    cleanup()
+    state = held({ stage: "prove" }, [advance("build")])
+    page()
+    expect(screen.queryByText(/min ago/)).toBeNull()
+  })
+})
