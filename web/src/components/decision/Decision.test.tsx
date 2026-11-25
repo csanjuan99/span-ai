@@ -13,8 +13,18 @@ const request: DecisionRequest = {
   happened: "The brief wants the button enabled.",
   evidence: [{ ref: "AGENTS.md:12", excerpt: "disable submit while invalid" }],
   options: [
-    { id: "follow-rule", label: "Follow AGENTS.md", consequence: "The button is disabled.", reversible: true },
-    { id: "stop", label: "Stop", consequence: "The run ends.", reversible: false },
+    {
+      id: "follow-rule",
+      label: "Follow AGENTS.md",
+      consequence: "The button is disabled.",
+      reversible: true,
+    },
+    {
+      id: "stop",
+      label: "Stop",
+      consequence: "The run ends.",
+      reversible: false,
+    },
   ],
   recommendation: "follow-rule",
 }
@@ -28,8 +38,17 @@ describe("Decision", () => {
     const onDecide = vi.fn(() => Promise.resolve())
     render(<Decision request={request} note="" onDecide={onDecide} />)
     expect(screen.getByText("disable submit while invalid")).toBeTruthy()
-    expect((screen.getByRole("radio", { name: /Follow AGENTS.md/ }) as HTMLInputElement).checked).toBe(true)
-    fireEvent.change(screen.getByLabelText("Your words for the agent (optional)"), { target: { value: "keep it disabled" } })
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: /Follow AGENTS.md/,
+        }) as HTMLInputElement
+      ).checked
+    ).toBe(true)
+    fireEvent.change(
+      screen.getByLabelText("Your words for the agent (optional)"),
+      { target: { value: "keep it disabled" } }
+    )
     fireEvent.click(screen.getByRole("button", { name: "Choose and continue" }))
     await screen.findByRole("button", { name: "Choose and continue" })
     expect(onDecide).toHaveBeenCalledWith("follow-rule", "keep it disabled")
@@ -49,8 +68,58 @@ describe("Decision", () => {
 describe("decisionOf", () => {
   it("reads a request and drops one nobody can answer", () => {
     expect(decisionOf(request)?.options).toHaveLength(2)
-    expect(decisionOf({ ...request, options: [request.options[0]] })).toBeUndefined()
+    expect(
+      decisionOf({ ...request, options: [request.options[0]] })
+    ).toBeUndefined()
     expect(decisionOf(null)).toBeUndefined()
-    expect(decisionOf({ ...request, options: [{ id: "", label: "" }, request.options[0]] })).toBeUndefined()
+    expect(
+      decisionOf({
+        ...request,
+        options: [{ id: "", label: "" }, request.options[0]],
+      })
+    ).toBeUndefined()
+  })
+})
+
+describe("Decision trade-off and next step", () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it("shows gain and cost and what the chosen option does next", () => {
+    const withTrade: DecisionRequest = {
+      ...request,
+      options: [
+        {
+          ...request.options[0]!,
+          then: "build",
+          gain: "Durable history",
+          cost: "One migration",
+        },
+        { ...request.options[1]!, then: "stop" },
+      ],
+    }
+    render(
+      <Decision
+        request={withTrade}
+        note=""
+        where="acme/api · span/x"
+        onDecide={() => Promise.resolve()}
+      />
+    )
+    expect(screen.getByText("Durable history")).toBeTruthy()
+    expect(screen.getByText("One migration")).toBeTruthy()
+    expect(screen.getByText("If you choose A")).toBeTruthy()
+    expect(screen.getByText("acme/api · span/x")).toBeTruthy()
+    expect(
+      screen.getByText("The build stage goes on with your answer as guidance.")
+    ).toBeTruthy()
+    fireEvent.click(screen.getByRole("radio", { name: /Stop/ }))
+    expect(screen.getByText("If you choose B")).toBeTruthy()
+    expect(
+      screen.getByText(
+        "The run ends. The branch and the changes stay as they are."
+      )
+    ).toBeTruthy()
   })
 })

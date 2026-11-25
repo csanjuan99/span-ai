@@ -6,8 +6,10 @@ import {
   choicePairs,
   conflictHold,
   diffLines,
+  differingLines,
   isConflictHold,
   kindLabel,
+  lineNumbers,
   remaining,
   riskLabel,
 } from "@/lib/conflict"
@@ -110,5 +112,31 @@ describe("conflict holds", () => {
     expect(conflictHold("conflict: choose how to resolve")).toBe("choose")
     expect(conflictHold("conflict: aborted")).toBe("aborted")
     expect(conflictHold("prove failed")).toBeNull()
+  })
+})
+
+describe("lineNumbers", () => {
+  it("counts the old side for a removed line and the new side for the rest", () => {
+    const lines = diffLines("@@ -10,3 +20,3 @@\n same\n-old\n+new\n tail\n")
+    expect(lineNumbers(lines)).toEqual([null, 20, 11, 21, 22])
+  })
+
+  it("leaves headers and lines before a hunk without a number", () => {
+    expect(lineNumbers(diffLines("diff --git a b\n+x\n"))).toEqual([null, null])
+  })
+})
+
+describe("differingLines", () => {
+  it("marks the changed lines another option does not have, and nothing shared", () => {
+    const a = "@@ -1 +1 @@\n-x\n+y\n+shared\n"
+    const b = "@@ -1 +1 @@\n-x\n+z\n+shared\n"
+    const [first, second] = differingLines([a, b])
+    expect([...(first ?? [])]).toEqual(["+y"])
+    expect([...(second ?? [])]).toEqual(["+z"])
+  })
+
+  it("marks nothing when the options write the same lines", () => {
+    const same = "-a\n+b\n"
+    expect(differingLines([same, same]).map((set) => set.size)).toEqual([0, 0])
   })
 })

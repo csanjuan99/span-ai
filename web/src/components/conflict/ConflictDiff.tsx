@@ -1,50 +1,74 @@
+"use client"
+
 import { useState } from "react"
 import { cn } from "cn"
 
-import { diffLines, type DiffLineKind } from "@/lib/conflict"
+import { diffLines, lineNumbers, type DiffLineKind } from "@/lib/conflict"
 import { Button } from "@/components/ui/button"
 
-/** Lines shown before "Show more": enough to read a hunk, short enough to compare cards. */
+/** Lines shown before "Show more": enough to read a hunk, short enough to compare groups. */
 const cap = 40
 
-const lineClass: Record<DiffLineKind, string> = {
-  add: "text-pass",
-  del: "text-destructive",
+const rowClass: Record<DiffLineKind, string> = {
+  add: "bg-pass-soft text-pass",
+  del: "bg-fail-soft text-fail",
   header: "text-muted-foreground",
-  context: "",
+  context: "text-muted-foreground",
 }
 
 /**
- * The unified diff an option would write, collapsed by default so the cards stay
- * comparable. The +/- prefix stays in the text, so the reading never depends on color.
+ * The unified diff an option would write, in a code block with the line numbers in the margin.
+ * The +/- prefix stays in the text, so the reading never depends on color. Lines in `differs`
+ * carry a bar on the left, so a comparison shows where the options part ways.
  */
-export function ConflictDiff({ diff }: { diff: string }) {
-  const [open, setOpen] = useState(false)
+export function ConflictDiff({
+  diff,
+  differs,
+}: {
+  diff: string
+  differs?: ReadonlySet<string>
+}) {
   const [all, setAll] = useState(false)
   const lines = diffLines(diff)
   if (lines.length === 0) {
     return null
   }
+  const numbers = lineNumbers(lines)
   const shown = all ? lines : lines.slice(0, cap)
   return (
     <div className="flex flex-col gap-2">
-      <Button type="button" variant="ghost" size="xs" className="self-start" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? "Hide diff" : "Show diff"}
-      </Button>
-      {open ? (
-        <pre
-          aria-label="Diff"
-          className="max-h-96 overflow-auto border border-border bg-muted/40 p-2 font-mono text-xs leading-5"
-        >
-          {shown.map((line, at) => (
-            <span key={at} data-kind={line.kind} className={cn("block whitespace-pre", lineClass[line.kind])}>
-              {line.text}
+      <div
+        role="region"
+        aria-label="Diff"
+        tabIndex={0}
+        className="max-h-96 overflow-auto rounded-[10px] border border-border bg-muted py-2.5 font-mono text-[13px] leading-5"
+      >
+        {shown.map((line, at) => (
+          <div
+            key={at}
+            data-differs={differs?.has(line.text) ? "true" : undefined}
+            className={cn(
+              "grid min-w-max grid-cols-[44px_minmax(0,1fr)] pr-3.5 whitespace-pre",
+              rowClass[line.kind],
+              differs?.has(line.text) &&
+                "shadow-[inset_3px_0_0_0] shadow-primary"
+            )}
+          >
+            <span className="pr-2 text-right text-muted-foreground tabular-nums">
+              {numbers[at]}
             </span>
-          ))}
-        </pre>
-      ) : null}
-      {open && lines.length > shown.length ? (
-        <Button type="button" variant="ghost" size="xs" className="self-start" onClick={() => setAll(true)}>
+            <span data-kind={line.kind}>{line.text}</span>
+          </div>
+        ))}
+      </div>
+      {lines.length > shown.length ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="self-start"
+          onClick={() => setAll(true)}
+        >
           Show more
         </Button>
       ) : null}

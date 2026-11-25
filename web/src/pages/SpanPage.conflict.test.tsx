@@ -102,7 +102,7 @@ describe("SpanPage on a merge conflict", () => {
   it("shows the conflict panel and not the generic failure card", () => {
     state = held({ reason: "conflict: choose how to resolve", conflict: choosing })
     renderPage()
-    expect(screen.getByRole("region", { name: "Merge conflict" })).toBeTruthy()
+    expect(screen.getByRole("region", { name: /hits a conflict/ })).toBeTruthy()
     expect(screen.queryByRole("region", { name: "Failing check" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Fix and retry" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull()
@@ -111,7 +111,7 @@ describe("SpanPage on a merge conflict", () => {
   it("shows a neutral note and the normal resume after an abort", () => {
     state = held({ reason: "conflict: aborted" })
     renderPage()
-    expect(screen.queryByRole("region", { name: "Merge conflict" })).toBeNull()
+    expect(screen.queryByRole("region", { name: /hits a conflict/ })).toBeNull()
     expect(screen.queryByRole("region", { name: "Failing check" })).toBeNull()
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
     expect(screen.getAllByText(/merge was aborted/).length).toBeGreaterThan(0)

@@ -167,3 +167,45 @@ export function conflictSignature(conflict: Conflict): string {
 export function proposalKey(conflict: Conflict): string {
   return conflict.groups.map((group) => `${group.id}:${group.options.map((item) => item.id).join(",")}`).join(";")
 }
+
+const hunkStart = /^@@ -(\d+)(?:,\d+)? \+(\d+)/
+
+/**
+ * The line number each diff line carries in the margin: the old side for a removed line, the
+ * new side for the rest. Headers carry none, and neither does anything before the first hunk.
+ */
+export function lineNumbers(lines: readonly DiffLine[]): (number | null)[] {
+  let before = 0
+  let after = 0
+  return lines.map((line) => {
+    const hunk = hunkStart.exec(line.text)
+    if (hunk !== null) {
+      before = Number(hunk[1])
+      after = Number(hunk[2])
+      return null
+    }
+    if (line.kind === "header" || after === 0) {
+      return null
+    }
+    if (line.kind === "del") {
+      return before++
+    }
+    before += 1
+    return after++
+  })
+}
+
+/** How many files a conflict holds across its groups. */
+export function conflictFileCount(conflict: Conflict): number {
+  return conflict.groups.reduce((total, group) => total + group.files.length, 0)
+}
+
+/**
+ * For each option's diff, the added and removed lines the other options do not all share.
+ * Comparing options side by side highlights these, so the differences stand out from the
+ * hunk header and context they have in common.
+ */
+export function differingLines(diffs: readonly string[]): ReadonlySet<string>[] {
+  const changed = diffs.map((diff) => new Set(diffLines(diff).filter((line) => line.kind === "add" || line.kind === "del").map((line) => line.text)))
+  return changed.map((mine, at) => new Set([...mine].filter((text) => changed.some((other, to) => to !== at && !other.has(text)))))
+}
