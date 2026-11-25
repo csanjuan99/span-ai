@@ -1,10 +1,13 @@
 import type { ReactNode } from "react"
 
-import { ThemeToggle } from "@/components/theme-toggle/ThemeToggle"
+import { AppBar } from "@/components/app-bar/AppBar"
 import { Timeline } from "@/components/timeline/Timeline"
 import type { TimelineLine } from "@/lib/timeline"
 
-/** One terminal session: a title bar, the pane, the timeline, and a status line. */
+/**
+ * One page: the shared top bar, the content, and, for a run that is writing a log, its
+ * timeline and status line at the foot.
+ */
 export function Shell({
   path,
   status,
@@ -18,19 +21,21 @@ export function Shell({
 }) {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-2 text-sm">
-        <span className="shrink-0 font-semibold text-primary">span</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground tabular-nums">{path}</span>
-        <ThemeToggle />
-      </div>
-      <main className="flex min-h-0 w-full flex-1 flex-col gap-6 overflow-y-auto px-4 py-6">{children}</main>
-      <footer className="shrink-0 bg-surface-code">
-        <Timeline lines={lines} />
-        <div className="flex items-center justify-between border-t border-border px-4 py-2 font-mono text-xs text-muted-foreground">
-          <span className="tabular-nums">{status}</span>
-          <span>span serve</span>
+      <AppBar path={path} />
+      <main className="min-h-0 w-full flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 px-4 pt-4 pb-12 sm:px-10 sm:pt-8 sm:pb-16">
+          {children}
         </div>
-      </footer>
+      </main>
+      {lines.length > 0 ? (
+        <footer className="shrink-0 bg-surface-code">
+          <Timeline lines={lines} />
+          <div className="flex items-center justify-between border-t border-border px-4 py-2 font-mono text-xs text-muted-foreground">
+            <span className="tabular-nums">{status}</span>
+            <span>span serve</span>
+          </div>
+        </footer>
+      ) : null}
     </div>
   )
 }

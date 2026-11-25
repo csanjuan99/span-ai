@@ -140,3 +140,6 @@ export function nextChord(
     ? { pending: "g", go: "" }
     : { pending: "", go: "" }
 }
+
+/** What the top bar sends to open the command palette from a click. */
+export const openPaletteEvent = "span:open-palette"

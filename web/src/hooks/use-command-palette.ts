@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 
-import { isTyping, nextChord } from "@/lib/help"
+import { isTyping, nextChord, openPaletteEvent } from "@/lib/help"
 
 /** What the palette and the shortcut sheet need: whether each is open, and a way to change that. */
 export interface CommandPaletteState {
@@ -57,8 +57,13 @@ export function useCommandPalette(
         goRef.current(step.go)
       }
     }
+    const onOpen = () => setPaletteOpen(true)
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    window.addEventListener(openPaletteEvent, onOpen)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener(openPaletteEvent, onOpen)
+    }
   }, [])
 
   return { paletteOpen, setPaletteOpen, sheetOpen, setSheetOpen }
