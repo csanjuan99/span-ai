@@ -10,8 +10,8 @@ import { Textarea } from "@/components/ui/textarea"
 export function Waiting(props: {
   questions: string[]
   note: string
-  onAnswer: (answers: { question: string; body: string }[]) => Promise<void>
-  onReload: () => Promise<void>
+  onAnswer: (answers: { question: string; body: string }[]) => Promise<unknown>
+  onReload: () => Promise<unknown>
 }) {
   const [bodies, setBodies] = useState<string[]>(() => props.questions.map(() => ""))
   const [busy, setBusy] = useState(false)

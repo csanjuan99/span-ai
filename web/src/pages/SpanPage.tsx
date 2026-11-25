@@ -168,7 +168,7 @@ export function SpanPage() {
   async function act(
     request: () => Promise<unknown>,
     outcome: { log: string; say: string | ((result: unknown) => string); failed: string },
-  ) {
+  ): Promise<boolean> {
     setNote("")
     try {
       const result = await request()
@@ -176,20 +176,32 @@ export function SpanPage() {
         state.note(outcome.log)
       }
       setNote(typeof outcome.say === "function" ? outcome.say(result) : outcome.say)
+      return true
     } catch (err: unknown) {
       setNote(err instanceof Error ? err.message : outcome.failed)
+      return false
     }
   }
 
   const asked = (what: string) => (why: unknown) => (typeof why === "string" && why !== "" ? why : `${what} requested.`)
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    await act(() => saveInstruction(id, selected, body), {
+  const saveNote = () =>
+    act(() => saveInstruction(id, selected, body), {
       log: "",
       say: "Instruction saved.",
       failed: "the instruction was not saved",
     })
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await saveNote()
+  }
+
+  // The note is read when the stage starts again, so it is saved first and only then does the run go on.
+  async function saveAndResume() {
+    if (await saveNote()) {
+      await resume()
+    }
   }
 
   const answer = (answers: { question: string; body: string }[]) =>
@@ -394,6 +406,7 @@ export function SpanPage() {
                 onSelect={setStage}
                 onBody={setBody}
                 onSave={(event) => void save(event)}
+                onSaveAndResume={canAct && !cursor?.done ? () => void saveAndResume() : undefined}
                 onOpen={() => {
                   setStage(selected)
                   setShowNote(true)

@@ -7,6 +7,7 @@ import type { Cursor, Snapshot, Statement } from "@/lib/types"
 
 const approveStage = vi.fn()
 const resumeRun = vi.fn()
+const saveInstruction = vi.fn()
 let state: SpanState
 
 vi.mock("@/hooks/use-span", () => ({ useSpan: () => state }))
@@ -16,6 +17,7 @@ vi.mock("@/lib/api", async (original) => {
     ...real,
     approveStage: (id: string, stage: string, environment: string) => approveStage(id, stage, environment),
     resumeRun: (id: string) => resumeRun(id),
+    saveInstruction: (id: string, stage: string, body: string) => saveInstruction(id, stage, body),
   }
 })
 
@@ -74,6 +76,7 @@ function page() {
 beforeEach(() => {
   approveStage.mockReset()
   resumeRun.mockReset()
+  saveInstruction.mockReset()
   approveStage.mockResolvedValue(undefined)
 })
 
@@ -309,5 +312,43 @@ describe("a checkout another run holds", () => {
     state = held({ stage: "build", reason: reason("pid 4321 shape") })
     page()
     expect(screen.queryByRole("link", { name: "Open the other run" })).toBeNull()
+  })
+})
+
+describe("a note and a resume in one click", () => {
+  const writeNote = () => {
+    // A held run already shows the form; one that goes on keeps it closed behind a button.
+    screen.queryByRole("button", { name: "Leave a note for a stage" })?.click()
+    fireEvent.change(screen.getByLabelText("Instruction body"), { target: { value: "Keep the backoff at 2x." } })
+  }
+
+  it("saves the note, then resumes, in that order", async () => {
+    state = held({ stage: "prove" })
+    saveInstruction.mockResolvedValue(undefined)
+    resumeRun.mockResolvedValue(undefined)
+    page()
+    writeNote()
+    fireEvent.click(screen.getByRole("button", { name: "Save and resume" }))
+    await waitFor(() => expect(resumeRun).toHaveBeenCalledOnce())
+    expect(saveInstruction).toHaveBeenCalledWith("span-1", "prove", "Keep the backoff at 2x.")
+    expect(saveInstruction.mock.invocationCallOrder[0]).toBeLessThan(resumeRun.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it("does not resume when the note was not saved", async () => {
+    state = held({ stage: "prove" })
+    saveInstruction.mockRejectedValue(new Error("disk full"))
+    page()
+    writeNote()
+    fireEvent.click(screen.getByRole("button", { name: "Save and resume" }))
+    expect((await screen.findAllByText("disk full")).length).toBeGreaterThan(0)
+    expect(resumeRun).not.toHaveBeenCalled()
+  })
+
+  it("offers only the plain save while the run goes on, since there is nothing to resume", () => {
+    state = { ...held({ stage: "build", hold: false, reason: "" }), agent: { id: "span-1", running: true, relaunch: false, name: "claude-code", pid: 7, stage: "build", elapsed: "1m", summary: "running" } }
+    page()
+    fireEvent.click(screen.getByRole("button", { name: "Leave a note for a stage" }))
+    expect(screen.getByRole("button", { name: "Save instruction" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Save and resume" })).toBeNull()
   })
 })

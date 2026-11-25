@@ -34,7 +34,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T11 | S8 | inline | Required marker and progress on open questions (the engine refuses an empty answer) | done, see git log |
 | T12 | S8 | inline | Backend: commit count on the implementation view (`git rev-list --count base..head`) | done, see git log |
 | T13 | S8 | inline | No backend needed: the hold reason already names the holder (`pid N run <id>`), so the page links to it | done, see git log |
-| T14 | S8 | deferred | Backend: note and resume in one call | |
+| T14 | S8 | inline | No backend needed: one click saves the note, then resumes only if it saved | done, see git log |
 | T6 | S7 | inline | Mobile layout, in the order the design draws it | done, see git log |
 
 S8. The page matches the design's desktop artboards S1 to S9. What the code already supports is drawn as is; what it does not is built, in this order: frontend-only first, backend after.

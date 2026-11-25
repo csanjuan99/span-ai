@@ -19,6 +19,8 @@ export function InstructionNote(props: {
   onBody: (body: string) => void
   onSave: (event: FormEvent<HTMLFormElement>) => void
   onOpen: () => void
+  /** Saves the note and resumes the run in one step. Only given when the run can resume. */
+  onSaveAndResume?: () => void
 }) {
   if (!props.open) {
     return (
@@ -61,6 +63,11 @@ export function InstructionNote(props: {
         <Button type="submit" variant="secondary" className="self-start">
           Save instruction
         </Button>
+        {props.onSaveAndResume !== undefined ? (
+          <Button type="button" className="self-start" onClick={props.onSaveAndResume}>
+            Save and resume
+          </Button>
+        ) : null}
         {props.note !== "" ? <p className="text-pretty text-sm">{props.note}</p> : null}
       </div>
     </form>
