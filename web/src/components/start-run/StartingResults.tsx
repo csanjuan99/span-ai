@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowLeftIcon, ArrowRightIcon } from "lucide-react"
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from "lucide-react"
 
 import { KeptNext } from "@/components/problem/KeptNext"
 import { Pill, Panel } from "@/components/shaping/session-ui"
@@ -29,7 +29,14 @@ export function StartingResults({
       <Panel className="flex flex-col">
         <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
           <h2 className="text-lg leading-[26px] font-semibold">{title}</h2>
-          {result.partial ? <Pill tone="hold">Partly started</Pill> : null}
+          {result.partial ? (
+            <Pill tone="hold">Partly started</Pill>
+          ) : (
+            <Pill tone="pass">
+              <CheckIcon className="size-3.5" aria-hidden="true" />
+              All started
+            </Pill>
+          )}
           <span className="text-[13px] text-muted-foreground">
             {result.partial
               ? "The failure does not stop the others."
@@ -56,10 +63,11 @@ export function StartingResults({
               <Button
                 type="button"
                 className={touchButton}
+                aria-label={`Open ${run.repo === "" ? run.id : run.repo}`}
                 onClick={() => onOpen(run.id)}
               >
                 <ArrowRightIcon aria-hidden="true" />
-                Open {run.repo === "" ? run.id : run.repo}
+                Open
               </Button>
             </li>
           ))}
@@ -73,7 +81,7 @@ export function StartingResults({
       <KeptNext
         kept={
           result.partial
-            ? `The ${result.runs.length} running runs and their branches. Nothing was created in the others.`
+            ? `${result.runs.length === 1 ? "The running run and its branch" : `The ${result.runs.length} running runs and their branches`}. Nothing was created in the others.`
             : "Your folder and files are untouched. Nothing is on the base branch."
         }
         next={

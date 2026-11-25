@@ -502,14 +502,10 @@ export function liveFrame(value: unknown): LiveFrame {
     frame.stage = value.stage
   }
   if (Array.isArray(value.lines)) {
-    frame.lines = value.lines.filter(
-      (line): line is string => typeof line === "string"
-    )
+    frame.lines = textLines(value.lines)
   }
   if (Array.isArray(value.transcript)) {
-    frame.transcript = value.transcript.filter(
-      (line): line is string => typeof line === "string"
-    )
+    frame.transcript = textLines(value.transcript)
   }
   if (value.span != null) {
     frame.span = snapshot(value.span)
@@ -527,8 +523,26 @@ export function liveFrame(value: unknown): LiveFrame {
   return frame
 }
 
+function textLines(items: unknown[]): string[] {
+  return items.filter((line): line is string => typeof line === "string")
+}
+
 function isWholeCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+/** The code a failed status carries when the body names none: a missing page or a dead gateway. */
+function statusCode(status: number): string {
+  if (status === 404) {
+    return "not_found"
+  }
+  return status === 502 || status === 503 || status === 504 ? "unreachable" : ""
+}
+
+/** The error a failed reply raises: the server's code, or the one its status stands for. */
+function failureOf(response: Response, body: unknown): ApiError {
+  const coded = isRecord(body) ? text(body.error) : ""
+  return new ApiError(coded || statusCode(response.status), messageOf(body))
 }
 
 async function readBody(response: Response): Promise<unknown> {
@@ -542,17 +556,8 @@ async function readBody(response: Response): Promise<unknown> {
     // net/http's NotFound is plain text. A failed call still has to carry a code,
     // or a missing run sits on the loading skeleton instead of the not-found page.
     if (!response.ok) {
-      const gateway =
-        response.status === 502 ||
-        response.status === 503 ||
-        response.status === 504
       return {
-        error:
-          response.status === 404
-            ? "not_found"
-            : gateway
-              ? "unreachable"
-              : "invalid",
+        error: statusCode(response.status) || "invalid",
         message: raw.trim().slice(0, 200) || "request failed",
       }
     }
@@ -563,11 +568,9 @@ async function readBody(response: Response): Promise<unknown> {
   }
 }
 
-/** Fetches JSON and surfaces the server message beside the action that sent it. */
-export async function getJSON(url: string): Promise<unknown> {
-  let response: Response
+async function fetchJSON(url: string): Promise<Response> {
   try {
-    response = await fetch(url, {
+    return await fetch(url, {
       headers: withAuth(new Headers({ Accept: "application/json" })),
     })
   } catch (err: unknown) {
@@ -577,25 +580,36 @@ export async function getJSON(url: string): Promise<unknown> {
       err instanceof Error ? err.message : "the server did not answer"
     )
   }
-  refuseUnauthorized(response)
+}
+
+/** Reads a JSON reply: a failed one throws with the server's code, unless `answer` takes its body as the result. */
+async function readReply(
+  url: string,
+  answer: (body: unknown) => boolean
+): Promise<unknown> {
+  const response = await fetchJSON(url)
   const body = await readBody(response)
+  if (!response.ok && answer(body)) {
+    return body
+  }
+  refuseUnauthorized(response)
   if (!response.ok) {
-    const gateway =
-      response.status === 502 ||
-      response.status === 503 ||
-      response.status === 504
-    const coded = isRecord(body) ? text(body.error) : ""
-    const code =
-      coded !== ""
-        ? coded
-        : response.status === 404
-          ? "not_found"
-          : gateway
-            ? "unreachable"
-            : ""
-    throw new ApiError(code, messageOf(body))
+    throw failureOf(response, body)
   }
   return body
+}
+
+/** Reads the start precheck. A refused start answers 4xx with its refusal: that body is the answer, not a failure. */
+export function getPrecheck(url: string): Promise<unknown> {
+  return readReply(
+    url,
+    (body) => isRecord(body) && typeof body.number === "number"
+  )
+}
+
+/** Fetches JSON and surfaces the server message beside the action that sent it. */
+export function getJSON(url: string): Promise<unknown> {
+  return readReply(url, () => false)
 }
 
 /** Keeps the entries of a `runs` reply that are runs. The reply is untrusted input. */
@@ -762,6 +776,22 @@ export function agentList(value: unknown): AgentStatus[] {
   return value.agents.map((item) => agentStatus(item))
 }
 
+/** One form-urlencoded POST with the access token. */
+function sendForm(
+  url: string,
+  body: URLSearchParams,
+  redirect?: RequestRedirect
+): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: withAuth(
+      new Headers({ "Content-Type": "application/x-www-form-urlencoded" })
+    ),
+    body,
+    redirect,
+  })
+}
+
 /** Posts a stage instruction and leaves the span page in place. */
 export async function saveInstruction(
   id: string,
@@ -771,14 +801,7 @@ export async function saveInstruction(
   const data = new URLSearchParams()
   data.set("stage", stage)
   data.set("body", body)
-  const response = await fetch(`/spans/${id}/instructions`, {
-    method: "POST",
-    headers: withAuth(
-      new Headers({ "Content-Type": "application/x-www-form-urlencoded" })
-    ),
-    body: data,
-    redirect: "manual",
-  })
+  const response = await sendForm(`/spans/${id}/instructions`, data, "manual")
   if (response.status === 303 || response.status === 0 || response.ok) {
     return
   }
@@ -791,13 +814,7 @@ export async function postForm(
   url: string,
   body: URLSearchParams
 ): Promise<unknown> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: withAuth(
-      new Headers({ "Content-Type": "application/x-www-form-urlencoded" })
-    ),
-    body,
-  })
+  const response = await sendForm(url, body)
   refuseUnauthorized(response)
   const payload = await readBody(response)
   if (!response.ok) {
@@ -984,7 +1001,7 @@ function spanHeadOf(value: unknown): SpanHead {
     updatedAt: text(row.updatedAt),
     startedAt: text(row.startedAt),
     need: text(row.need),
-    count: typeof row.count === "number" ? row.count : 0,
+    count: count(row.count),
   }
 }
 
@@ -1006,6 +1023,15 @@ export class ApiError extends Error {
   }
 }
 
+/** The refusal a /shapes route answered, with the server's code. */
+function shapeError(raw: string): ApiError {
+  const payload = errorBody(raw)
+  return new ApiError(
+    isRecord(payload) ? text(payload.error) : "",
+    messageOf(payload)
+  )
+}
+
 /** A GET to a /shapes route that answers a file, such as an export; returns its text. */
 export async function shapeFile(url: string): Promise<string> {
   const response = await fetch(url, {
@@ -1016,11 +1042,7 @@ export async function shapeFile(url: string): Promise<string> {
   if (response.ok) {
     return raw
   }
-  const payload = errorBody(raw)
-  throw new ApiError(
-    isRecord(payload) ? text(payload.error) : "",
-    messageOf(payload)
-  )
+  throw shapeError(raw)
 }
 
 /** One JSON request to a /shapes route; a refusal throws an ApiError with the server's code. */
@@ -1043,11 +1065,7 @@ export async function shapeRequest(
   if (response.ok) {
     return raw === "" ? null : parseJSON(raw)
   }
-  const payload = errorBody(raw)
-  throw new ApiError(
-    isRecord(payload) ? text(payload.error) : "",
-    messageOf(payload)
-  )
+  throw shapeError(raw)
 }
 
 function shapeSource(value: unknown): ShapeSource {
@@ -1490,7 +1508,7 @@ export function folderProbeOf(value: unknown): FolderProbe {
     git: flag(body.git),
     branch: text(body.branch),
     remote: text(body.remote),
-    dirty: typeof body.dirty === "number" ? body.dirty : 0,
+    dirty: count(body.dirty),
     reason: text(body.reason),
   }
 }

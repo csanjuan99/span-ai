@@ -13,17 +13,14 @@ import {
 } from "lucide-react"
 import { Link } from "react-router"
 
-import { CommandLine } from "@/components/problem/CommandLine"
-import { KeptNext } from "@/components/problem/KeptNext"
-import { Panel, type Tone } from "@/components/shaping/session-ui"
+import { ProblemCard } from "@/components/problem/ProblemCard"
 import { Button, buttonVariants } from "@/components/ui/button"
 import type { StartRefusal } from "@/components/start-run/types"
-import { wideButton } from "@/lib/button-class"
 import { cn } from "@/lib/utils"
 
 interface Refusal {
   band: string
-  tone: Tone
+  tone: "hold" | "fail"
   icon: LucideIcon
   title: string
   kept: string
@@ -58,7 +55,7 @@ const refusals: Record<number, Refusal> = {
   },
   14: {
     band: "Not a git repository",
-    tone: "fail",
+    tone: "hold",
     icon: FolderIcon,
     title: "This folder is not a git repository",
     kept: "Nothing was created. Your files are untouched.",
@@ -69,7 +66,7 @@ const refusals: Record<number, Refusal> = {
   },
   15: {
     band: "Base branch missing",
-    tone: "fail",
+    tone: "hold",
     icon: ShieldAlertIcon,
     title: "That base branch does not exist",
     kept: "No branch and no run were created.",
@@ -122,14 +119,6 @@ const generic: Refusal = {
   actionIcon: ArrowRightIcon,
 }
 
-const bands: Record<Tone, string> = {
-  acc: "bg-accent text-primary",
-  pass: "bg-pass-soft text-pass",
-  hold: "bg-hold-soft text-hold",
-  fail: "bg-fail-soft text-fail",
-  mut: "bg-muted text-muted-foreground",
-}
-
 /** N4: a coded refusal before any run exists: the cause, what is kept, and the one way on. */
 export function RefusalPanels({
   refusal,
@@ -139,53 +128,37 @@ export function RefusalPanels({
   onDismiss: () => void
 }) {
   const view = refusals[refusal.number] ?? generic
-  const Band = view.icon
   const Action = view.actionIcon
-  const target =
-    view.to ?? (refusal.runId !== undefined && refusal.runId !== ""
-      ? `/spans/${refusal.runId}`
-      : undefined)
+  const title =
+    refusal.number === 15 && refusal.base !== undefined && refusal.base !== ""
+      ? `Branch ${refusal.base} does not exist`
+      : view.title
+  const runId = refusal.runId ?? ""
+  const target = view.to ?? (runId !== "" ? `/spans/${runId}` : undefined)
   return (
-    <Panel
-      aria-label="Refusal"
-      className="flex flex-col overflow-hidden"
-      role="alert"
-    >
-      <div
-        className={cn(
-          "flex items-center gap-2 px-4 py-2 text-xs font-semibold",
-          bands[view.tone]
-        )}
+    <div role="alert">
+      <ProblemCard
+        label={view.band}
+        tone={view.tone}
+        icon={view.icon}
+        title={title}
+        cause={refusal.message}
+        command={view.command}
+        kept={view.kept}
+        next={view.next}
       >
-        <Band aria-hidden="true" className="size-4" />
-        {view.band}
-      </div>
-      <div className="flex flex-col gap-3 p-4 md:p-5">
-        <h2 className="text-lg leading-[26px] font-semibold">{view.title}</h2>
-        <p className="text-sm text-pretty">
-          <b>Cause.</b> {refusal.message}
-        </p>
-        {view.command !== undefined ? (
-          <CommandLine command={view.command} />
-        ) : null}
-        <KeptNext kept={view.kept} next={view.next} />
         {target !== undefined ? (
-          <Link
-            to={target}
-            className={cn(buttonVariants(), wideButton, "gap-2")}
-          >
+          <Link to={target} className={cn(buttonVariants(), "gap-2")}>
             <Action aria-hidden="true" />
-            {refusal.runId !== undefined && refusal.runId !== ""
-              ? `${view.action}: ${refusal.runId}`
-              : view.action}
+            {runId !== "" ? `${view.action}: ${runId}` : view.action}
           </Link>
         ) : (
-          <Button type="button" className={wideButton} onClick={onDismiss}>
+          <Button type="button" onClick={onDismiss}>
             <Action aria-hidden="true" />
             {view.action}
           </Button>
         )}
-      </div>
-    </Panel>
+      </ProblemCard>
+    </div>
   )
 }

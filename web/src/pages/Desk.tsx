@@ -17,6 +17,7 @@ import {
   agentList,
   branchChoice,
   getJSON,
+  getPrecheck,
   getShape,
   postForm,
   spanHeadsOf,
@@ -157,13 +158,7 @@ export function Desk() {
       })
       .catch((err: unknown) => {
         if (closed) return
-        if (err instanceof UnauthorizedError) {
-          setListNote(
-            "This server needs its access token. Add it under Settings."
-          )
-        } else {
-          setListNote(reasonText(err, "the desk could not load"))
-        }
+        setListNote(reasonText(err, "the desk could not load"))
         setListOk(false)
         setListed(true)
       })
@@ -214,6 +209,15 @@ export function Desk() {
     }
   }
 
+  /** A refused token shows its N4 card; any other failure is left to the caller. */
+  function refuseToken(err: unknown): boolean {
+    if (!(err instanceof UnauthorizedError)) {
+      return false
+    }
+    setRefusal(tokenRefusal(err))
+    return true
+  }
+
   async function readBranches(project: string) {
     if (project.trim() === "") {
       setBranches(noBranches)
@@ -225,8 +229,9 @@ export function Desk() {
           await getJSON(`/branches?path=${encodeURIComponent(project)}`)
         )
       )
-    } catch {
+    } catch (err: unknown) {
       setBranches(noBranches)
+      setListNote(reasonText(err, "the branches could not be read"))
     }
   }
 
@@ -363,7 +368,7 @@ export function Desk() {
       data.set("base", base.trim())
     }
     try {
-      const pre = await getJSON(
+      const pre = await getPrecheck(
         `/start/precheck?${precheckQuery(data).toString()}`
       )
       const blocked = refusalOf(pre)
@@ -372,8 +377,7 @@ export function Desk() {
         return
       }
     } catch (err: unknown) {
-      if (err instanceof UnauthorizedError) {
-        setRefusal(tokenRefusal(err))
+      if (refuseToken(err)) {
         return
       }
       // An old server has no precheck route; the start itself still answers for the story.
@@ -398,8 +402,7 @@ export function Desk() {
       note("run started")
       void navigate(`/spans/${result.id}`)
     } catch (err: unknown) {
-      if (err instanceof UnauthorizedError) {
-        setRefusal(tokenRefusal(err))
+      if (refuseToken(err)) {
         return
       }
       const message = reasonText(err, "the run did not start")

@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils"
 /** The colour of the label: something is wrong (fail), waiting on a person (hold) or just missing (info). */
 export type ProblemTone = "fail" | "hold" | "info"
 
-const tones: Record<ProblemTone, string> = {
+/** The band colors of a card, by tone. */
+export const problemTones: Record<ProblemTone, string> = {
   fail: "bg-fail-soft text-fail",
   hold: "bg-hold-soft text-hold",
   info: "bg-accent text-primary",
@@ -49,7 +50,7 @@ export function ProblemCard({
       <div
         className={cn(
           "flex flex-wrap items-center gap-2 px-4 py-2.5 text-xs font-medium md:px-5",
-          tones[tone]
+          problemTones[tone]
         )}
       >
         <Icon className="size-4" aria-hidden="true" />
