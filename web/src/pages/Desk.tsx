@@ -17,6 +17,7 @@ import {
   agentList,
   branchChoice,
   getJSON,
+  getShape,
   postForm,
   spanHeadsOf,
   startRun,
@@ -31,12 +32,11 @@ import {
   type TimelineAction,
 } from "@/lib/timeline"
 import type {
-  AgentChoice,
   AgentStatus,
   BranchChoice,
   SpanHead,
 } from "@/lib/types"
-import { isRecord, reasonText } from "@/lib/guards"
+import { isRecord, reasonText, rows, text } from "@/lib/guards"
 import {
   jiraSessionOf,
   noSession,
@@ -45,7 +45,10 @@ import {
 } from "@/lib/jira-session"
 import { repoNames } from "@/lib/repos"
 import { Shell } from "@/components/shell/Shell"
-import type { StoryHit } from "@/components/start-run/JiraLookup"
+import type { Lookup, StoryHit } from "@/components/start-run/JiraLookup"
+import type { StartSource } from "@/components/start-run/WhatSection"
+import { useStartInfo } from "@/hooks/use-start-info"
+import { shapeArrival } from "@/lib/start-info"
 import { cn } from "@/lib/utils"
 import { touchArea } from "@/lib/button-class"
 
@@ -57,39 +60,41 @@ function reposOf(value: unknown) {
 }
 
 function storiesOf(value: unknown): StoryHit[] {
-  if (!isRecord(value) || !Array.isArray(value.issues)) {
-    return []
-  }
-  return value.issues.filter(isRecord).map((item) => ({
-    key: typeof item.key === "string" ? item.key : "",
-    summary: typeof item.summary === "string" ? item.summary : "",
+  return rows(isRecord(value) ? value.issues : []).map((item) => ({
+    key: text(item.key),
+    summary: text(item.summary),
   }))
 }
 
 function storyOf(value: unknown): { key: string; brief: string } {
-  if (!isRecord(value)) {
-    return { key: "", brief: "" }
-  }
-  return {
-    key: typeof value.key === "string" ? value.key : "",
-    brief: typeof value.brief === "string" ? value.brief : "",
-  }
+  const body = isRecord(value) ? value : {}
+  return { key: text(body.key), brief: text(body.brief) }
 }
 
 /** Desk: list runs or start a new one (N1–N4). */
 export function Desk() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [workspace, setWorkspace] = useState(".")
-  const [repos, setRepos] = useState<{ name: string; checked: boolean }[]>([])
+  const arrival = shapeArrival(location.state)
+  const [workspace, setWorkspace] = useState(arrival?.workspace ?? ".")
+  const [repos, setRepos] = useState<{ name: string; checked: boolean }[]>(
+    arrival !== null && arrival.repo !== ""
+      ? [{ name: arrival.repo, checked: true }]
+      : []
+  )
   const [session, setSession] = useState<JiraSession>(noSession)
   const [stories, setStories] = useState<StoryHit[]>([])
-  const [issue, setIssue] = useState("")
+  const [issue, setIssue] = useState(arrival?.issue ?? "")
   const [story, setStory] = useState(() =>
     (location.state as { sample?: boolean } | null)?.sample === true
       ? sampleBrief.text
-      : ""
+      : (arrival?.story ?? "")
   )
+  const [source, setSource] = useState<StartSource>(
+    arrival !== null ? "shape" : story === "" ? "jira" : "text"
+  )
+  const [lookup, setLookup] = useState<Lookup>({ phase: "idle" })
+  const [shapeId, setShapeId] = useState(arrival?.id ?? "")
   const [kind, setKind] = useState("infer")
   const [base, setBase] = useState("")
   const [branches, setBranches] = useState<BranchChoice>(noBranches)
@@ -98,14 +103,13 @@ export function Desk() {
   const [listOk, setListOk] = useState(false)
   const notifications = useNotifications(listOk ? spans : null)
   const formRef = useRef<HTMLFormElement>(null)
-  const [starting, setStarting] = useState(false)
+  const [starting, setStarting] = useState(arrival !== null)
   const [now, setNow] = useState(() => new Date())
   const [url, setUrl] = useState("")
   const [email, setEmail] = useState("")
   const [token, setToken] = useState("")
   const [jiraNote, setJiraNote] = useState("")
   const [folderNote, setFolderNote] = useState("")
-  const [storyNote, setStoryNote] = useState("")
   const [runNote, setRunNote] = useState("")
   const [refusal, setRefusal] = useState<StartRefusal | null>(null)
   const [started, setStarted] = useState<Started | null>(null)
@@ -113,7 +117,7 @@ export function Desk() {
   const [agents, setAgents] = useState<AgentStatus[]>([])
   const [agentAt, setAgentAt] = useState("")
   const [listNote, setListNote] = useState("")
-  const [pick, setPick] = useState<AgentChoice | null>(null)
+  const info = useStartInfo(workspace, kind, base)
   const lines = withAgent(
     timelineLines({ statements: [], frames: [], actions }),
     deskAgentLine(agents, agentAt)
@@ -242,8 +246,7 @@ export function Desk() {
     }
   }
 
-  async function saveSession(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function saveSession() {
     const data = new URLSearchParams()
     data.set("url", url)
     data.set("email", email)
@@ -261,7 +264,7 @@ export function Desk() {
   }
 
   async function loadStory(key: string) {
-    setStoryNote("")
+    setLookup({ phase: "asking", key })
     try {
       const body = await getJSON(
         `/jira/issues/${encodeURIComponent(key)}?path=${encodeURIComponent(workspace)}`
@@ -269,14 +272,22 @@ export function Desk() {
       const loaded = storyOf(body)
       setIssue(loaded.key)
       setStory(loaded.brief)
+      setLookup({
+        phase: "found",
+        key: loaded.key,
+        title: loaded.brief.split("\n")[0] ?? loaded.key,
+      })
       void readSession(workspace)
     } catch (err: unknown) {
-      setStoryNote(reasonText(err, "the story could not be loaded"))
+      setLookup({
+        phase: "failed",
+        key,
+        reason: reasonText(err, "the story could not be loaded"),
+      })
     }
   }
 
   async function loadMine() {
-    setStoryNote("")
     try {
       const body = await getJSON(
         `/jira/search?path=${encodeURIComponent(workspace)}`
@@ -284,7 +295,11 @@ export function Desk() {
       setStories(storiesOf(body))
       void readSession(workspace)
     } catch (err: unknown) {
-      setStoryNote(reasonText(err, "the stories could not be loaded"))
+      setLookup({
+        phase: "failed",
+        key: issue,
+        reason: reasonText(err, "the stories could not be loaded"),
+      })
     }
   }
 
@@ -308,6 +323,18 @@ export function Desk() {
     setRunNote("")
     setStarted(null)
     setRefusal(null)
+    if (source === "shape" && shapeId !== "" && arrival === null) {
+      try {
+        const sealed = await getShape(shapeId, workspace)
+        data.set("story", sealed.story)
+        if (sealed.jira !== null) {
+          data.set("issue", sealed.jira.key)
+        }
+      } catch (err: unknown) {
+        setRunNote(reasonText(err, "the sealed story could not be read"))
+        return
+      }
+    }
     if (kind === "infer") {
       data.delete("kind")
     }
@@ -394,44 +421,81 @@ export function Desk() {
           onDismissRefusal={() => setRefusal(null)}
           started={started}
           onOpenRun={(id) => void navigate(`/spans/${id}`)}
+          onBack={() => {
+            setStarted(null)
+            setStarting(false)
+          }}
           form={{
             formRef,
-            workspace,
-            onWorkspace: setWorkspace,
-            repos,
-            onToggleRepo: (name, checked) =>
-              setRepos((current) =>
-                current.map((item) =>
-                  item.name === name ? { ...item, checked } : item
-                )
-              ),
-            folderNote,
-            onFindRepos: () => void findRepos(),
-            pick,
-            onPickLoaded: setPick,
-            issue,
-            onIssue: setIssue,
-            kind,
-            onKind: setKind,
-            base,
-            onBase: setBase,
-            branches,
-            story,
-            onStory: setStory,
-            session,
-            jiraUrl: url,
-            onJiraUrl: setUrl,
-            jiraEmail: email,
-            onJiraEmail: setEmail,
-            jiraToken: token,
-            onJiraToken: setToken,
-            stories,
-            jiraNote,
-            storyNote,
-            onLoadStory: () => void loadStory(issue),
-            onLoadMine: () => void loadMine(),
-            onSaveSession: (event) => void saveSession(event),
-            onPickStory: (key) => void loadStory(key),
+            where: {
+              workspace,
+              onWorkspace: setWorkspace,
+              repos,
+              onToggleRepo: (name, checked) =>
+                setRepos((current) =>
+                  current.map((item) =>
+                    item.name === name ? { ...item, checked } : item
+                  )
+                ),
+              folderNote,
+              onFindRepos: () => void findRepos(),
+            },
+            what: {
+              source,
+              onSource: setSource,
+              story,
+              onStory: setStory,
+              sealed: info.sealed,
+              shapeId,
+              onShape: setShapeId,
+              locked:
+                arrival === null
+                  ? null
+                  : {
+                      id: arrival.id,
+                      title: arrival.title,
+                      workspace: arrival.workspace,
+                    },
+              sample: listOk && spans.length === 0 ? sampleBrief : null,
+              jira: {
+                session,
+                issue,
+                onIssue: setIssue,
+                url,
+                onUrl: setUrl,
+                email,
+                onEmail: setEmail,
+                token,
+                onToken: setToken,
+                stories,
+                lookup,
+                note: jiraNote,
+                onLoadOne: () => void loadStory(issue),
+                onLoadMine: () => void loadMine(),
+                onSaveSession: () => void saveSession(),
+                onPick: (key) => {
+                  setIssue(key)
+                  void loadStory(key)
+                },
+                onPasteInstead: () => setSource("text"),
+              },
+            },
+            how: {
+              kind,
+              onKind: setKind,
+              base,
+              onBase: setBase,
+              branches,
+              savedBase: info.summary.base,
+            },
+            aside: {
+              summary: info.summary,
+              runs: Math.max(repos.filter((repo) => repo.checked).length, 1),
+              story,
+              shapeable: source === "text",
+              onShapeFirst: () =>
+                void navigate("/shaping", { state: { idea: story } }),
+            },
             runNote,
             onSubmit: run,
           }}

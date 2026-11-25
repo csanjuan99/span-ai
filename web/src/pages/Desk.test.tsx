@@ -88,6 +88,11 @@ async function openForm() {
   )
 }
 
+/** The folder shows as a chip; the repository search lives behind "Change folder". */
+async function openFolder() {
+  fireEvent.click(await screen.findByRole("button", { name: "Change folder" }))
+}
+
 describe("Desk", () => {
   it("does not call a desk empty when the list never loaded", async () => {
     getJSON.mockImplementation((url: string) => {
@@ -117,17 +122,10 @@ describe("Desk", () => {
         <Desk />
       </MemoryRouter>
     )
-    await waitFor(() => {
-      expect(
-        getJSON.mock.calls.some(([url]) =>
-          String(url).startsWith("/jira?path=")
-        )
-      ).toBe(true)
-    })
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Token")).toBeNull()
-    })
-    expect(screen.getByText(/me@example\.test/)).toBeTruthy()
+    await openForm()
+    expect(await screen.findByText(/me@example\.test/)).toBeTruthy()
+    expect(screen.queryByLabelText("Token")).toBeNull()
+    // The session is closed from Settings, which stay out of the way of the start form.
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
   })
 
@@ -176,6 +174,7 @@ describe("Desk", () => {
       </MemoryRouter>
     )
     await openForm()
+    await openFolder()
     fireEvent.click(await screen.findByRole("button", { name: "Find repos" }))
     await waitFor(() => {
       expect(screen.getByText("api")).toBeTruthy()
@@ -216,6 +215,7 @@ describe("Desk", () => {
     await waitFor(() => {
       expect(jiraCalls).toBe(1)
     })
+    await openFolder()
     fireEvent.click(await screen.findByRole("button", { name: "Find repos" }))
     await waitFor(() => {
       expect(screen.getByText("the folder is gone")).toBeTruthy()
@@ -293,9 +293,11 @@ describe("Desk", () => {
     expect(
       await screen.findByRole("region", { name: "Waiting for me" })
     ).toBeTruthy()
-    expect(screen.queryByLabelText("Story")).toBeNull()
+    expect(
+      screen.queryByRole("form", { name: "Start a run", hidden: true })
+    ).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "New run" }))
-    expect(await screen.findByLabelText("Story")).toBeTruthy()
+    expect(await screen.findByRole("form", { name: "Start a run" })).toBeTruthy()
   })
 
   it("starts the sample brief in one click when there are no runs", async () => {
@@ -320,9 +322,87 @@ describe("Desk", () => {
       </MemoryRouter>
     )
     await screen.findByRole("button", { name: "Start with the sample brief" })
-    expect(screen.getByLabelText("Story").closest("[hidden]")).not.toBeNull()
+    const form = () =>
+      screen.getByRole("form", { name: "Start a run", hidden: true })
+    expect(form().closest("[hidden]")).not.toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Paste a Jira story" }))
-    expect(screen.getByLabelText("Story").closest("[hidden]")).toBeNull()
+    expect(form().closest("[hidden]")).toBeNull()
+  })
+
+  it("shows what the saved settings will do before Start is pressed", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/start/what-will-happen")) {
+        return Promise.resolve({
+          base: "main",
+          chosenAgent: "claude",
+          stages: { merge: "hold", open: "auto" },
+          checks: ["go test ./..."],
+        })
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    await openForm()
+    expect(await screen.findByText("claude writes the stages.")).toBeTruthy()
+    expect(screen.getByText(/merge wait for your yes/)).toBeTruthy()
+    expect(screen.getByText("go test ./...")).toBeTruthy()
+    expect(screen.getByText("Nothing on main and none of your files.")).toBeTruthy()
+  })
+
+  it("offers to shape a short pasted story first", async () => {
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    await openForm()
+    expect(screen.queryByText("This story is short")).toBeNull()
+    fireEvent.click(await screen.findByRole("button", { name: "Pasted text" }))
+    fireEvent.change(screen.getByLabelText("Story text"), {
+      target: { value: "Refunds should not be larger than the charge." },
+    })
+    expect(await screen.findByText("This story is short")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Shape it first/ })).toBeTruthy()
+  })
+
+  it("locks the source when a sealed story arrives from Shape a story", async () => {
+    render(
+      <MemoryRouter
+        initialEntries={[
+          {
+            pathname: "/",
+            state: {
+              shape: {
+                id: "sh-1",
+                title: "Retry a failed delivery",
+                workspace: "/w",
+                story: "# Retry",
+                issue: "",
+                repo: "api",
+              },
+            },
+          },
+        ]}
+      >
+        <Desk />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText("Came from Shape a story")).toBeTruthy()
+    expect(screen.getByText("Retry a failed delivery")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Pasted text" })).toBeNull()
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    await waitFor(() => expect(startRun).toHaveBeenCalled())
+    const sent = startRun.mock.calls[0]?.[0] as FormData
+    expect(sent.get("story")).toBe("# Retry")
+    expect(sent.get("workspace")).toBe("/w")
+    expect(sent.get("repo")).toBe("api")
   })
 
   it("shows the token refusal when the precheck is refused for its token", async () => {

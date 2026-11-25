@@ -20,6 +20,7 @@ export function StartRunPanel({
   onDismissRefusal,
   started,
   onOpenRun,
+  onBack,
   form,
 }: {
   visible: boolean
@@ -27,6 +28,8 @@ export function StartRunPanel({
   onDismissRefusal: () => void
   started: Started | null
   onOpenRun: (id: string) => void
+  /** Leaves the results for the desk. */
+  onBack: () => void
   form: StartFormProps
 }) {
   return (
@@ -35,7 +38,11 @@ export function StartRunPanel({
         <RefusalPanels refusal={refusal} onDismiss={onDismissRefusal} />
       ) : null}
       {visible && started !== null ? (
-        <StartingResults result={started} onOpen={onOpenRun} />
+        <StartingResults
+          result={started}
+          onOpen={onOpenRun}
+          onBack={onBack}
+        />
       ) : null}
       <StartForm {...form} />
     </div>

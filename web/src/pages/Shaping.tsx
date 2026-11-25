@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useNavigate, useSearchParams } from "react-router"
+import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { FirstSession } from "@/components/shape-entry/FirstSession"
 import { RecentSessions } from "@/components/shape-entry/RecentSessions"
@@ -35,7 +35,12 @@ export function Shaping() {
   const listing = params.get("view") === "sessions"
   const [filter, setFilter] = useState<ListFilter>(noFilter)
   const [repos, setRepos] = useState<string[]>([])
-  const [firstIdea, setFirstIdea] = useState("")
+  const location = useLocation()
+  const [firstIdea, setFirstIdea] = useState(() =>
+    typeof (location.state as { idea?: unknown } | null)?.idea === "string"
+      ? (location.state as { idea: string }).idea
+      : ""
+  )
   const [note, setNote] = useState("")
   const sessions = useShapeSessions(workspace, filter)
   // A started session leaves this page, so busy stays on once it works.

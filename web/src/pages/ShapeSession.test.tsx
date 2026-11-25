@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type {
@@ -157,7 +157,7 @@ function open() {
     <MemoryRouter initialEntries={["/shaping/sh-1?workspace=%2Fw"]}>
       <Routes>
         <Route path="/shaping/:id" element={<ShapeSession />} />
-        <Route path="/spans/:id" element={<p>run page</p>} />
+        <Route path="/" element={<ArrivalProbe />} />
       </Routes>
     </MemoryRouter>
   )
@@ -170,6 +170,12 @@ beforeEach(() => {
   }
   mocks.getShape.mockResolvedValue(session())
 })
+
+/** Stands in for the desk: prints what the session handed over to start a run from. */
+function ArrivalProbe() {
+  const state = useLocation().state as { shape?: Record<string, string> } | null
+  return <pre data-testid="arrival">{JSON.stringify(state?.shape ?? null)}</pre>
+}
 
 const click = (name: string | RegExp) =>
   fireEvent.click(screen.getByRole("button", { name }))
@@ -620,44 +626,32 @@ describe("sealed story", () => {
     expect(screen.queryByRole("button", { name: /Source:/ })).toBeNull()
   })
 
-  it("starts a run with the story and the Jira key", async () => {
+  it("hands the story and the Jira key to the desk to start a run from", async () => {
     mocks.getShape.mockResolvedValue(
       sealed({
         jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
       })
     )
-    mocks.startRun.mockResolvedValue({
-      id: "run-1",
-      stage: "intake",
-      runs: [],
-      partial: false,
-      notes: "",
-    })
     open()
     await clickWhenReady("Create run")
-    expect(await screen.findByText("run page")).toBeTruthy()
-    const form = mocks.startRun.mock.calls[0]?.[0] as FormData
-    expect(form.get("story")).toBe("# Refund\n\n## Why\nBecause.")
-    expect(form.get("issue")).toBe("PRJ-9")
-    expect(form.get("workspace")).toBe("/w")
-    expect(form.get("repo")).toBe("api")
+    const arrival = JSON.parse(
+      (await screen.findByTestId("arrival")).textContent ?? "null"
+    ) as Record<string, string>
+    expect(arrival.story).toBe("# Refund\n\n## Why\nBecause.")
+    expect(arrival.issue).toBe("PRJ-9")
+    expect(arrival.workspace).toBe("/w")
+    expect(arrival.repo).toBe("api")
+    expect(mocks.startRun).not.toHaveBeenCalled()
   })
 
-  it("starts a run without an issue when Jira was skipped", async () => {
+  it("hands over no issue when Jira was skipped", async () => {
     mocks.getShape.mockResolvedValue(sealed())
-    mocks.startRun.mockResolvedValue({
-      id: "run-1",
-      stage: "intake",
-      runs: [],
-      partial: false,
-      notes: "",
-    })
     open()
     await clickWhenReady("Create run")
-    await screen.findByText("run page")
-    expect((mocks.startRun.mock.calls[0]?.[0] as FormData).has("issue")).toBe(
-      false
-    )
+    const arrival = JSON.parse(
+      (await screen.findByTestId("arrival")).textContent ?? "null"
+    ) as Record<string, string>
+    expect(arrival.issue).toBe("")
   })
 
   it("starts a new session from the sealed story and opens it", async () => {

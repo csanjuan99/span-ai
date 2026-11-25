@@ -13,7 +13,6 @@ import {
   resumeShape,
   sealShape,
   settleShapeContext,
-  startRun,
 } from "@/lib/api"
 import { ContextBoard } from "@/components/shaping/ContextBoard"
 import { JiraBoard } from "@/components/shaping/JiraBoard"
@@ -38,19 +37,6 @@ import { errorText } from "@/components/shaping/styles"
 import { loadProgress, saveProgress } from "@/lib/shape-draft"
 
 const readFailure = "the session could not be read"
-
-function runForm(session: Session): FormData {
-  const form = new FormData()
-  form.set("workspace", session.workspace)
-  form.set("story", session.story)
-  if (session.jira !== null) {
-    form.set("issue", session.jira.key)
-  }
-  if (session.repo !== "") {
-    form.set("repo", session.repo)
-  }
-  return form
-}
 
 /** One shaping session: the interview, the map, the split, the context, the seal and what to do with the sealed story. */
 export function ShapeSession() {
@@ -125,15 +111,20 @@ export function ShapeSession() {
     }
   }
 
+  /** Hands the sealed story to the desk's start form, locked, so the run is started there. */
   function beginRun(current: Session) {
-    void act(async () => {
-      const result = await startRun(runForm(current))
-      if (typeof result === "string") {
-        setNote(result)
-        return
-      }
-      void navigate(`/spans/${result.id}`)
-    }, "the run did not start")
+    void navigate("/", {
+      state: {
+        shape: {
+          id: current.id,
+          title: current.title,
+          workspace: current.workspace,
+          story: current.story,
+          issue: current.jira?.key ?? "",
+          repo: current.repo,
+        },
+      },
+    })
   }
 
   function fork(current: Session) {
