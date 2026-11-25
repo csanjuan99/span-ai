@@ -737,6 +737,10 @@ function spanHeadOf(value: unknown): SpanHead {
     repo: text(row.repo),
     stage: text(row.stage),
     verdict: text(row.verdict),
+    title: text(row.title),
+    branch: text(row.branch),
+    reason: text(row.reason),
+    updatedAt: text(row.updatedAt),
   }
 }
 

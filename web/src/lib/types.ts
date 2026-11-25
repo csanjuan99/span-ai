@@ -182,6 +182,13 @@ export interface SpanHead {
   repo: string
   stage: string
   verdict: string
+  /** What the run is about, from its brief. Empty when none was kept. */
+  title: string
+  branch: string
+  /** Why the run is held or stopped. */
+  reason: string
+  /** When the run last moved, RFC 3339. Empty when unknown. */
+  updatedAt: string
 }
 
 /** The agent section of the desk: what is known, what was asked, what would run. */

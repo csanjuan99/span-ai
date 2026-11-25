@@ -1,17 +1,40 @@
 "use client"
 
-import { DeleteRun } from "@/components/run-list/DeleteRun"
+import { EmptyDesk, sampleBrief } from "@/components/desk/EmptyDesk"
+import { RunsDesk } from "@/components/desk/RunsDesk"
 import { useEffect, useState, type FormEvent } from "react"
 import { Link, useNavigate } from "react-router"
 
-import { agentList, basePlaceholder, branchChoice, getJSON, postForm, rememberServeToken, serveToken, startRun, UnauthorizedError, type Started } from "@/lib/api"
-import { agentReviewMs, deskAgentLine, timelineLines, withAgent, type TimelineAction } from "@/lib/timeline"
-import type { AgentChoice, AgentStatus, BranchChoice, SpanHead } from "@/lib/types"
+import {
+  agentList,
+  basePlaceholder,
+  branchChoice,
+  getJSON,
+  postForm,
+  rememberServeToken,
+  serveToken,
+  spanHeadsOf,
+  startRun,
+  UnauthorizedError,
+  type Started,
+} from "@/lib/api"
+import {
+  agentReviewMs,
+  deskAgentLine,
+  timelineLines,
+  withAgent,
+  type TimelineAction,
+} from "@/lib/timeline"
+import type {
+  AgentChoice,
+  AgentStatus,
+  BranchChoice,
+  SpanHead,
+} from "@/lib/types"
 import { isRecord, reasonText } from "@/lib/guards"
 import { readJiraSession } from "@/lib/jira-session"
 import { repoNames } from "@/lib/repos"
 import { setupSteps, type StepId } from "@/lib/setup"
-import { spanHeadsOf } from "@/lib/api"
 import { PromptHeading } from "@/components/shell/PromptHeading"
 import { Shell } from "@/components/shell/Shell"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
@@ -22,7 +45,13 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
 interface Repo {
@@ -36,6 +65,9 @@ interface JiraSession {
   baseUrl: string
 }
 
+const noSession: JiraSession = { configured: false, email: "", baseUrl: "" }
+const noBranches: BranchChoice = { branches: [], defaultBase: "dev" }
+
 interface StoryHit {
   key: string
   summary: string
@@ -48,7 +80,7 @@ function reposOf(value: unknown): Repo[] {
 
 function sessionOf(value: unknown): JiraSession {
   if (!isRecord(value)) {
-    return { configured: false, email: "", baseUrl: "" }
+    return noSession
   }
   return {
     configured: value.configured === true,
@@ -77,21 +109,22 @@ function storyOf(value: unknown): { key: string; brief: string } {
   }
 }
 
-
-
 /** Every control the desk had, now as the front page. A run opens the span page. */
 export function Desk() {
   const navigate = useNavigate()
   const [workspace, setWorkspace] = useState(".")
   const [repos, setRepos] = useState<Repo[]>([])
-  const [session, setSession] = useState<JiraSession>({ configured: false, email: "", baseUrl: "" })
+  const [session, setSession] = useState<JiraSession>(noSession)
   const [stories, setStories] = useState<StoryHit[]>([])
   const [issue, setIssue] = useState("")
   const [story, setStory] = useState("")
   const [kind, setKind] = useState("infer")
   const [base, setBase] = useState("")
-  const [branches, setBranches] = useState<BranchChoice>({ branches: [], defaultBase: "dev" })
+  const [branches, setBranches] = useState<BranchChoice>(noBranches)
   const [spans, setSpans] = useState<SpanHead[]>([])
+  const [listed, setListed] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [now, setNow] = useState(() => new Date())
   const [url, setUrl] = useState("")
   const [email, setEmail] = useState("")
   const [token, setToken] = useState("")
@@ -103,9 +136,15 @@ export function Desk() {
   const [actions, setActions] = useState<TimelineAction[]>([])
   const [agents, setAgents] = useState<AgentStatus[]>([])
   const [agentAt, setAgentAt] = useState("")
-  const lines = withAgent(timelineLines({ statements: [], frames: [], actions }), deskAgentLine(agents, agentAt))
+  const lines = withAgent(
+    timelineLines({ statements: [], frames: [], actions }),
+    deskAgentLine(agents, agentAt)
+  )
   function note(text: string) {
-    setActions((current) => [...current, { at: new Date().toISOString(), text }])
+    setActions((current) => [
+      ...current,
+      { at: new Date().toISOString(), text },
+    ])
   }
   const [listNote, setListNote] = useState("")
   const [serve, setServe] = useState(serveToken)
@@ -119,6 +158,8 @@ export function Desk() {
       .then((spanBody) => {
         if (!closed) {
           setSpans(spanHeadsOf(spanBody))
+          setNow(new Date())
+          setListed(true)
         }
       })
       .catch((err: unknown) => {
@@ -130,6 +171,7 @@ export function Desk() {
           setSettingsOpen(true)
         }
         setListNote(reasonText(err, "the desk could not load"))
+        setListed(true)
       })
     return () => {
       closed = true
@@ -166,7 +208,7 @@ export function Desk() {
   // showing the form until someone happened to blur the field.
   async function readSession(project: string) {
     if (project.trim() === "") {
-      setSession({ configured: false, email: "", baseUrl: "" })
+      setSession(noSession)
       return
     }
     try {
@@ -176,7 +218,11 @@ export function Desk() {
       // The action that needs the session reports its own failure; this says why the band
       // still shows Jira as not connected.
       const detail = reasonText(err, "")
-      setListNote(detail === "" ? "Jira session not read" : `Jira session not read: ${detail}`)
+      setListNote(
+        detail === ""
+          ? "Jira session not read"
+          : `Jira session not read: ${detail}`
+      )
     }
   }
 
@@ -184,13 +230,17 @@ export function Desk() {
   // usable: a typed branch name is still checked by the run before anything is cut.
   async function readBranches(project: string) {
     if (project.trim() === "") {
-      setBranches({ branches: [], defaultBase: "dev" })
+      setBranches(noBranches)
       return
     }
     try {
-      setBranches(branchChoice(await getJSON(`/branches?path=${encodeURIComponent(project)}`)))
+      setBranches(
+        branchChoice(
+          await getJSON(`/branches?path=${encodeURIComponent(project)}`)
+        )
+      )
     } catch {
-      setBranches({ branches: [], defaultBase: "dev" })
+      setBranches(noBranches)
     }
   }
 
@@ -212,12 +262,16 @@ export function Desk() {
     if (repoResult.status === "fulfilled") {
       setRepos(reposOf(repoResult.value))
     } else {
-      setFolderNote(reasonText(repoResult.reason, "the folder could not be read"))
+      setFolderNote(
+        reasonText(repoResult.reason, "the folder could not be read")
+      )
     }
     if (jiraResult.status === "fulfilled") {
       setSession(sessionOf(jiraResult.value))
     } else {
-      setJiraNote(reasonText(jiraResult.reason, "the session could not be read"))
+      setJiraNote(
+        reasonText(jiraResult.reason, "the session could not be read")
+      )
     }
   }
 
@@ -245,7 +299,7 @@ export function Desk() {
     try {
       await postForm("/jira/logout", data)
       setJiraNote("Session closed for this folder.")
-      setSession({ configured: false, email: "", baseUrl: "" })
+      setSession(noSession)
     } catch (err: unknown) {
       setJiraNote(reasonText(err, "the session was not closed"))
     }
@@ -254,7 +308,9 @@ export function Desk() {
   async function loadStory(key: string) {
     setStoryNote("")
     try {
-      const body = await getJSON(`/jira/issues/${encodeURIComponent(key)}?path=${encodeURIComponent(workspace)}`)
+      const body = await getJSON(
+        `/jira/issues/${encodeURIComponent(key)}?path=${encodeURIComponent(workspace)}`
+      )
       const loaded = storyOf(body)
       setIssue(loaded.key)
       setStory(loaded.brief)
@@ -267,7 +323,9 @@ export function Desk() {
   async function loadMine() {
     setStoryNote("")
     try {
-      const body = await getJSON(`/jira/search?path=${encodeURIComponent(workspace)}`)
+      const body = await getJSON(
+        `/jira/search?path=${encodeURIComponent(workspace)}`
+      )
       setStories(storiesOf(body))
       void readSession(workspace)
     } catch (err: unknown) {
@@ -300,7 +358,11 @@ export function Desk() {
       if (result.runs.length > 1 || result.partial) {
         // Several repos started, or some did not: stay here so every run is visible.
         setStarted(result)
-        note(result.partial ? "some runs started" : `${result.runs.length} runs started`)
+        note(
+          result.partial
+            ? "some runs started"
+            : `${result.runs.length} runs started`
+        )
         return
       }
       note("run started")
@@ -313,12 +375,23 @@ export function Desk() {
   }
 
   const chosenAgent = pick?.agents.find((row) => row.id === pick.chosen)
-  const chosenModel = pick !== null && chosenAgent !== undefined ? (pick.models[chosenAgent.id] ?? "") : ""
+  const chosenModel =
+    pick !== null && chosenAgent !== undefined
+      ? (pick.models[chosenAgent.id] ?? "")
+      : ""
   const steps = setupSteps({
     folderReady: repos.length > 0 || branches.branches.length > 0,
-    folderDetail: repos.length > 0 ? `${repos.length} ${repos.length === 1 ? "repository" : "repositories"} found in ${workspace}` : workspace === "." ? "the current folder" : workspace,
+    folderDetail:
+      repos.length > 0
+        ? `${repos.length} ${repos.length === 1 ? "repository" : "repositories"} found in ${workspace}`
+        : workspace === "."
+          ? "the current folder"
+          : workspace,
     agentReady: chosenAgent?.ready === true,
-    agentDetail: chosenAgent === undefined ? "" : `${chosenAgent.label} · ${chosenModel === "" ? "model set by Gentle AI" : chosenModel}`,
+    agentDetail:
+      chosenAgent === undefined
+        ? ""
+        : `${chosenAgent.label} · ${chosenModel === "" ? "model set by Gentle AI" : chosenModel}`,
     jiraConfigured: session.configured,
     jiraDetail: `${session.email} at ${session.baseUrl}`,
     jiraProblem: jiraNote,
@@ -326,39 +399,70 @@ export function Desk() {
   })
 
   function go(id: StepId) {
-    const target = { folder: "workspace", agent: "agent", jira: "jira-url", story: "issue" }[id]
+    const target = {
+      folder: "workspace",
+      agent: "agent",
+      jira: "jira-url",
+      story: "issue",
+    }[id]
     const element = document.getElementById(target)
     element?.scrollIntoView({ block: "center" })
     element?.focus()
   }
 
   const jiraBody = session.configured ? (
-    <p className="text-pretty text-sm">Connected as {session.email}. You can close the session under settings.</p>
+    <p className="text-sm text-pretty">
+      Connected as {session.email}. You can close the session under settings.
+    </p>
   ) : (
-    <form className="flex max-w-md flex-col gap-3" onSubmit={(event) => void saveSession(event)}>
-      <p className="text-pretty text-sm text-muted-foreground">
+    <form
+      className="flex max-w-md flex-col gap-3"
+      onSubmit={(event) => void saveSession(event)}
+    >
+      <p className="text-sm text-pretty text-muted-foreground">
         Span reads your stories with an Atlassian API token.{" "}
-        <a className="text-primary underline-offset-4 hover:underline" href="https://id.atlassian.com/manage-profile/security/api-tokens">
+        <a
+          className="text-primary underline-offset-4 hover:underline"
+          href="https://id.atlassian.com/manage-profile/security/api-tokens"
+        >
           Create one
         </a>
         , then paste it here. It is stored for this folder only.
       </p>
       <div className="flex flex-col gap-2">
         <Label htmlFor="jira-url">Jira URL</Label>
-        <Input id="jira-url" placeholder="https://example.atlassian.net" value={url} onChange={(event) => setUrl(event.target.value)} />
+        <Input
+          id="jira-url"
+          placeholder="https://example.atlassian.net"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+        />
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="jira-email">Email</Label>
-        <Input id="jira-email" placeholder="you@example.com" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <Input
+          id="jira-email"
+          placeholder="you@example.com"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
       </div>
       <div className="flex flex-col gap-2">
         <Label htmlFor="jira-token">Token</Label>
-        <Input id="jira-token" type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} />
+        <Input
+          id="jira-token"
+          type="password"
+          autoComplete="off"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+        />
       </div>
       <Button type="submit" className="self-start">
         Connect Jira
       </Button>
-      {jiraNote !== "" ? <p className="text-pretty text-sm">{jiraNote}</p> : null}
+      {jiraNote !== "" ? (
+        <p className="text-sm text-pretty">{jiraNote}</p>
+      ) : null}
     </form>
   )
 
@@ -366,168 +470,244 @@ export function Desk() {
     <Shell path="~/span" status="desk" lines={lines}>
       <header>
         <PromptHeading as="h1">span desk</PromptHeading>
-        <p className="text-pretty text-muted-foreground">Turn a Jira story into a reviewed pull request.</p>
+        <p className="text-pretty text-muted-foreground">
+          Turn a Jira story into a reviewed pull request.
+        </p>
         <p className="mt-1 text-sm">
-          <Link className="text-primary underline-offset-4 hover:underline" to="/metrics">
+          <Link
+            className="text-primary underline-offset-4 hover:underline"
+            to="/metrics"
+          >
             Metrics
           </Link>{" "}
-          <span className="text-muted-foreground">how the runs on this server went</span>
+          <span className="text-muted-foreground">
+            how the runs on this server went
+          </span>
         </p>
         <p className="mt-1 text-sm">
-          <Link className="text-primary underline-offset-4 hover:underline" to="/shaping">
+          <Link
+            className="text-primary underline-offset-4 hover:underline"
+            to="/shaping"
+          >
             Shape a story
           </Link>{" "}
-          <span className="text-muted-foreground">turn an idea into a sealed story before the run</span>
+          <span className="text-muted-foreground">
+            turn an idea into a sealed story before the run
+          </span>
         </p>
       </header>
-      <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
-      <form className="flex flex-col gap-4" onSubmit={(event) => void run(event)}>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="workspace">Folder</Label>
-          <Input
-            id="workspace"
-            name="workspace"
-            value={workspace}
-            onChange={(event) => setWorkspace(event.target.value)}
-            onBlur={() => {
-              void readJiraSession(workspace)
-                .then((body) => setSession(sessionOf(body)))
-                .catch((err: unknown) => {
-                  setJiraNote(reasonText(err, "the session could not be read"))
-                })
-            }}
-          />
-        </div>
-        <div id="agent-field">
-          <AgentPicker project={workspace} onLoaded={setPick} />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Button type="button" variant="secondary" className="self-start" onClick={() => void findRepos()}>
-            Find repos
-          </Button>
-          {folderNote !== "" ? <p className="text-pretty text-sm text-destructive">{folderNote}</p> : null}
-          {repos.map((repo) => (
-            <label key={repo.name} className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={repo.checked}
-                onCheckedChange={(checked) =>
-                  setRepos((current) => current.map((item) => (item.name === repo.name ? { ...item, checked: checked === true } : item)))
-                }
+      {listNote !== "" ? (
+        <p className="text-sm text-pretty text-destructive">{listNote}</p>
+      ) : null}
+      {listed && spans.length > 0 ? (
+        <RunsDesk
+          runs={spans}
+          now={now}
+          onNew={() => setStarting(true)}
+          onDeleted={(gone) =>
+            setSpans((current) => current.filter((item) => item.id !== gone))
+          }
+        />
+      ) : null}
+      {listed && spans.length === 0 ? (
+        <EmptyDesk
+          onSample={() => {
+            setStory(sampleBrief.text)
+            setStarting(true)
+          }}
+          onStory={() => setStarting(true)}
+        />
+      ) : null}
+      {starting || spans.length === 0 ? (
+        <>
+          <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => void run(event)}
+          >
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="workspace">Folder</Label>
+              <Input
+                id="workspace"
+                name="workspace"
+                value={workspace}
+                onChange={(event) => setWorkspace(event.target.value)}
+                onBlur={() => {
+                  void readJiraSession(workspace)
+                    .then((body) => setSession(sessionOf(body)))
+                    .catch((err: unknown) => {
+                      setJiraNote(
+                        reasonText(err, "the session could not be read")
+                      )
+                    })
+                }}
               />
-              {repo.name}
-              {repo.checked ? <input type="hidden" name="repo" value={repo.name} /> : null}
-            </label>
-          ))}
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="issue">Story key</Label>
-          <Input id="issue" name="issue" value={issue} onChange={(event) => setIssue(event.target.value)} />
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={() => void loadStory(issue)}>
-              Load one story
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => void loadMine()}>
-              My stories
-            </Button>
-            {storyNote !== "" ? <p className="text-pretty text-sm text-destructive">{storyNote}</p> : null}
-          </div>
-          {stories.length > 0 ? (
-            <ul className="flex flex-col gap-1 text-sm">
-              {stories.map((item) => (
-                <li key={item.key}>
-                  <button
-                    type="button"
-                    className="text-left text-primary underline-offset-4 hover:underline"
-                    onClick={() => {
-                      setIssue(item.key)
-                      void loadStory(item.key)
-                    }}
-                  >
-                    {item.key} {item.summary}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="kind">Kind</Label>
-          <Select value={kind} onValueChange={setKind}>
-            <SelectTrigger id="kind" className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="infer">infer</SelectItem>
-              <SelectItem value="feat">feat</SelectItem>
-              <SelectItem value="fix">fix</SelectItem>
-              <SelectItem value="hotfix">hotfix</SelectItem>
-            </SelectContent>
-          </Select>
-          {kind !== "infer" ? <input type="hidden" name="kind" value={kind} /> : null}
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="base">Base branch</Label>
-          <Input
-            id="base"
-            name="base"
-            list="base-branches"
-            className="w-64"
-            placeholder={basePlaceholder(kind, branches.defaultBase)}
-            value={base}
-            onChange={(event) => setBase(event.target.value)}
-          />
-          <datalist id="base-branches">
-            {branches.branches.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-          <p className="text-pretty text-sm text-muted-foreground">
-            The branch is cut from here and its pull request opens into it. Empty uses {basePlaceholder(kind, branches.defaultBase)}.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="story">Story</Label>
-          <Textarea id="story" name="story" value={story} onChange={(event) => setStory(event.target.value)} rows={8} />
-        </div>
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="file">Handoff files</Label>
-          <Input id="file" name="file" type="file" multiple className="max-w-full" />
-        </div>
-        <div className="flex items-center gap-3">
-          <Button type="submit">Configure and run</Button>
-          {runNote !== "" ? <p className="text-pretty text-sm text-destructive">{runNote}</p> : null}
-          {started !== null ? (
-            <StartedRuns runs={started.runs} partial={started.partial} notes={started.notes} />
-          ) : null}
-        </div>
-      </form>
-      <section>
-        <PromptHeading>spans</PromptHeading>
-        {listNote !== "" ? <p className="text-pretty text-sm text-destructive">{listNote}</p> : null}
-        {spans.length === 0 ? (
-          <p className="mt-2 text-pretty text-muted-foreground">No runs yet. Load a story above, then run it; it will appear here.</p>
-        ) : (
-          <ul className="mt-2 flex flex-col gap-1">
-            {spans.map((span) => (
-              <li key={span.id}>
-                <Link
-                  className="text-primary underline-offset-4 hover:underline tabular-nums"
-                  to={`/spans/${span.id}`}
-                  title={span.id}
+            </div>
+            <div id="agent-field">
+              <AgentPicker project={workspace} onLoaded={setPick} />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="self-start"
+                onClick={() => void findRepos()}
+              >
+                Find repos
+              </Button>
+              {folderNote !== "" ? (
+                <p className="text-sm text-pretty text-destructive">
+                  {folderNote}
+                </p>
+              ) : null}
+              {repos.map((repo) => (
+                <label
+                  key={repo.name}
+                  className="flex items-center gap-2 text-sm"
                 >
-                  {span.label === "" ? span.id : span.label}
-                </Link>
-                <span className="text-muted-foreground">{"  "}{span.stage} · {span.verdict}{"  "}</span>
-                <DeleteRun
-                  id={span.id}
-                  label={span.label === "" ? span.id : span.label}
-                  onDeleted={(gone) => setSpans((current) => current.filter((item) => item.id !== gone))}
+                  <Checkbox
+                    checked={repo.checked}
+                    onCheckedChange={(checked) =>
+                      setRepos((current) =>
+                        current.map((item) =>
+                          item.name === repo.name
+                            ? { ...item, checked: checked === true }
+                            : item
+                        )
+                      )
+                    }
+                  />
+                  {repo.name}
+                  {repo.checked ? (
+                    <input type="hidden" name="repo" value={repo.name} />
+                  ) : null}
+                </label>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="issue">Story key</Label>
+              <Input
+                id="issue"
+                name="issue"
+                value={issue}
+                onChange={(event) => setIssue(event.target.value)}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadStory(issue)}
+                >
+                  Load one story
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadMine()}
+                >
+                  My stories
+                </Button>
+                {storyNote !== "" ? (
+                  <p className="text-sm text-pretty text-destructive">
+                    {storyNote}
+                  </p>
+                ) : null}
+              </div>
+              {stories.length > 0 ? (
+                <ul className="flex flex-col gap-1 text-sm">
+                  {stories.map((item) => (
+                    <li key={item.key}>
+                      <button
+                        type="button"
+                        className="text-left text-primary underline-offset-4 hover:underline"
+                        onClick={() => {
+                          setIssue(item.key)
+                          void loadStory(item.key)
+                        }}
+                      >
+                        {item.key} {item.summary}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="kind">Kind</Label>
+              <Select value={kind} onValueChange={setKind}>
+                <SelectTrigger id="kind" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="infer">infer</SelectItem>
+                  <SelectItem value="feat">feat</SelectItem>
+                  <SelectItem value="fix">fix</SelectItem>
+                  <SelectItem value="hotfix">hotfix</SelectItem>
+                </SelectContent>
+              </Select>
+              {kind !== "infer" ? (
+                <input type="hidden" name="kind" value={kind} />
+              ) : null}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="base">Base branch</Label>
+              <Input
+                id="base"
+                name="base"
+                list="base-branches"
+                className="w-64"
+                placeholder={basePlaceholder(kind, branches.defaultBase)}
+                value={base}
+                onChange={(event) => setBase(event.target.value)}
+              />
+              <datalist id="base-branches">
+                {branches.branches.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              <p className="text-sm text-pretty text-muted-foreground">
+                The branch is cut from here and its pull request opens into it.
+                Empty uses {basePlaceholder(kind, branches.defaultBase)}.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="story">Story</Label>
+              <Textarea
+                id="story"
+                name="story"
+                value={story}
+                onChange={(event) => setStory(event.target.value)}
+                rows={8}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="file">Handoff files</Label>
+              <Input
+                id="file"
+                name="file"
+                type="file"
+                multiple
+                className="max-w-full"
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Button type="submit">Configure and run</Button>
+              {runNote !== "" ? (
+                <p className="text-sm text-pretty text-destructive">
+                  {runNote}
+                </p>
+              ) : null}
+              {started !== null ? (
+                <StartedRuns
+                  runs={started.runs}
+                  partial={started.partial}
+                  notes={started.notes}
                 />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+              ) : null}
+            </div>
+          </form>
+        </>
+      ) : null}
       <Settings
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
@@ -539,7 +719,11 @@ export function Desk() {
           setNeedsToken(false)
           note(value === "" ? "access token cleared" : "access token saved")
         }}
-        jira={session.configured ? `Logged in as ${session.email}. ${session.baseUrl}` : ""}
+        jira={
+          session.configured
+            ? `Logged in as ${session.email}. ${session.baseUrl}`
+            : ""
+        }
         onCloseJira={() => void closeSession()}
       />
     </Shell>
