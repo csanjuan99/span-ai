@@ -1,7 +1,8 @@
 "use client"
 
-import { FlaskConicalIcon, FileTextIcon } from "lucide-react"
+import { CheckIcon, FlaskConicalIcon, FileTextIcon } from "lucide-react"
 
+import { Honest } from "@/components/qa/Honest"
 import { VerdictPill } from "@/components/qa/Pill"
 import { Pill } from "@/components/onboarding/Pill"
 import { Panel } from "@/components/shaping/session-ui"
@@ -9,6 +10,8 @@ import { Consequences } from "@/components/status-block/Consequences"
 import { Button } from "@/components/ui/button"
 import { touchButton } from "@/lib/button-class"
 import {
+  asksForProof,
+  canAcceptRisk,
   exitLabel,
   firstLoggedGate,
   hasLog,
@@ -18,6 +21,11 @@ import {
 import { cn } from "@/lib/utils"
 
 const gateColumns = "grid-cols-[88px_112px_72px_64px_minmax(0,1fr)]"
+
+/** "2 failing cases", or "failing cases" when the run has no counts to give. */
+function casesOf(word: string, count: number | undefined): string {
+  return count === undefined ? `${word} cases` : `${count} ${word} cases`
+}
 
 function exitText(ran: boolean, code: number): string {
   return ran ? `exit ${code}` : "not run"
@@ -56,7 +64,7 @@ function nextRows(view: QaView) {
       rows: [
         {
           label: "Shows",
-          body: `The ${counts?.failed ?? "failing"} failing cases with their output.`,
+          body: `The ${casesOf("failing", counts?.failed)} with their output.`,
         },
         { label: "Changes", body: "Nothing." },
         { label: "Kept", body: view.kept },
@@ -96,8 +104,11 @@ export function Overview({
 }) {
   const counts = view.counts
   const logged = firstLoggedGate(view.gates)
-  const asks = view.verdict === "fail" || view.verdict === "held"
+  const asks = asksForProof(view)
   const next = nextRows(view)
+  if (view.state !== "ok") {
+    return <Honest view={view} state={view.state} onAccept={onAccept} />
+  }
   return (
     <section
       aria-label="Proof"
@@ -138,6 +149,7 @@ export function Overview({
               <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                 <span>Evidence</span>
                 <Pill tone={view.verdict === "held" ? "hold" : "pass"}>
+                  <CheckIcon className="size-3.5" aria-hidden="true" />
                   Run by Span
                 </Pill>
                 {view.evidenceNote}
@@ -273,10 +285,10 @@ export function Overview({
           >
             <FlaskConicalIcon aria-hidden="true" />
             {view.verdict === "fail"
-              ? `See the ${counts?.failed ?? ""} failing cases`
-              : `See the ${counts?.skipped ?? ""} skipped cases`}
+              ? `See the ${casesOf("failing", counts?.failed)}`
+              : `See the ${casesOf("skipped", counts?.skipped)}`}
           </Button>
-          {view.verdict === "held" && view.accepted === null ? (
+          {view.verdict === "held" && canAcceptRisk(view) ? (
             <Button
               type="button"
               variant="outline"

@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { designField } from "@/lib/field-class"
 import { cn } from "@/lib/utils"
 import { useRunResource } from "@/hooks/use-run-resource"
-import { acceptQa, firstLoggedGate, readQa } from "@/lib/qa"
+import { acceptQa, canAcceptRisk, firstLoggedGate, readQa } from "@/lib/qa"
 import { reasonText } from "@/lib/guards"
 
 type Pane = "overview" | "cases" | "log" | "transcript"
@@ -100,9 +100,7 @@ export function QaTab({ id }: { id: string }) {
             onOpenCases={() => setPane("cases")}
             onAccept={() => reasonField.current?.focus()}
           />
-          {view.state === "ok" &&
-          (view.verdict === "fail" || view.verdict === "held") &&
-          view.accepted === null ? (
+          {canAcceptRisk(view) ? (
             <div className="flex flex-col gap-2 rounded-[14px] border border-border bg-card p-4">
               <label htmlFor="qa-accept" className="text-sm font-medium">
                 Go on without proof

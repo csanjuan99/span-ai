@@ -56,7 +56,7 @@ export function Transcript({ id }: { id: string }) {
               setFrom(0)
             }}
           >
-            {item.stage}
+            {item.stage === "" ? "Whole run" : item.stage}
           </PillToggle>
         ))}
       </div>

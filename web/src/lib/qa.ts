@@ -514,3 +514,15 @@ export function exitLabel(exit: number): string {
       return `exit ${exit}`
   }
 }
+
+/** Whether the proof leaves a person something to decide: it failed or it is held. */
+export function asksForProof(view: QaView): boolean {
+  return view.verdict === "fail" || view.verdict === "held"
+}
+
+/** Whether the page offers to record a risk: a reading without proof that nobody accepted yet. */
+export function canAcceptRisk(view: QaView): boolean {
+  const lacksProof =
+    view.state === "no_cases" || (view.state === "ok" && asksForProof(view))
+  return lacksProof && view.accepted === null
+}

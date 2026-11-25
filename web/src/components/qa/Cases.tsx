@@ -1,10 +1,14 @@
 "use client"
 
+import { RefreshCwIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { VerdictPill } from "@/components/qa/Pill"
 import { PillToggle } from "@/components/qa/PillToggle"
+import { Panel } from "@/components/shaping/session-ui"
+import { Consequences } from "@/components/status-block/Consequences"
 import { Button } from "@/components/ui/button"
+import { touchButton } from "@/lib/button-class"
 import { reasonText } from "@/lib/guards"
 import {
   caseTime,
@@ -14,6 +18,7 @@ import {
   type QaCase,
   type QaCasesView,
 } from "@/lib/qa"
+import { cn } from "@/lib/utils"
 
 const filters = [
   { value: "", label: "All" },
@@ -88,99 +93,134 @@ export function Cases({ id, version }: { id: string; version: number }) {
             {item.label}
           </PillToggle>
         ))}
-        {failing.length > 0 ? (
-          <Button
-            type="button"
-            size="sm"
-            className="ml-auto"
-            disabled={busy}
-            onClick={() => void rerun(failing)}
-          >
-            {busy ? "Running…" : "Rerun failed cases"}
-          </Button>
-        ) : null}
       </div>
-      {problem !== "" ? (
-        <p role="alert" className="text-sm text-destructive">
-          {problem}
-        </p>
-      ) : null}
-      {view !== null && view.cases.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No case matches this filter.
-        </p>
-      ) : null}
-      {groupByFile(view?.cases ?? []).map((group) => (
-        <div
-          key={group.path}
-          className="overflow-hidden rounded-[14px] border border-border bg-card"
-        >
-          <div className="flex flex-wrap items-center gap-2 bg-muted px-4 py-2 text-sm">
-            <span className="font-mono">
-              {group.path === "" ? "Not placed in a file" : group.path}
-            </span>
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-              {group.passed} passed · {group.failed} failed
-            </span>
-          </div>
-          {group.cases.map((item) => (
-            <div key={item.name} className="border-t border-border">
-              <button
-                type="button"
-                aria-expanded={open === item.name}
-                onClick={() => setOpen(open === item.name ? "" : item.name)}
-                className="grid min-h-11 w-full grid-cols-[72px_minmax(0,1fr)_56px] items-center gap-3 px-4 py-2 text-left text-sm"
-              >
-                <VerdictPill verdict={caseVerdict(item.result)}>
-                  {item.result}
-                </VerdictPill>
-                <span className="min-w-0 truncate font-mono text-[13px]">
-                  {item.name}
-                  {item.isNew ? (
-                    <span className="ml-2 rounded-md border border-dashed border-border px-1.5 text-[11px] text-muted-foreground">
-                      new
-                    </span>
-                  ) : null}
+      <div
+        className={cn(
+          "grid gap-4",
+          failing.length > 0 &&
+            "lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"
+        )}
+      >
+        <div className="flex min-w-0 flex-col gap-3">
+          {problem !== "" ? (
+            <p role="alert" className="text-sm text-destructive">
+              {problem}
+            </p>
+          ) : null}
+          {view !== null && view.cases.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No case matches this filter.
+            </p>
+          ) : null}
+          {groupByFile(view?.cases ?? []).map((group) => (
+            <div
+              key={group.path}
+              className="overflow-hidden rounded-[14px] border border-border bg-card"
+            >
+              <div className="flex flex-wrap items-center gap-2 bg-muted px-4 py-2 text-sm">
+                <span className="font-mono">
+                  {group.path === "" ? "Not placed in a file" : group.path}
                 </span>
-                <span className="text-right text-muted-foreground tabular-nums">
-                  {caseTime(item.elapsedMs)}
+                <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                  {group.passed} passed · {group.failed} failed
                 </span>
-              </button>
-              {open === item.name ? (
-                <div className="flex flex-col gap-2 bg-muted px-4 py-3 text-sm">
-                  {item.message !== "" ? (
-                    <p className="text-pretty">{item.message}</p>
-                  ) : null}
-                  {item.line > 0 ? (
-                    <p className="font-mono text-xs text-muted-foreground">
-                      {item.path}:{item.line}
-                    </p>
-                  ) : null}
-                  {item.output.length > 0 ? (
-                    <pre className="overflow-x-auto rounded-[10px] border border-border bg-surface-code py-2 font-mono text-xs leading-5">
-                      {item.output.map((line, index) => (
-                        <div key={index} className="px-3.5 whitespace-pre">
-                          {line}
-                        </div>
-                      ))}
-                    </pre>
-                  ) : null}
-                  <Button
+              </div>
+              {group.cases.map((item) => (
+                <div key={item.name} className="border-t border-border">
+                  <button
                     type="button"
-                    size="sm"
-                    variant="outline"
-                    className="self-start"
-                    disabled={busy}
-                    onClick={() => void rerun([item.name])}
+                    aria-expanded={open === item.name}
+                    onClick={() => setOpen(open === item.name ? "" : item.name)}
+                    className="grid min-h-11 w-full grid-cols-[72px_minmax(0,1fr)_56px] items-center gap-3 px-4 py-2 text-left text-sm"
                   >
-                    Rerun this case
-                  </Button>
+                    <VerdictPill verdict={caseVerdict(item.result)}>
+                      {item.result}
+                    </VerdictPill>
+                    <span className="min-w-0 truncate font-mono text-[13px]">
+                      {item.name}
+                      {item.isNew ? (
+                        <span className="ml-2 rounded-md border border-dashed border-border px-1.5 text-[11px] text-muted-foreground">
+                          new
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-right text-muted-foreground tabular-nums">
+                      {caseTime(item.elapsedMs)}
+                    </span>
+                  </button>
+                  {open === item.name ? (
+                    <div className="flex flex-col gap-2 bg-muted px-4 py-3 text-sm">
+                      {item.message !== "" ? (
+                        <p className="text-pretty">{item.message}</p>
+                      ) : null}
+                      {item.line > 0 ? (
+                        <p className="font-mono text-xs text-muted-foreground">
+                          {item.path}:{item.line}
+                        </p>
+                      ) : null}
+                      {item.output.length > 0 ? (
+                        <pre className="overflow-x-auto rounded-[10px] border border-border bg-surface-code py-2 font-mono text-xs leading-5">
+                          {item.output.map((line, index) => (
+                            <div key={index} className="px-3.5 whitespace-pre">
+                              {line}
+                            </div>
+                          ))}
+                        </pre>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="self-start"
+                        disabled={busy}
+                        onClick={() => void rerun([item.name])}
+                      >
+                        Rerun this case
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              ))}
             </div>
           ))}
         </div>
-      ))}
+        {failing.length > 0 ? (
+          <Panel className="flex flex-col gap-3 p-4 lg:sticky lg:top-4">
+            <Consequences
+              title="Rerun"
+              icon={RefreshCwIcon}
+              iconClassName="text-primary"
+              rows={[
+                {
+                  label: "Does",
+                  body: `Runs the ${failing.length} failing cases again on the branch checkout.`,
+                },
+                {
+                  label: "Changes",
+                  body: "Nothing in the code. The result is added to this run.",
+                },
+                {
+                  label: "Kept",
+                  body: "The first result stays in the history.",
+                },
+                {
+                  label: "Next",
+                  body: "If they pass, resume verify. If not, the output shows here.",
+                },
+              ]}
+            />
+            <Button
+              type="button"
+              className={cn("w-full", touchButton)}
+              disabled={busy}
+              onClick={() => void rerun(failing)}
+            >
+              <RefreshCwIcon aria-hidden="true" />
+              {busy ? "Running…" : `Rerun ${failing.length} failed cases`}
+            </Button>
+          </Panel>
+        ) : null}
+      </div>
       <p className="text-xs text-muted-foreground">
         Terminal: <span className="font-mono">span qa cases {id} --failed</span>
       </p>

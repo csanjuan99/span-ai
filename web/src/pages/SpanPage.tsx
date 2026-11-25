@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 import {
   Check,
+  ExternalLink,
   MessageSquare,
   OctagonX,
   Play,
@@ -45,6 +46,7 @@ import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage } from "@/lib/stage-copy"
 import { clockOf } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
+import { reasonText } from "@/lib/guards"
 import { useSpan } from "@/hooks/use-span"
 import { ConflictPanel } from "@/components/conflict/ConflictPanel"
 import { FailureCard } from "@/components/failure/FailureCard"
@@ -122,17 +124,12 @@ export function SpanPage() {
   const journalState = useEvents(id, state.span?.statements.length ?? 0)
   const current = cursor?.stage || "intake"
   const paused = Boolean(cursor?.hold || cursor?.stop)
+  const currentIndex = stages.indexOf(current as (typeof stages)[number])
   // The stage a note targets follows the run until the person touches the form; touching it
   // pins the stage they were looking at, so it does not move under them.
   const [stage, setStage] = useState("")
   const selected =
-    stage ||
-    noteStage({
-      current,
-      hold: Boolean(cursor?.hold),
-      stop: Boolean(cursor?.stop),
-    }) ||
-    noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
+    stage || noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
   const verdict: RunState = cursor?.done
     ? "done"
     : cursor?.stop
@@ -227,8 +224,7 @@ export function SpanPage() {
     [...(state.span?.statements ?? [])].reverse().find((item) => item.time)
       ?.time ?? ""
   const attempt = failure === null ? "" : attemptLine(failure)
-  const stageNumber =
-    Math.max(stages.indexOf(current as (typeof stages)[number]), 0) + 1
+  const stageNumber = Math.max(currentIndex, 0) + 1
   const failedWhere = [
     current,
     attempt,
@@ -316,7 +312,7 @@ export function SpanPage() {
       )
       return true
     } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : outcome.failed)
+      setNote(reasonText(err, outcome.failed))
       return false
     }
   }
@@ -412,7 +408,7 @@ export function SpanPage() {
       await navigator.clipboard.writeText(markdown)
       setNote("Summary copied.")
     } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the summary was not copied")
+      setNote(reasonText(err, "the summary was not copied"))
     }
   }
 
@@ -511,7 +507,7 @@ export function SpanPage() {
       : ""
 
   // The right column of the block that waits on a person: what the action does, then the action.
-  const next = stages[stages.indexOf(current as (typeof stages)[number]) + 1]
+  const next = stages[currentIndex + 1]
   const primary =
     needs === null
       ? null
@@ -614,12 +610,16 @@ export function SpanPage() {
         </Button>
         {holder !== "" ? (
           <div className="flex flex-col gap-1">
-            <Link
-              className="self-start text-sm text-primary underline-offset-4 hover:underline"
-              to={`/spans/${holder}`}
+            <Button
+              asChild
+              variant="outline"
+              className={cn(wideButton, quietButton)}
             >
-              Open the other run
-            </Link>
+              <Link to={`/spans/${holder}`}>
+                <ExternalLink aria-hidden="true" />
+                Open the other run
+              </Link>
+            </Button>
             <p className="text-xs text-pretty text-muted-foreground">
               You can let it finish or stop it from there.
             </p>
