@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
 	"span/internal/agent"
+	"span/internal/fsutil"
 	"span/internal/policy"
 )
 
@@ -82,7 +84,7 @@ func SetStageAgent(dir, stage, name string, home string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, agentsFile), append(raw, '\n'))
+	return fsutil.WriteAtomic(filepath.Join(dir, agentsFile), append(raw, '\n'))
 }
 
 // ignoreStateRoot makes the state directory ignore itself, the way .git does. Span
@@ -109,7 +111,7 @@ func RequestPause(root, id string) error {
 	if _, err := os.Stat(filepath.Join(dir, "cursor.json")); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, pauseFile), []byte("paused by the page\n"))
+	return fsutil.WriteAtomic(filepath.Join(dir, pauseFile), []byte("paused by the page\n"))
 }
 
 // takePause reports whether a pause was requested and consumes it, so the next resume
@@ -119,8 +121,16 @@ func (r *runner) takePause() bool {
 	if _, err := os.Stat(path); err != nil {
 		return false
 	}
-	_ = os.Remove(path)
+	r.drop(path)
 	return true
+}
+
+// drop removes a marker file the run has consumed. A file that is already gone is fine; any
+// other failure is logged, because a marker that stays would act twice.
+func (r *runner) drop(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		log.Printf("remove %s %s: %v", r.cur.ID, filepath.Base(path), err)
+	}
 }
 
 // agentWanted is the CLI a stage asks for: the run's choice for it, else the one span.yaml

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"span/internal/statement"
 )
@@ -167,9 +168,10 @@ func band(ctx context.Context, check Checker, dir string, excuse Excuse, name, l
 			rep.Commands = append(rep.Commands, statement.Command{Command: command, Band: name, Error: ErrProse.Error()})
 			return rep, nil
 		}
+		began := time.Now()
 		code, err := check.Run(ctx, command, dir)
 		item := statement.Command{Command: command, ExitCode: code.ExitCode, Band: name,
-			Output: code.Text}
+			Output: code.Text, DurationMS: time.Since(began).Milliseconds()}
 		if counts, ok := CountTests(code.Text); ok {
 			item.Tests = &counts
 		}

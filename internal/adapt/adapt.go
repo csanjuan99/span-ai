@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"span/internal/agent"
@@ -34,15 +33,9 @@ const OutputCap = 1 << 20
 // Run executes one command in dir and keeps the tail of its output (see OutputCap). A failing
 // exit is reported in the output's ExitCode, not as an error; a cancelled context is an error.
 func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) {
-	env, fields, err := Argv(command)
+	cmd, err := declared(ctx, command, dir)
 	if err != nil {
 		return prove.Output{}, err
-	}
-	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
-	proc.Tame(cmd)
-	cmd.Dir = dir
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
 	}
 	kept := &tailBuffer{max: OutputCap}
 	cmd.Stdout = kept
@@ -63,6 +56,23 @@ func (Exec) Run(ctx context.Context, command, dir string) (prove.Output, error) 
 		return out, nil
 	}
 	return out, err
+}
+
+// declared builds the process of a declared command: argv without a shell, tamed, in dir,
+// with the command's own NAME=value words and then extra added to the environment. With
+// neither, the process inherits the environment as it is.
+func declared(ctx context.Context, command, dir string, extra ...string) (*exec.Cmd, error) {
+	env, fields, err := Argv(command)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
+	proc.Tame(cmd)
+	cmd.Dir = dir
+	if len(env)+len(extra) > 0 {
+		cmd.Env = append(append(os.Environ(), env...), extra...)
+	}
+	return cmd, nil
 }
 
 // tailBuffer keeps the last max bytes written to it. One goroutine writes at a
@@ -240,6 +250,17 @@ type Diff struct {
 	Truncated bool   `json:"truncated"`
 	// Commits is how many commits head has that base does not.
 	Commits int `json:"commits"`
+	// CommitLog is those commits, oldest first, so a reader can follow the work in the order it
+	// happened. It is empty, not absent, when head adds nothing to base.
+	CommitLog []Commit `json:"commitLog"`
+}
+
+// Commit is one commit of a branch as a reader needs it: which one, what it says, and when.
+type Commit struct {
+	SHA     string `json:"sha"`
+	Subject string `json:"subject"`
+	// Time is the commit time in RFC 3339.
+	Time string `json:"time"`
 }
 
 // Diff reads git diff base...head without a shell.
@@ -251,24 +272,47 @@ func (g Git) Diff(ctx context.Context, base, head string) (Diff, error) {
 	if strings.HasPrefix(base, "-") || strings.HasPrefix(head, "-") {
 		return Diff{}, fmt.Errorf("diff %q...%q: not a commit", base, head)
 	}
-	spec := base + "..." + head
-	stat, err := g.output(ctx, "diff", "--stat", spec, "--")
+	stat, patch, truncated, err := g.statAndPatch(ctx, base+"..."+head)
 	if err != nil {
 		return Diff{}, err
 	}
-	patch, truncated, err := g.bounded(ctx, patchLimit, "diff", spec, "--")
+	log, err := g.commitLog(ctx, base, head)
 	if err != nil {
 		return Diff{}, err
 	}
-	counted, err := g.output(ctx, "rev-list", "--count", base+".."+head, "--")
-	if err != nil {
-		return Diff{}, err
+	return Diff{Stat: stat, Patch: patch, Truncated: truncated, Commits: len(log), CommitLog: log}, nil
+}
+
+// statAndPatch reads the stat and the bounded patch of one range, with the extra diff flags
+// both reads share.
+func (g Git) statAndPatch(ctx context.Context, spec string, flags ...string) (stat, patch string, truncated bool, err error) {
+	statArgs := append(append([]string{"diff", "--stat"}, flags...), spec, "--")
+	if stat, err = g.output(ctx, statArgs...); err != nil {
+		return "", "", false, err
 	}
-	commits, err := strconv.Atoi(strings.TrimSpace(counted))
+	patchArgs := append(append([]string{"diff"}, flags...), spec, "--")
+	patch, truncated, err = g.bounded(ctx, patchLimit, patchArgs...)
+	return stat, patch, truncated, err
+}
+
+// commitLog lists the commits head has that base does not, oldest first.
+func (g Git) commitLog(ctx context.Context, base, head string) ([]Commit, error) {
+	out, err := g.output(ctx, "log", "--reverse", "--format=%H%x1f%s%x1f%cI", base+".."+head, "--")
 	if err != nil {
-		return Diff{}, fmt.Errorf("count commits %q..%q: %w", base, head, err)
+		return nil, fmt.Errorf("list commits %q..%q: %w", base, head, err)
 	}
-	return Diff{Stat: stat, Patch: patch, Truncated: truncated, Commits: commits}, nil
+	log := []Commit{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x1f", 3)
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("list commits %q..%q: unreadable line %q", base, head, line)
+		}
+		log = append(log, Commit{SHA: parts[0], Subject: parts[1], Time: parts[2]})
+	}
+	return log, nil
 }
 
 // Landed finds where a merged branch came in. When head is already in base, a plain
@@ -374,16 +418,18 @@ func (g Git) bounded(ctx context.Context, limit int, args ...string) (string, bo
 	buf := make([]byte, limit+1)
 	n, readErr := io.ReadFull(stdout, buf)
 	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
-		// The read already failed and that error is the one returned; Wait only reaps the process.
-		_ = cmd.Wait()
-		return "", false, readErr
+		// The read failed first, so that error is the one returned; Wait reaps the process and
+		// its own error rides along.
+		return "", false, errors.Join(readErr, cmd.Wait())
 	}
 	truncated := n > limit
 	if truncated {
 		n = limit
 	}
 	// What is left past the limit is dropped on purpose; draining it lets git exit.
-	_, _ = io.Copy(io.Discard, stdout)
+	if _, err := io.Copy(io.Discard, stdout); err != nil {
+		return "", false, errors.Join(err, cmd.Wait())
+	}
 	if err := cmd.Wait(); err != nil {
 		return "", false, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, stderr.String())
 	}
@@ -611,14 +657,10 @@ type CommandRelease struct{}
 
 // Run executes the environment command for the commit sha; a failure carries its stderr.
 func (CommandRelease) Run(ctx context.Context, command, dir, sha string) error {
-	env, fields, err := Argv(command)
+	cmd, err := declared(ctx, command, dir, "SPAN_SHA="+sha)
 	if err != nil {
 		return fmt.Errorf("release command: %w", err)
 	}
-	cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
-	proc.Tame(cmd)
-	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), env...), "SPAN_SHA="+sha)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := proc.Run(cmd); err != nil {
@@ -669,15 +711,7 @@ func (c CLIAgents) Select(want string) (agent.Selection, error) {
 
 // Frame asks the agent to frame the story and reads its JSON reply.
 func (c CLIAgents) Frame(ctx context.Context, name, workspace, text string) (engine.FrameDoc, error) {
-	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, c.sink)
-	if err != nil {
-		return engine.FrameDoc{}, err
-	}
-	var doc engine.FrameDoc
-	if err := agent.ParseJSON(out, &doc); err != nil {
-		return engine.FrameDoc{}, err
-	}
-	return doc, nil
+	return runJSON[engine.FrameDoc](ctx, c, name, workspace, text, c.sink)
 }
 
 // Build asks the agent to write the change in workspace.
@@ -688,27 +722,26 @@ func (c CLIAgents) Build(ctx context.Context, name, workspace, text string) erro
 
 // Inspect asks the agent to review the change and reads its JSON verdict.
 func (c CLIAgents) Inspect(ctx context.Context, name, workspace, text string) (engine.InspectDoc, error) {
-	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, c.sink)
-	if err != nil {
-		return engine.InspectDoc{}, err
-	}
-	var doc engine.InspectDoc
-	if err := agent.ParseJSON(out, &doc); err != nil {
-		return engine.InspectDoc{}, err
-	}
-	return doc, nil
+	return runJSON[engine.InspectDoc](ctx, c, name, workspace, text, c.sink)
 }
 
 // Propose asks the agent for conflict options. Its stdout is not copied to the run
 // transcript: the reply carries file contents, which belong in the plan, not the log.
 func (c CLIAgents) Propose(ctx context.Context, name, workspace, text string) (engine.ConflictReply, error) {
-	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, nil)
+	return runJSON[engine.ConflictReply](ctx, c, name, workspace, text, nil)
+}
+
+// runJSON runs the agent and reads its reply as one JSON document of type T. The sink
+// receives the agent's stdout, or nothing when it is nil.
+func runJSON[T any](ctx context.Context, c CLIAgents, name, workspace, text string, sink io.Writer) (T, error) {
+	var doc T
+	out, err := agent.RunModel(ctx, name, c.Model(name), workspace, text, sink)
 	if err != nil {
-		return engine.ConflictReply{}, err
+		return doc, err
 	}
-	var reply engine.ConflictReply
-	if err := agent.ParseJSON(out, &reply); err != nil {
-		return engine.ConflictReply{}, err
+	if err := agent.ParseJSON(out, &doc); err != nil {
+		var zero T
+		return zero, err
 	}
-	return reply, nil
+	return doc, nil
 }

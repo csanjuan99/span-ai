@@ -66,7 +66,7 @@ func Build(in Input) string {
 		extra.WriteString("Authoring aid, not the gate: @playwright/mcp --caps=testing. The gate is the qa command.\n")
 	}
 	if in.DecisionPath != "" {
-		fmt.Fprintf(&extra, `If the brief asks for something a rule of this repository forbids (AGENTS.md, a hook, CI), or you cannot go on without a person deciding, do not choose one side silently and do not stop with a question in the chat. Write this JSON to %s and stop: {"class":"spec-conflict","title":"","happened":"","evidence":[{"ref":"path:line","excerpt":""}],"options":[{"id":"","label":"","consequence":"","reversible":true,"then":"build"}],"recommendation":""}
+		fmt.Fprintf(&extra, `If the brief asks for something a rule of this repository forbids (AGENTS.md, a hook, CI), or you cannot go on without a person deciding, do not choose one side silently and do not stop with a question in the chat. Write this JSON to %s and stop: {"class":"spec-conflict","title":"","happened":"","evidence":[{"ref":"path:line","excerpt":""}],"options":[{"id":"","label":"","consequence":"","reversible":true,"then":"build","gain":"","cost":""}],"recommendation":""}
 Give 2 to 4 options. "then" is build (work again with the person's words), retry (try the commit again after the person changed the repository) or stop. Quote both sides of a conflict in the evidence. Never offer to skip a hook or a check.
 `, in.DecisionPath)
 	}

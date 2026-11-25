@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"span/internal/statement"
 )
@@ -14,10 +15,13 @@ type script struct {
 	fail   map[string]int
 	err    map[string]error
 	output map[string]string
+	// pause is how long each command takes, so a test can read the duration a command keeps.
+	pause time.Duration
 }
 
 func (s *script) Run(_ context.Context, command, _ string) (Output, error) {
 	s.calls = append(s.calls, command)
+	time.Sleep(s.pause)
 	if err := s.err[command]; err != nil {
 		return Output{}, err
 	}
@@ -287,5 +291,16 @@ func TestAFocusLabelKeepsTheFingerprintAcrossNarrowedCommands(t *testing.T) {
 	}
 	if fingerprint("go test m/b") != Fingerprint("go test ./...", text) {
 		t.Fatal("the label was not used for the fingerprint")
+	}
+}
+
+func TestACommandKeepsHowLongItTook(t *testing.T) {
+	s := &script{pause: 5 * time.Millisecond}
+	got, err := Bands(context.Background(), s, t.TempDir(), Plan{Fast: []string{"go build ./..."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Commands) != 1 || got.Commands[0].DurationMS < 5 {
+		t.Fatalf("commands %#v", got.Commands)
 	}
 }

@@ -169,3 +169,49 @@ func digest(line []byte) string {
 	sum := sha256.Sum256(line)
 	return hex.EncodeToString(sum[:])
 }
+
+// Entry is one journal line as the audit view shows it: the event, the hash of its own
+// bytes, and the hash the line before it really has, so a reader can see where a link
+// does not hold.
+type Entry struct {
+	Event
+	// Hash is the SHA-256 of this line's bytes.
+	Hash string `json:"hash"`
+	// Want is the SHA-256 of the previous line as stored. A healthy entry has Prev equal to
+	// Want. The first entry has neither.
+	Want string `json:"want,omitempty"`
+}
+
+// Chain reads every entry with its hashes and returns the seq of the first entry whose link
+// does not hold, or 0 when the whole journal holds together. Entries after a broken link are
+// still returned, as stored; the caller decides how much to trust them.
+func Chain(dir string) ([]Entry, int, error) {
+	lines, err := readLines(filepath.Join(dir, File))
+	if err != nil {
+		return nil, 0, err
+	}
+	entries := make([]Entry, 0, len(lines))
+	broken := 0
+	var previous []byte
+	for index, line := range lines {
+		var event Event
+		if err := json.Unmarshal(line, &event); err != nil {
+			if broken == 0 {
+				broken = index + 1
+			}
+			entries = append(entries, Entry{Event: Event{Seq: index + 1, Type: "unreadable"}, Hash: digest(line)})
+			previous = line
+			continue
+		}
+		entry := Entry{Event: event, Hash: digest(line)}
+		if previous != nil {
+			entry.Want = digest(previous)
+		}
+		if broken == 0 && (event.Seq != index+1 || event.Prev != entry.Want) {
+			broken = index + 1
+		}
+		entries = append(entries, entry)
+		previous = line
+	}
+	return entries, broken, nil
+}

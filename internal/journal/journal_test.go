@@ -91,3 +91,34 @@ func TestReadOfAMissingJournalIsEmpty(t *testing.T) {
 		t.Fatalf("%v %v", events, err)
 	}
 }
+
+func TestChainNamesTheFirstBrokenLink(t *testing.T) {
+	dir := t.TempDir()
+	for _, typ := range []string{"started", "sealed", "held"} {
+		if err := Append(dir, Span, typ, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, broken, err := Chain(dir)
+	if err != nil || broken != 0 || len(entries) != 3 {
+		t.Fatalf("intact chain = %d entries, broken %d, err %v", len(entries), broken, err)
+	}
+	if entries[1].Prev != entries[0].Hash || entries[1].Want != entries[0].Hash || entries[0].Want != "" {
+		t.Fatalf("links = %+v", entries)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(raw), `"type":"sealed"`, `"type":"sealed!"`, 1)
+	if err := os.WriteFile(filepath.Join(dir, File), []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entries, broken, err = Chain(dir)
+	if err != nil || broken != 3 || len(entries) != 3 {
+		t.Fatalf("edited chain broke at %d (entries %d, err %v), want 3", broken, len(entries), err)
+	}
+	if entries[2].Prev == entries[2].Want {
+		t.Fatalf("the entry after the edit should not match what is stored: %+v", entries[2])
+	}
+}

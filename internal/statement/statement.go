@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"span/internal/fsutil"
 )
 
 const (
@@ -36,12 +38,17 @@ type TestCounts struct {
 
 // Command is one declared check, not a shell script.
 type Command struct {
-	Command     string `json:"command"`
-	ExitCode    int    `json:"exitCode"`
-	Error       string `json:"error,omitempty"`
-	Band        string `json:"band,omitempty"`
-	Output      string `json:"output,omitempty"`
-	LogPath     string `json:"logPath,omitempty"`
+	Command  string `json:"command"`
+	ExitCode int    `json:"exitCode"`
+	Error    string `json:"error,omitempty"`
+	Band     string `json:"band,omitempty"`
+	Output   string `json:"output,omitempty"`
+	LogPath  string `json:"logPath,omitempty"`
+	// Lines is how many lines the command printed in all, so a reader of the tail knows how
+	// much of the log it is looking at ("5 of 142 lines").
+	Lines int `json:"lines,omitempty"`
+	// DurationMS is how long the command ran, so the QA tab can show a time per gate.
+	DurationMS  int64  `json:"durationMs,omitempty"`
 	Fingerprint string `json:"fingerprint,omitempty"`
 	// Preexisting marks a failure the base commit already had. It is shown, not counted.
 	Preexisting bool `json:"preexisting,omitempty"`
@@ -101,10 +108,10 @@ func Write(dir string, s *Statement) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	if err := writeAtomic(filepath.Join(dir, s.Stage+".json"), raw); err != nil {
+	if err := fsutil.WriteAtomic(filepath.Join(dir, s.Stage+".json"), raw); err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, s.Stage+".md"), []byte(markdown(s)))
+	return fsutil.WriteAtomic(filepath.Join(dir, s.Stage+".md"), []byte(markdown(s)))
 }
 
 // Read loads a stage statement. ok is false when the file is absent.
@@ -211,24 +218,14 @@ func Signature(parts ...string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func writeAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".tmp-*")
-	if err != nil {
-		return err
+// CountLines is how many lines output holds; a last line without a newline still counts.
+func CountLines(output string) int {
+	if output == "" {
+		return 0
 	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
+	lines := strings.Count(output, "\n")
+	if !strings.HasSuffix(output, "\n") {
+		lines++
 	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return lines
 }

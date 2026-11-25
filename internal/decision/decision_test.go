@@ -163,3 +163,22 @@ func TestClashKeyPrefersTheLineOverTheWords(t *testing.T) {
 		t.Fatal("without a ref the rule text stands in")
 	}
 }
+
+func TestParseKeepsAndBoundsTheTradeoff(t *testing.T) {
+	raw := `{"title":"t","happened":"h","options":[` +
+		`{"id":"a","label":"A","consequence":"c","then":"build","gain":"  Durable\nhistory ","cost":"` + strings.Repeat("x", 300) + `"},` +
+		`{"id":"b","label":"B","consequence":"c","then":"stop"}]}`
+	req, err := Parse([]byte(raw), "frame", time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Options[0].Gain; got != "Durable history" {
+		t.Errorf("gain = %q, want one line", got)
+	}
+	if got := len([]rune(req.Options[0].Cost)); got != maxTradeoff {
+		t.Errorf("cost is %d runes, want %d", got, maxTradeoff)
+	}
+	if req.Options[1].Gain != "" || req.Options[1].Cost != "" {
+		t.Errorf("an option without a trade-off must stay without one: %+v", req.Options[1])
+	}
+}

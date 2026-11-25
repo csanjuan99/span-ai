@@ -298,7 +298,10 @@ func TestHappyPathPromotesOnce(t *testing.T) {
 	if err != nil || !ok || frame.InstructionsDigest == "" {
 		t.Fatalf("frame digest ok=%v err=%v %+v", ok, err, frame)
 	}
-	noteSt, _, _ := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "1"), note)
+	noteSt, _, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "1"), note)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if noteSt.Reason == "" || noteSt.ParentDigest == "" {
 		t.Fatalf("note %+v", noteSt)
 	}
@@ -837,6 +840,9 @@ func TestAFailingQAGateReturnsToBuildWithTheOutput(t *testing.T) {
 	}
 	if len(first.Commands) > 0 && first.Commands[0].LogPath == "" {
 		t.Fatal("the full output was not written to a log file")
+	}
+	if len(first.Commands) > 0 && first.Commands[0].Lines != 2 {
+		t.Fatalf("the statement kept %d lines of output, want the 2 the command printed", first.Commands[0].Lines)
 	}
 	second, ok, err := statement.Read(filepath.Join(opt.Root, got.ID, "iter", "2"), build)
 	if err != nil || !ok {

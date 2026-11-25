@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"span/internal/fsutil"
 	"span/internal/statement"
 )
 
@@ -44,7 +45,7 @@ func Approve(root, id, stage, environment string) error {
 	if !cur.Hold || cur.Stage != stage {
 		return fmt.Errorf("this run is not held at %s", stage)
 	}
-	return writeAtomic(filepath.Join(root, id, approvalFile(stage, environment)), []byte(cur.GitSHA+"\n"))
+	return fsutil.WriteAtomic(filepath.Join(root, id, approvalFile(stage, environment)), []byte(cur.GitSHA+"\n"))
 }
 
 // approved reports whether a person approved this stage for the head the run is at.
@@ -58,7 +59,7 @@ func (r *runner) approved(stage, environment string) bool {
 
 // spendApproval removes the approval once the stage it covered has advanced.
 func (r *runner) spendApproval(stage, environment string) {
-	_ = os.Remove(filepath.Join(r.spanDir(), approvalFile(stage, environment)))
+	r.drop(filepath.Join(r.spanDir(), approvalFile(stage, environment)))
 }
 
 // gated reports whether a stage in hold mode must still wait for a person.

@@ -70,6 +70,10 @@ type Option struct {
 	Consequence string `json:"consequence"`
 	Reversible  bool   `json:"reversible"`
 	Then        string `json:"then"`
+	// Gain and Cost are the two sides of the trade in a few words each, so a person can
+	// weigh the options side by side. Both are optional.
+	Gain string `json:"gain,omitempty"`
+	Cost string `json:"cost,omitempty"`
 	// Effect is what Span does to the run's decision log when the option is chosen. Only
 	// Span sets it: an agent's request never carries one.
 	Effect string `json:"effect,omitempty"`
@@ -169,6 +173,7 @@ const (
 	maxLabel       = 200
 	maxHappened    = 2000
 	maxConsequence = 500
+	maxTradeoff    = 120
 	maxEvidence    = 10
 	maxExcerpt     = 4000
 	// MaxFile is the largest request file Span reads.
@@ -210,6 +215,7 @@ func Parse(raw []byte, stage string, now time.Time) (Request, error) {
 		o := &req.Options[i]
 		o.ID, o.Label = oneLine(o.ID), clip(oneLine(o.Label), maxLabel)
 		o.Consequence = clip(oneLine(o.Consequence), maxConsequence)
+		o.Gain, o.Cost = clip(oneLine(o.Gain), maxTradeoff), clip(oneLine(o.Cost), maxTradeoff)
 		o.Effect = ""
 	}
 	req.Stage = stage

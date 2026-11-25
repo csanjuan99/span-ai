@@ -249,3 +249,46 @@ func TestAShortWritePublishesOnlyTheLinesThatReachedTheFile(t *testing.T) {
 		t.Fatalf("wrote %q", out.wrote)
 	}
 }
+
+func TestStagesSplitTheTranscriptWhereEachBegan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.log")
+	log, err := Open(path, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.SetStage("frame")
+	if _, err := log.Write([]byte("one\ntwo\n")); err != nil {
+		t.Fatal(err)
+	}
+	log.SetStage("build")
+	if _, err := log.Write([]byte("three\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := Segments(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 2 || segs[0].Stage != "frame" || len(segs[0].Lines) != 2 || segs[1].Stage != "build" || segs[1].Lines[0] != "three" {
+		t.Fatalf("segments %#v", segs)
+	}
+	if segs[1].FirstLine != 3 || segs[0].EndedAt.IsZero() {
+		t.Fatalf("second segment %#v", segs[1])
+	}
+}
+
+func TestATranscriptWithoutMarkersIsOneSegment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "transcript.log")
+	if err := os.WriteFile(path, []byte("a\nb\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := Segments(path)
+	if err != nil || len(segs) != 1 || segs[0].Stage != "" || len(segs[0].Lines) != 2 {
+		t.Fatalf("segments %#v err %v", segs, err)
+	}
+	if none, err := Segments(filepath.Join(t.TempDir(), "missing.log")); err != nil || none != nil {
+		t.Fatalf("a missing transcript has no segment: %#v %v", none, err)
+	}
+}

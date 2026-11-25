@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -19,8 +18,10 @@ import (
 
 	"span/internal/adapt"
 	"span/internal/engine"
+	"span/internal/implementation"
 	"span/internal/live"
 	"span/internal/qa"
+	"span/internal/transcript"
 )
 
 func wantsJSON(r *http.Request) bool {
@@ -104,28 +105,15 @@ func readAcceptance(root, id string) (acceptanceBody, error) {
 }
 
 func readImplementation(ctx context.Context, root, id string) (adapt.Diff, error) {
-	snap, err := engine.Load(root, id)
-	if err != nil {
+	change, err := implementation.RunChange(ctx, root, id)
+	if err != nil || change.Empty() {
 		return adapt.Diff{}, err
 	}
-	if snap.Cursor.Workspace == "" || snap.Cursor.Base == "" || snap.Cursor.GitSHA == "" {
-		return adapt.Diff{}, nil
-	}
-	git := adapt.Git{Dir: snap.Cursor.Workspace}
-	base := snap.Cursor.Base
-	if snap.Cursor.Done {
-		// A merged branch is already in its base, so base...head would be empty. Read the work
-		// from where the merge took it in. Failing to find that is not an error: the plain diff
-		// is still the right answer for a run that was not merged this way.
-		if before, ok, err := git.Landed(ctx, base, snap.Cursor.GitSHA); err == nil && ok {
-			base = before
-		}
-	}
-	return git.Diff(ctx, base, snap.Cursor.GitSHA)
+	return change.Git.Diff(ctx, change.Base, change.Head)
 }
 
 // featureLimit bounds the feature document the report reads.
-const featureLimit = 64 * 1024
+const featureLimit = implementation.FeatureLimit
 
 // featureView is the ODD document the build stage wrote, for the report.
 type featureView struct {
@@ -137,30 +125,8 @@ type featureView struct {
 // readFeature reads odd/tasks/<feature>.md from the run's workspace. A run with no document
 // yet, or a feature name that is not a plain file name, is an empty report and not an error.
 func readFeature(root, id string) (featureView, error) {
-	snap, err := engine.Load(root, id)
-	if err != nil {
-		return featureView{}, err
-	}
-	feature := snap.Cursor.Feature
-	if snap.Cursor.Workspace == "" || !safe(feature) {
-		return featureView{}, nil
-	}
-	rel := filepath.Join("odd", "tasks", feature+".md")
-	file, err := os.Open(filepath.Join(snap.Cursor.Workspace, rel))
-	if err != nil {
-		return featureView{Path: filepath.ToSlash(rel)}, nil
-	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, featureLimit+1))
-	if err != nil {
-		return featureView{}, err
-	}
-	view := featureView{Path: filepath.ToSlash(rel), Markdown: string(raw)}
-	if len(raw) > featureLimit {
-		view.Markdown = string(raw[:featureLimit])
-		view.Truncated = true
-	}
-	return view, nil
+	path, markdown, truncated, err := implementation.FeatureDocument(root, id)
+	return featureView{Path: path, Markdown: markdown, Truncated: truncated}, err
 }
 
 // liveWriteTimeout bounds one socket write, in nanoseconds; tests shorten it.
@@ -198,7 +164,7 @@ func serveLive(hub *live.Hub, root, token, id string, w http.ResponseWriter, r *
 	// compares seq against, and without it a reconnecting page would skip or gap forever.
 	// The transcript does not depend on the snapshot, so it is replayed either way.
 	replay := engine.Event{Type: "replay", Seq: resume}
-	replay.Transcript, replay.Offset = transcriptTail(filepath.Join(root, id, "transcript.log"), 1000)
+	replay.Transcript, replay.Offset = transcript.TailOffset(filepath.Join(root, id, "transcript.log"), 1000)
 	if snap, err := engine.Load(root, id); err == nil {
 		replay.Span = &snap
 	}
@@ -285,35 +251,6 @@ func writeLive(ctx context.Context, conn *websocket.Conn, raw []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(liveWriteTimeout.Load()))
 	defer cancel()
 	return conn.Write(ctx, websocket.MessageText, raw)
-}
-
-// transcriptTail reads the last n lines of the transcript and the byte offset they end
-// at. Both come from one read, cut at the last newline, so the tail never holds a byte
-// past the offset; a later transcript frame at or below it repeats lines the page has.
-func transcriptTail(path string, n int) ([]string, int64) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, 0
-	}
-	end := strings.LastIndexByte(string(raw), '\n') + 1
-	raw = raw[:end]
-	offset := int64(end)
-	const maxBytes = 1 << 20
-	if len(raw) > maxBytes {
-		raw = raw[len(raw)-maxBytes:]
-		if i := strings.IndexByte(string(raw), '\n'); i >= 0 {
-			raw = raw[i+1:]
-		}
-	}
-	text := strings.TrimRight(string(raw), "\n")
-	if text == "" {
-		return nil, offset
-	}
-	lines := strings.Split(text, "\n")
-	if n > 0 && len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return lines, offset
 }
 
 // minRedactLen is the shortest serve token the socket redacts. A shorter token is too

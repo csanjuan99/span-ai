@@ -27,6 +27,7 @@ import (
 	"span/internal/branch"
 	"span/internal/decision"
 	"span/internal/feature"
+	"span/internal/fsutil"
 	"span/internal/handoff"
 	"span/internal/harness"
 	"span/internal/journal"
@@ -625,6 +626,7 @@ func (r *runner) stamp(stage string, commands []statement.Command) []statement.C
 			if path, err := r.writeLog(stage, i, item.Output); err == nil {
 				item.LogPath = path
 			}
+			item.Lines = statement.CountLines(item.Output)
 			item.Output = statement.Tail(item.Output)
 		}
 		out[i] = item
@@ -1101,7 +1103,7 @@ func (r *runner) logAnswer(req *decision.Request, option decision.Option, body s
 			return err
 		}
 	case decision.Approve:
-		if err := writeAtomic(filepath.Join(dir, approvalFile(req.Stage, "")), []byte(r.cur.GitSHA+"\n")); err != nil {
+		if err := fsutil.WriteAtomic(filepath.Join(dir, approvalFile(req.Stage, "")), []byte(r.cur.GitSHA+"\n")); err != nil {
 			return err
 		}
 	}
@@ -2207,7 +2209,7 @@ func (r *runner) save() error {
 	if err != nil {
 		return err
 	}
-	if err := writeAtomic(filepath.Join(r.spanDir(), "cursor.json"), append(raw, '\n')); err != nil {
+	if err := fsutil.WriteAtomic(filepath.Join(r.spanDir(), "cursor.json"), append(raw, '\n')); err != nil {
 		return err
 	}
 	cur := r.cur
@@ -2247,7 +2249,7 @@ func (r *runner) receiptExists(env, sha string) bool {
 }
 
 func (r *runner) writeReceipt(env, sha string) error {
-	return writeAtomic(r.receiptPath(env, sha), []byte(sha+"\n"))
+	return fsutil.WriteAtomic(r.receiptPath(env, sha), []byte(sha+"\n"))
 }
 
 func (r *runner) receiptPath(env, sha string) string {
@@ -2439,31 +2441,7 @@ func writeJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, append(raw, '\n'))
-}
-
-func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	defer func() { _ = os.Remove(tmp) }()
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fsutil.WriteAtomic(path, append(raw, '\n'))
 }
 
 // rulesFor is the rules block of a stage: only frame compares the story with them.

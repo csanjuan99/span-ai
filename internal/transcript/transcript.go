@@ -2,6 +2,8 @@
 package transcript
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -25,6 +27,7 @@ type Batch struct {
 // Log is the durable agent stdout for one run.
 type Log struct {
 	mu      sync.Mutex
+	path    string
 	file    *os.File
 	out     io.Writer
 	secrets []string
@@ -67,6 +70,7 @@ func Open(path string, secrets []string, publish func(Batch)) (*Log, error) {
 		size = info.Size()
 	}
 	log := &Log{
+		path:    path,
 		file:    file,
 		out:     file,
 		size:    size,
@@ -86,6 +90,7 @@ func (l *Log) SetStage(stage string) {
 	l.mu.Lock()
 	prev := l.take()
 	l.stage = stage
+	l.mark(stage)
 	l.handOff(prev)
 }
 
@@ -260,20 +265,138 @@ func Tail(path string, n int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return tailLines(raw, n), nil
+}
+
+// TailOffset returns the last n lines of the transcript and the byte offset they end at. Both
+// come from one read, cut at the last newline, so the lines never hold a byte past the
+// offset. A missing or unreadable file is empty at offset zero.
+func TailOffset(path string, n int) ([]string, int64) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0
+	}
+	end := bytes.LastIndexByte(raw, '\n') + 1
+	return tailLines(raw[:end], n), int64(end)
+}
+
+// tailLines keeps the last n lines of at most the last MiB of raw.
+func tailLines(raw []byte, n int) []string {
 	const maxBytes = 1 << 20
 	if len(raw) > maxBytes {
 		raw = raw[len(raw)-maxBytes:]
-		if i := strings.IndexByte(string(raw), '\n'); i >= 0 {
+		if i := bytes.IndexByte(raw, '\n'); i >= 0 {
 			raw = raw[i+1:]
 		}
 	}
 	text := strings.TrimRight(string(raw), "\n")
 	if text == "" {
-		return nil, nil
+		return nil
 	}
 	lines := strings.Split(text, "\n")
 	if n > 0 && len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
-	return lines, nil
+	return lines
+}
+
+// StagesSuffix names the file beside a transcript that says where each stage's lines begin.
+const StagesSuffix = ".stages"
+
+// Marker says that the lines of a stage begin at a byte offset of the transcript.
+type Marker struct {
+	Stage  string    `json:"stage"`
+	Offset int64     `json:"offset"`
+	At     time.Time `json:"at"`
+}
+
+// mark records where a stage starts. A marker that cannot be written is dropped: the transcript
+// itself is what matters, and without markers it simply reads as one stage. The caller holds mu.
+func (l *Log) mark(stage string) {
+	raw, err := json.Marshal(Marker{Stage: stage, Offset: l.size, At: time.Now().UTC()})
+	if err != nil {
+		return
+	}
+	file, err := os.OpenFile(l.path+StagesSuffix, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, werr := file.Write(append(raw, '\n'))
+	if cerr := file.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil && l.err == nil {
+		l.err = werr
+	}
+}
+
+// Segment is the lines one stage printed, in one pass of that stage.
+type Segment struct {
+	Stage     string
+	StartedAt time.Time
+	EndedAt   time.Time
+	// FirstLine is the number of the segment's first line in the whole transcript.
+	FirstLine int
+	Lines     []string
+}
+
+// Segments splits a transcript at its stage markers. A transcript with no markers (a run that
+// predates them) is one segment with no stage. A missing transcript has no segment.
+func Segments(path string) ([]Segment, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	markers := readMarkers(path + StagesSuffix)
+	if len(markers) == 0 {
+		return []Segment{{FirstLine: 1, Lines: splitLines(string(raw))}}, nil
+	}
+	var out []Segment
+	first := 1
+	for i, m := range markers {
+		end := int64(len(raw))
+		if i+1 < len(markers) {
+			end = markers[i+1].Offset
+		}
+		if m.Offset > int64(len(raw)) || end > int64(len(raw)) || end < m.Offset {
+			continue
+		}
+		seg := Segment{Stage: m.Stage, StartedAt: m.At, Lines: splitLines(string(raw[m.Offset:end]))}
+		if i+1 < len(markers) {
+			seg.EndedAt = markers[i+1].At
+		}
+		seg.FirstLine = first
+		first += len(seg.Lines)
+		out = append(out, seg)
+	}
+	return out, nil
+}
+
+func readMarkers(path string) []Marker {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []Marker
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m Marker
+		if json.Unmarshal([]byte(line), &m) == nil && m.Stage != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func splitLines(text string) []string {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
 }

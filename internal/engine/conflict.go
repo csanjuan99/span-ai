@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"span/internal/branch"
+	"span/internal/fsutil"
 	"span/internal/prompt"
 	"span/internal/statement"
 )
@@ -180,6 +181,7 @@ type RepoPin struct {
 // guessing: it runs no git on it and says which path to inspect.
 type TamperedError struct{ Path string }
 
+// Error names the path the person has to inspect.
 func (e *TamperedError) Error() string {
 	return "the agent changed the repository structure; span did not run git. Inspect " + e.Path + " by hand"
 }
@@ -1151,7 +1153,7 @@ func (r *runner) writePlan(plan *conflictPlan) error {
 		return err
 	}
 	path := filepath.Join(r.spanDir(), conflictPlanFile)
-	if err := writeAtomic(path, raw); err != nil {
+	if err := fsutil.WriteAtomic(path, raw); err != nil {
 		return err
 	}
 	// The plan holds file contents; only this user reads it.
@@ -1177,13 +1179,13 @@ func (r *runner) takeSide(name string) []byte {
 	if err != nil {
 		return nil
 	}
-	_ = os.Remove(path)
+	r.drop(path)
 	return raw
 }
 
 func (r *runner) clearConflictFiles() {
 	for _, name := range []string{conflictChoiceFile, conflictHintFile, conflictAbortFile, conflictPlanFile} {
-		_ = os.Remove(filepath.Join(r.spanDir(), name))
+		r.drop(filepath.Join(r.spanDir(), name))
 	}
 }
 
@@ -1232,7 +1234,7 @@ func ChooseConflict(root, id string, choices map[string]string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, conflictChoiceFile), raw)
+	return fsutil.WriteAtomic(filepath.Join(dir, conflictChoiceFile), raw)
 }
 
 // HintConflict records the person's words for the agent's next proposal.
@@ -1248,7 +1250,7 @@ func HintConflict(root, id, text string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, conflictHintFile), []byte(text+"\n"))
+	return fsutil.WriteAtomic(filepath.Join(dir, conflictHintFile), []byte(text+"\n"))
 }
 
 // AbortConflict asks the run to undo the merge and hold.
@@ -1257,7 +1259,7 @@ func AbortConflict(root, id string) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, conflictAbortFile), []byte("aborted by the page\n"))
+	return fsutil.WriteAtomic(filepath.Join(dir, conflictAbortFile), []byte("aborted by the page\n"))
 }
 
 func choosingConflict(root, id string, states ...string) (Cursor, string, error) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"span/internal/fsutil"
 	"span/internal/runlock"
 )
 
@@ -78,7 +79,7 @@ func writeCursorFile(dir string, cur Cursor) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, "cursor.json"), append(raw, '\n'))
+	return fsutil.WriteAtomic(filepath.Join(dir, "cursor.json"), append(raw, '\n'))
 }
 
 // applyRewind points a cursor at stage for a fresh attempt: the holds, the questions, the
