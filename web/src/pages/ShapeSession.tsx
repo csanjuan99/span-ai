@@ -14,13 +14,13 @@ import {
   sealShape,
   settleShapeContext,
 } from "@/lib/api"
+import { InterviewStopped } from "@/components/shape-entry/InterviewStopped"
 import { ContextBoard } from "@/components/shaping/ContextBoard"
 import { JiraBoard } from "@/components/shaping/JiraBoard"
 import { MapBoard } from "@/components/shaping/MapBoard"
 import { QuestionsBoard } from "@/components/shaping/QuestionsBoard"
 import { SealBoard } from "@/components/shaping/SealBoard"
 import { SealedBoard } from "@/components/shaping/SealedBoard"
-import { SessionFailure } from "@/components/shaping/SessionFailure"
 import { SessionHeader } from "@/components/shaping/SessionHeader"
 import { SessionRail } from "@/components/shaping/SessionRail"
 import { SplitBoard } from "@/components/shaping/SplitBoard"
@@ -54,6 +54,8 @@ export function ShapeSession() {
   }))
   const [revisit, setRevisit] = useState(false)
   const [running, setRunning] = useState(false)
+  // "Wait and resume later" hides the stopped band for the failure it was pressed on.
+  const [waited, setWaited] = useState("")
 
   const progress: SessionProgress = seen.id === id ? seen : loadProgress(id)
   function advance(change: SessionProgress) {
@@ -90,13 +92,18 @@ export function ShapeSession() {
     void act(async () => setSession(await task()))
   }
 
+  /** Shows the session a turn returned, from its own step rather than a revisited one. */
+  function adopt(next: Session) {
+    setSession(next)
+    setRevisit(false)
+  }
+
   // A turn also marks the page as working, so the screen says so until the agent answers.
   function turn(task: () => Promise<Session>) {
     setRunning(true)
     void act(async () => {
       try {
-        setSession(await task())
-        setRevisit(false)
+        adopt(await task())
       } finally {
         setRunning(false)
       }
@@ -278,11 +285,12 @@ export function ShapeSession() {
           {session.failure !== undefined &&
           session.failure !== null &&
           session.status !== "sealed" &&
+          session.failure.at !== waited &&
           !running ? (
-            <SessionFailure
-              failure={session.failure}
-              busy={busy}
-              onRetry={() => resume(session)}
+            <InterviewStopped
+              session={session}
+              onResumed={adopt}
+              onLater={() => setWaited(session.failure?.at ?? "")}
             />
           ) : null}
           {board(session)}

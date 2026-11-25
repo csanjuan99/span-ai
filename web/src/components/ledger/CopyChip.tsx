@@ -12,11 +12,13 @@ interface Props {
   value: string
   /** What the chip shows, usually the short form of the value. */
   children: ReactNode
+  /** An icon before the text, for a chip that reads as a button ("Copy digest"). */
+  icon?: ReactNode
   className?: string
 }
 
 /** A small button that copies a full hash and says so for a moment. */
-export function CopyChip({ label, value, children, className }: Props) {
+export function CopyChip({ label, value, children, icon, className }: Props) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -41,13 +43,16 @@ export function CopyChip({ label, value, children, className }: Props) {
       aria-label={`Copy ${label} ${value}`}
       onClick={() => void copy()}
       className={cn(
-        "relative inline-flex items-center gap-1.5 rounded-md after:absolute after:-inset-x-1 after:-inset-y-3 sm:after:hidden border border-border px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-        className,
+        "relative inline-flex items-center gap-1.5 rounded-md border border-border px-1.5 py-0.5 font-mono text-xs text-muted-foreground tabular-nums transition-colors after:absolute after:-inset-x-1 after:-inset-y-3 hover:border-primary/50 hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:after:hidden",
+        className
       )}
     >
+      {icon}
       {children}
       <span aria-live="polite" className="inline-flex w-3 justify-center">
-        {copied ? <CheckIcon aria-label="copied" className="size-3 text-pass" /> : null}
+        {copied ? (
+          <CheckIcon aria-label="copied" className="size-3 text-pass" />
+        ) : null}
       </span>
     </button>
   )

@@ -13,12 +13,6 @@ export const touchButtonXs = "h-11 md:h-7"
 /** {@link touchButton} for a small control: 44px on a phone, 32px from a tablet up. */
 export const touchButtonSm = "h-11 md:h-8"
 
-/** {@link touchWideButton} for a small control: 44px on a phone, 32px from a tablet up. */
-export const touchWideButtonSm = "h-11 w-full md:h-8"
-
-/** {@link touchWideButton} for a medium control: 44px on a phone, 36px from a tablet up. */
-export const touchWideButtonMd = "h-11 w-full md:h-9"
-
 /** The design's quiet button: the raised fill and the strong border, not the tinted outline of the kit. */
 export const quietButton =
   "border-input bg-card text-foreground hover:bg-muted dark:border-input dark:bg-card dark:hover:bg-muted"

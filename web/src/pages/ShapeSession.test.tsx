@@ -183,6 +183,28 @@ const click = (name: string | RegExp) =>
 const clickWhenReady = async (name: string | RegExp) =>
   fireEvent.click(await screen.findByRole("button", { name }))
 
+/** A Jira link on a session, in the state Jira reports. */
+function linkedJira(status = "Backlog") {
+  return { key: "PRJ-9", url: "https://j/PRJ-9", status }
+}
+
+/** A turn that stopped on the agent's usage limit. */
+function stoppedTurn() {
+  return {
+    at: "2026-11-25T09:30:00Z",
+    agent: "claude-code",
+    kind: "usage_limit" as const,
+    message: "limit reached",
+  }
+}
+
+/** What the desk received when a sealed story was handed to it. */
+async function readArrival() {
+  return JSON.parse(
+    (await screen.findByTestId("arrival")).textContent ?? "null"
+  ) as Record<string, string>
+}
+
 describe("header and steps", () => {
   it("names the session, how it stands and where the person is", async () => {
     open()
@@ -311,27 +333,41 @@ describe("questions", () => {
 })
 
 describe("failure and drafting", () => {
-  it("offers to run the turn again when the last one stopped", async () => {
+  it("shows the stopped band when the last turn stopped, and resumes from it", async () => {
     mocks.getShape.mockResolvedValue(
       session({
-        failure: {
-          at: "2026-11-25T09:30:00Z",
-          agent: "claude-code",
-          kind: "usage_limit",
-          message: "limit reached",
-        },
+        failure: stoppedTurn(),
       })
     )
     mocks.resumeShape.mockResolvedValue(session())
     open()
-    expect(await screen.findByText("The agent hit a usage limit.")).toBeTruthy()
-    expect(
-      screen.getByText(/answers and the map so far are kept/i)
-    ).toBeTruthy()
-    click("Try the turn again")
+    expect(await screen.findByText("Interview stopped")).toBeTruthy()
+    expect(screen.getByText("The interview agent stopped")).toBeTruthy()
+    expect(screen.getByText("What was kept")).toBeTruthy()
+    click("Resume with claude-code")
     await waitFor(() =>
-      expect(mocks.resumeShape).toHaveBeenCalledWith("sh-1", "/w")
+      expect(mocks.resumeShape).toHaveBeenCalledWith(
+        "sh-1",
+        "/w",
+        "claude-code",
+        ""
+      )
     )
+    await waitFor(() =>
+      expect(screen.queryByText("Interview stopped")).toBeNull()
+    )
+  })
+
+  it("hides the stopped band when the person chooses to wait", async () => {
+    mocks.getShape.mockResolvedValue(
+      session({
+        failure: stoppedTurn(),
+      })
+    )
+    open()
+    await screen.findByText("Interview stopped")
+    click("Wait and resume later")
+    expect(screen.queryByText("Interview stopped")).toBeNull()
   })
 
   it("lets a session with no question and no story be drafted", async () => {
@@ -400,9 +436,7 @@ describe("example map", () => {
 
   it("goes to the seal when there is no split and no note", async () => {
     open()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Looks right: continue" })
-    )
+    await clickWhenReady("Looks right: continue")
     expect(await screen.findByText("The story")).toBeTruthy()
     expect(screen.getByText("Draft · not sealed")).toBeTruthy()
   })
@@ -422,9 +456,7 @@ describe("split", () => {
 
   async function toSplit() {
     open()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Looks right: continue" })
-    )
+    await clickWhenReady("Looks right: continue")
     await screen.findByText("The agent suggests splitting this story")
   }
 
@@ -487,9 +519,7 @@ describe("context notes", () => {
   async function toContext() {
     mocks.getShape.mockResolvedValue(notes())
     open()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Looks right: continue" })
-    )
+    await clickWhenReady("Looks right: continue")
     await screen.findByText("2 notes for your product context")
   }
 
@@ -549,9 +579,7 @@ describe("seal", () => {
   async function toSeal(value: Session) {
     mocks.getShape.mockResolvedValue(value)
     open()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Looks right: continue" })
-    )
+    await clickWhenReady("Looks right: continue")
     await screen.findByText("Draft · not sealed")
   }
 
@@ -629,14 +657,12 @@ describe("sealed story", () => {
   it("hands the story and the Jira key to the desk to start a run from", async () => {
     mocks.getShape.mockResolvedValue(
       sealed({
-        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+        jira: linkedJira(),
       })
     )
     open()
     await clickWhenReady("Create run")
-    const arrival = JSON.parse(
-      (await screen.findByTestId("arrival")).textContent ?? "null"
-    ) as Record<string, string>
+    const arrival = await readArrival()
     expect(arrival.story).toBe("# Refund\n\n## Why\nBecause.")
     expect(arrival.issue).toBe("PRJ-9")
     expect(arrival.workspace).toBe("/w")
@@ -648,9 +674,7 @@ describe("sealed story", () => {
     mocks.getShape.mockResolvedValue(sealed())
     open()
     await clickWhenReady("Create run")
-    const arrival = JSON.parse(
-      (await screen.findByTestId("arrival")).textContent ?? "null"
-    ) as Record<string, string>
+    const arrival = await readArrival()
     expect(arrival.issue).toBe("")
   })
 
@@ -668,7 +692,7 @@ describe("sealed story", () => {
   it("links the Jira issue instead of offering a second preview", async () => {
     mocks.getShape.mockResolvedValue(
       sealed({
-        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+        jira: linkedJira(),
       })
     )
     open()
@@ -682,11 +706,7 @@ describe("jira", () => {
   async function toJira() {
     mocks.getShape.mockResolvedValue(sealed())
     open()
-    click(
-      await screen
-        .findByRole("button", { name: "Preview in Jira" })
-        .then(() => "Preview in Jira")
-    )
+    await clickWhenReady("Preview in Jira")
     await screen.findByText("Nothing sent yet")
   }
 
@@ -704,7 +724,7 @@ describe("jira", () => {
     mocks.previewShapeIssue.mockResolvedValue(preview)
     mocks.createShapeIssue.mockResolvedValue(
       sealed({
-        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "Backlog" },
+        jira: linkedJira(),
       })
     )
     await toJira()
@@ -777,7 +797,7 @@ describe("jira", () => {
     await toJira()
     mocks.getShape.mockResolvedValue(
       sealed({
-        jira: { key: "PRJ-9", url: "https://j/PRJ-9", status: "To Do" },
+        jira: linkedJira("To Do"),
       })
     )
     await loadPreview()

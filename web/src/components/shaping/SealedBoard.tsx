@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { CheckCircle2Icon, PlayIcon } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { CheckCircle2Icon, CopyIcon, PlayIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { CopyChip } from "@/components/ledger/CopyChip"
@@ -30,6 +30,15 @@ const tabs: { value: Tab; label: string }[] = [
   { value: "context", label: "Context" },
 ]
 
+/** One question or context note of the sealed story, as a bordered card. */
+function Card({ children }: { children: ReactNode }) {
+  return (
+    <li className="flex flex-col gap-1 rounded-[10px] border border-border p-3">
+      {children}
+    </li>
+  )
+}
+
 function Questions({ session }: { session: ShapeSession }) {
   if (session.questions.length === 0) {
     return (
@@ -39,10 +48,7 @@ function Questions({ session }: { session: ShapeSession }) {
   return (
     <ul className="flex flex-col gap-3">
       {session.questions.map((question) => (
-        <li
-          key={question.id}
-          className="flex flex-col gap-1 rounded-[10px] border border-border p-3"
-        >
+        <Card key={question.id}>
           <div className="flex flex-wrap items-center gap-2 text-sm font-semibold">
             <span className={monoCaption}>{question.id}</span>
             {question.text}
@@ -53,7 +59,7 @@ function Questions({ session }: { session: ShapeSession }) {
             </Pill>
           </div>
           <p className={noteText}>{question.answer}</p>
-        </li>
+        </Card>
       ))}
     </ul>
   )
@@ -70,10 +76,7 @@ function Notes({ session }: { session: ShapeSession }) {
   return (
     <ul className="flex flex-col gap-3">
       {session.proposals.map((note) => (
-        <li
-          key={note.id}
-          className="flex flex-col gap-1 rounded-[10px] border border-border p-3"
-        >
+        <Card key={note.id}>
           <div className="flex items-center gap-2">
             <span className="font-mono text-xs">{note.section}</span>
             <Pill tone={note.status === "accepted" ? "pass" : "mut"} small>
@@ -81,7 +84,7 @@ function Notes({ session }: { session: ShapeSession }) {
             </Pill>
           </div>
           <p className="text-[13px] leading-5">{note.text}</p>
-        </li>
+        </Card>
       ))}
     </ul>
   )
@@ -147,7 +150,12 @@ export function SealedBoard({
           <div className="rounded-[10px] bg-muted px-3 py-2.5 font-mono text-xs leading-[18px] break-all">
             {`${digest.slice(0, 27)}…`}
           </div>
-          <CopyChip label="digest" value={digest}>
+          <CopyChip
+            label="digest"
+            value={digest}
+            icon={<CopyIcon aria-hidden="true" className="size-3" />}
+            className="h-6 self-start border-input bg-card px-2 py-0 font-sans font-medium text-foreground"
+          >
             Copy digest
           </CopyChip>
           <p className="text-xs text-muted-foreground">
@@ -188,12 +196,9 @@ export function SealedBoard({
             Create run
           </Button>
           {session.jira !== null ? (
-            <a
-              className="inline-flex h-11 w-full items-center justify-center rounded-[10px] border border-input bg-card text-sm font-medium md:h-10"
-              href={session.jira.url}
-            >
-              {`Open ${session.jira.key}`}
-            </a>
+            <Button asChild variant="outline" className={touchWideButton}>
+              <a href={session.jira.url}>{`Open ${session.jira.key}`}</a>
+            </Button>
           ) : (
             <Button
               type="button"

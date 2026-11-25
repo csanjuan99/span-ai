@@ -9,7 +9,7 @@ import {
   type Revision,
   type RevisionDiff,
 } from "@/lib/shape-versions"
-import { touchWideButtonMd, touchWideButtonSm } from "@/lib/button-class"
+import { wideButton } from "@/lib/button-class"
 
 /** What leaves the draft when a revision is restored: the diff from it to where the session is now. */
 function leaves(back: RevisionDiff | null): string {
@@ -91,17 +91,11 @@ export function RestorePanel({
     >
       {sealed ? (
         <>
-          <Button
-            className={touchWideButtonMd}
-            size="lg"
-            disabled={busy}
-            onClick={onFork}
-          >
+          <Button className={wideButton} disabled={busy} onClick={onFork}>
             New session from {target.id}
           </Button>
           <Button
-            className={touchWideButtonSm}
-            size="lg"
+            className={wideButton}
             variant="outline"
             disabled
             aria-disabled="true"
@@ -112,8 +106,7 @@ export function RestorePanel({
       ) : (
         <>
           <Button
-            className={touchWideButtonSm}
-            size="lg"
+            className={wideButton}
             disabled={busy || isCurrent}
             onClick={onRestore}
           >
@@ -122,8 +115,7 @@ export function RestorePanel({
               : `Restore ${target.id} as ${next}`}
           </Button>
           <Button
-            className={touchWideButtonSm}
-            size="lg"
+            className={wideButton}
             variant="ghost"
             disabled={busy}
             onClick={onFork}
@@ -132,12 +124,7 @@ export function RestorePanel({
           </Button>
         </>
       )}
-      <Button
-        className={touchWideButtonSm}
-        size="lg"
-        variant="ghost"
-        onClick={onPickOther}
-      >
+      <Button className={wideButton} variant="ghost" onClick={onPickOther}>
         Pick other revisions
       </Button>
     </ActionPanel>

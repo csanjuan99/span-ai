@@ -1,5 +1,6 @@
 "use client"
 
+import { PlusIcon } from "lucide-react"
 import { useCallback, useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router"
 
@@ -12,7 +13,9 @@ import { BulkBar } from "@/components/shaping/board/BulkBar"
 import { ViewTabs } from "@/components/shaping/versions/ViewTabs"
 import { Button } from "@/components/ui/button"
 import { useNotedAction } from "@/components/shaping/use-noted-action"
+import { touchButton } from "@/lib/button-class"
 import { reasonText } from "@/lib/guards"
+import { cn } from "@/lib/utils"
 import {
   bulk,
   getBoard,
@@ -72,6 +75,18 @@ export function ShapeBoard() {
     void load()
   }, [load])
 
+  const listUrl = `/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`
+
+  function clearPlan() {
+    setPlan(null)
+    setAction(null)
+  }
+
+  function clearSelection() {
+    setChosen(new Set())
+    clearPlan()
+  }
+
   const cards = (board?.columns ?? []).flatMap((column) => column.cards)
   const picked = cards.filter((card) => chosen.has(card.id))
 
@@ -83,8 +98,7 @@ export function ShapeBoard() {
       }
       return next
     })
-    setPlan(null)
-    setAction(null)
+    clearPlan()
   }
 
   function ask(next: BulkAction) {
@@ -100,9 +114,7 @@ export function ShapeBoard() {
     }
     void run(async () => {
       const done = await bulk(workspace, action, [...chosen], false)
-      setPlan(null)
-      setAction(null)
-      setChosen(new Set())
+      clearSelection()
       if (done.failed > 0) {
         setNote(
           `${done.failed} of ${done.items.length} sessions could not change.`
@@ -143,14 +155,12 @@ export function ShapeBoard() {
           ]}
           onChange={(next) => {
             if (next === "list") {
-              void navigate(
-                `/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`
-              )
+              void navigate(listUrl)
             }
           }}
         />
         <Link
-          to={`/shaping?view=sessions&workspace=${encodeURIComponent(workspace)}`}
+          to={listUrl}
           className="inline-flex min-h-11 items-center text-[13px] text-primary hover:underline md:min-h-0"
         >
           Open the list
@@ -170,8 +180,13 @@ export function ShapeBoard() {
             ]}
           />
         ) : null}
-        <Button asChild variant="outline" className="ml-auto">
+        <Button
+          asChild
+          variant="outline"
+          className={cn(touchButton, "ml-auto")}
+        >
           <Link to={`/shaping?workspace=${encodeURIComponent(workspace)}`}>
+            <PlusIcon aria-hidden="true" />
             New session
           </Link>
         </Button>
@@ -198,15 +213,8 @@ export function ShapeBoard() {
         busy={busy}
         onPlan={ask}
         onApply={apply}
-        onCancel={() => {
-          setPlan(null)
-          setAction(null)
-        }}
-        onClear={() => {
-          setChosen(new Set())
-          setPlan(null)
-          setAction(null)
-        }}
+        onCancel={clearPlan}
+        onClear={clearSelection}
       />
       <ActivityFeed workspace={workspace} />
       <ApiCli actions={actions} exits={exits} />
