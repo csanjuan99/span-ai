@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +27,8 @@ const qaUsage = `usage: ./span qa show <run> [--json]
         10 a gate failed, 11 no proof, 13 a log is cut)`
 
 // qaExitLogCut is the exit code of a log whose start was cut. A missing run, case, gate or stage
-// exits with exitNotFound, the code every verb of the run page uses.
+// exits with exitNotFound (4). Conflict and decision keep exit 1 for a missing run, as the run
+// page verbs always have.
 const qaExitLogCut = 13
 
 func qaCmd(args []string) int         { return qaMain(args, os.Stdout, os.Stderr) }
@@ -38,14 +40,32 @@ func qaUsageError(errw io.Writer) int {
 }
 
 // qaFailure prints an error and gives the exit code its kind earns: a missing run, case, gate or
-// stage is 4, anything else 1.
-func qaFailure(errw io.Writer, err error) int {
-	fmt.Fprintln(errw, err)
+// stage is 4, anything else 1. With --json the object is the one writeErr sends
+// ({"error","message"}) so a script can read the same fields as the route.
+func qaFailure(out, errw io.Writer, asJSON bool, err error) int {
+	codeName := "error"
 	var coded interface{ SpanCode() string }
-	if errors.As(err, &coded) && coded.SpanCode() == "not_found" || errors.Is(err, os.ErrNotExist) {
-		return exitNotFound
+	if errors.As(err, &coded) {
+		codeName = coded.SpanCode()
 	}
-	return 1
+	exit := 1
+	if codeName == "not_found" || errors.Is(err, os.ErrNotExist) {
+		if codeName == "error" {
+			codeName = "not_found"
+		}
+		exit = exitNotFound
+	}
+	if asJSON {
+		raw, marshalErr := json.Marshal(map[string]string{"error": codeName, "message": err.Error()})
+		if marshalErr != nil {
+			fmt.Fprintln(errw, marshalErr)
+			return 1
+		}
+		fmt.Fprintln(out, string(raw))
+		return exit
+	}
+	fmt.Fprintln(errw, err)
+	return exit
 }
 
 func qaMain(args []string, out, errw io.Writer) int {
@@ -71,8 +91,14 @@ func qaMain(args []string, out, errw io.Writer) int {
 	id, rest := pos[0], pos[1:]
 	switch verb {
 	case "show":
+		if len(rest) != 0 {
+			return qaUsageError(errw)
+		}
 		return qaShow(out, errw, v, id)
 	case "cases":
+		if len(rest) != 0 {
+			return qaUsageError(errw)
+		}
 		status := ""
 		switch {
 		case *failed:
@@ -93,6 +119,9 @@ func qaMain(args []string, out, errw io.Writer) int {
 	case "rerun":
 		return qaRerun(out, errw, v, id, rest, *failed)
 	case "accept":
+		if len(rest) != 0 {
+			return qaUsageError(errw)
+		}
 		return qaAccept(out, errw, v, id, *reason)
 	case "log":
 		if len(rest) != 1 {
@@ -136,7 +165,7 @@ func seconds(ms int64) string {
 func qaShow(out, errw io.Writer, v *verbFlags, id string) int {
 	view, err := serve.ReadQA(v.spans, id)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		if code := emit(out, errw, view); code != 0 {
@@ -174,7 +203,7 @@ func qaShow(out, errw io.Writer, v *verbFlags, id string) int {
 func qaCases(out, errw io.Writer, v *verbFlags, id string, filter serve.QACaseFilter) int {
 	body, err := serve.ReadQACases(v.spans, id, filter)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		return emit(out, errw, body)
@@ -208,7 +237,7 @@ func qaCases(out, errw io.Writer, v *verbFlags, id string, filter serve.QACaseFi
 func qaCase(out, errw io.Writer, v *verbFlags, id, name string) int {
 	c, err := serve.ReadQACase(v.spans, id, name)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		return emit(out, errw, c)
@@ -233,7 +262,7 @@ func qaRerun(out, errw io.Writer, v *verbFlags, id string, names []string, faile
 	if failed {
 		body, err := serve.ReadQACases(v.spans, id, serve.QACaseFilter{Status: "failed"})
 		if err != nil {
-			return qaFailure(errw, err)
+			return qaFailure(out, errw, v.asJSON, err)
 		}
 		for _, c := range body.Cases {
 			names = append(names, c.Name)
@@ -245,7 +274,7 @@ func qaRerun(out, errw io.Writer, v *verbFlags, id string, names []string, faile
 	}
 	body, err := serve.RerunQA(context.Background(), v.spans, id, names)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		if code := emit(out, errw, body); code != 0 {
@@ -267,7 +296,7 @@ func qaRerun(out, errw io.Writer, v *verbFlags, id string, names []string, faile
 func qaAccept(out, errw io.Writer, v *verbFlags, id, reason string) int {
 	accepted, err := serve.AcceptQA(v.spans, id, reason)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		return emit(out, errw, accepted)
@@ -281,7 +310,7 @@ func qaAccept(out, errw io.Writer, v *verbFlags, id, reason string) int {
 func qaLog(out, errw io.Writer, v *verbFlags, id, gate string, q serve.LogQuery) int {
 	view, err := serve.ReadGateLog(v.spans, id, gate, q)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		if code := emit(out, errw, view); code != 0 {
@@ -313,7 +342,7 @@ func transcriptMain(args []string, out, errw io.Writer) int {
 	}
 	view, err := serve.ReadTranscript(v.spans, pos[0], *stage, *from, *limit)
 	if err != nil {
-		return qaFailure(errw, err)
+		return qaFailure(out, errw, v.asJSON, err)
 	}
 	if v.asJSON {
 		return emit(out, errw, view)

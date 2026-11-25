@@ -25,7 +25,7 @@ const (
 	shapeExitAgent    = 5
 )
 
-const shapeUsage = `usage: ./span shape list|show|start|resume|agent|archive|delete [--workspace .] [--json]
+const shapeUsage = `usage: ./span shape list|show|start|resume|agent|archive|delete|answer|context|split|seal|source|preview|jira|story|fork|log|diff|restore|compare|merge|board|activity|bulk|history|undo|import|export|share [--workspace .] [--json]
   list    [--status s] [--query q] [--repo r] [--agent a] [--sort activity|created] [--archived include|only]
   show    <id>
   start   (--idea text | --idea-file f | --issue KEY) [--repo r] [--agent a] [--model m]
@@ -109,10 +109,12 @@ func shapeCmd(ctx context.Context, args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, shapeUsage)
 		return shapeExitUsage
 	}
-	if err := fs.Parse(rest); err != nil {
+	// Flags may come before or after the session id, as they do on every other verb.
+	pos, ok := parseVerb(fs, rest)
+	if !ok {
 		return shapeExitUsage
 	}
-	o.args = fs.Args()
+	o.args = pos
 	ws, err := serve.WorkspaceDir(o.workspace)
 	if err != nil {
 		fmt.Fprintln(errw, err)

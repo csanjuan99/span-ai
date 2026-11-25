@@ -123,6 +123,15 @@ func (o *shapeOpts) activity(ctx context.Context) int {
 			return shapeExitUsage
 		}
 	}
+	// One JSON array, newest first, the body GET /shapes/activity returns. --follow keeps
+	// printing each new step on its own line because the route then streams events.
+	if o.json && !o.brd.follow {
+		feed, err := shape.RecentActivity(o.ws, o.brd.who, since, o.brd.limit)
+		if err != nil {
+			return o.fail(err, false)
+		}
+		return o.encode(feed)
+	}
 	if !o.json {
 		fmt.Fprintln(o.out, "TIME      SESSION      ACTOR        DOING")
 	}

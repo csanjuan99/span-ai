@@ -107,6 +107,24 @@ func TestQALogPrintsWholeLogLineNumbersAndSearches(t *testing.T) {
 	}
 }
 
+func TestQARejectsAnExtraArgumentAndPrintsRouteErrors(t *testing.T) {
+	root, id := qaFixture(t)
+	if code, _, _ := runQA(root, "show", id, "extra"); code != 2 {
+		t.Fatalf("show with an extra argument exits %d, want 2", code)
+	}
+	if code, _, _ := runQA(root, "cases", id, "extra"); code != 2 {
+		t.Fatalf("cases with an extra argument exits %d, want 2", code)
+	}
+	if code, _, _ := runQA(root, "accept", id, "extra", "--reason", "because the risk is known"); code != 2 {
+		t.Fatalf("accept with an extra argument exits %d, want 2", code)
+	}
+	code, out, errw := runQA(root, "case", id, "TestNope", "--json")
+	var body map[string]string
+	if code != exitNotFound || json.Unmarshal([]byte(out), &body) != nil || body["error"] != "not_found" || errw != "" {
+		t.Fatalf("case json error: %d %s %s", code, out, errw)
+	}
+}
+
 func TestQAAcceptNeedsAReason(t *testing.T) {
 	root, id := qaFixture(t)
 	if code, _, _ := runQA(root, "accept", id); code != 1 {

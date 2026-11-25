@@ -125,3 +125,28 @@ func TestShapeStartFromAnIssueKeyAndUsageErrors(t *testing.T) {
 		t.Errorf("an unknown status exits %d", code)
 	}
 }
+
+func TestShapeFlagsAfterTheIDAndUsageNamesTheVerbs(t *testing.T) {
+	ws := shapeWorkspace(t)
+	code, out, _ := shapeRun(t, okTurn, "start", "--workspace", ws, "--idea", "Flags after the id", "--json")
+	var started shape.View
+	if code != 0 || json.Unmarshal([]byte(out), &started) != nil {
+		t.Fatalf("start %d %s", code, out)
+	}
+	code, out, errw := shapeRun(t, okTurn, "show", started.ID, "--json", "--workspace", ws)
+	var shown shape.View
+	if code != 0 || json.Unmarshal([]byte(out), &shown) != nil || shown.ID != started.ID {
+		t.Fatalf("flag after the id: %d %s %s", code, out, errw)
+	}
+	_, _, errw = shapeRun(t, okTurn)
+	for _, verb := range []string{"log", "diff", "restore", "compare", "merge", "board", "activity", "bulk", "history", "undo", "import", "export", "share"} {
+		if !strings.Contains(errw, verb) {
+			t.Errorf("shape usage missing %s", verb)
+		}
+	}
+	for _, verb := range []string{"./span implementation ", "log|diff|restore", "[--json] AET-1234"} {
+		if !strings.Contains(usageText, verb) {
+			t.Errorf("top usage missing %q", verb)
+		}
+	}
+}

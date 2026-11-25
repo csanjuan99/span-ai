@@ -81,7 +81,7 @@ The login belongs to one folder. A parent folder and a checkout inside it are di
 ./span jira status --project /path/to/salute
 ```
 
-`status` prints `configured true`, the project folder, the site, and the email. It does not print the token.
+`status` prints `configured true`, the project folder, the site, and the email. It does not print the token. `--json` on `status`, `configure` and `logout` prints the same object as `GET /jira?path=<project>` (`configured`, `baseUrl`, `email`, `auth`, never the token). `issue --json` prints the story object `GET /jira/issues/{key}` returns, and `search --json` prints `{"issues":[...]}`. A missing account still exits `1`; `GET /jira` answers `200` with `configured: false`. Flags may come before or after the issue key.
 
 On the page, the **Folder** field is that project. A saved account shows **Logged in to Jira as** the email and the site **for this folder**, and hides the token fields. Changing the folder loads that folder's login. **Close session** removes only that folder's login. The command is `./span jira logout --project /path/to/salute`.
 
@@ -1516,7 +1516,7 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | Decision panel | `GET /spans/<id>`, `POST /spans/<id>/decide` | `./span decision show\|choose` |
 | Conflict panel | `GET /spans/<id>`, `POST /spans/<id>/conflict/*` | `./span conflict show\|choose\|hint\|abort` |
 
-What a verb reads is what the route answers, field for field: `--json` prints the route's body. `runs list --json` prints `{"spans": [...]}`.
+What a verb reads is what the route answers, field for field: `--json` prints the route's body. `runs list --json` prints `{"spans": [...]}`. `decision show --json` is `cursor.decision` and `conflict show --options --json` is `cursor.conflict` (without `--options` the diffs are left out). `conflict choose`, `hint`, `abort` and `decision choose` record the same choice the route records, then continue the run in this process unless `--no-resume`. Their `--json` is that outcome (`id`, `action`, `stage`, `resumed`, and when the run went on, `verdict` and `reason`). The route answers `202` with `id` and `stage` and wakes `serve` instead, because the continuation happens in the server.
 
 The log of a command. A statement stores the path of each command's log (`iter/1/logs/prove-1.log`) and `lines`, how many lines the command printed, so the page can say "5 of 142 lines" over the last lines it shows. `./span log` and the route read the same file with the same limits: a clean relative `.log` path under `iter/`, resolved inside the run, a regular file, and the last 512 KiB (`truncated: true` when it was longer; the plain output then says so on stderr).
 

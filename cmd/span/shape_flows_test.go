@@ -35,8 +35,19 @@ func TestShapeBoardActivityAndBulk(t *testing.T) {
 	if _, out, _ = shapeRun(t, okTurn, "board", "--workspace", ws); !strings.Contains(out, "INTERVIEWING (1)") || !strings.Contains(out, a.Ref) {
 		t.Fatalf("board text %q", out)
 	}
-	if code, out, _ = shapeRun(t, okTurn, "activity", "--workspace", ws, "--json"); code != 0 || !strings.Contains(out, a.Ref) {
+	code, out, _ = shapeRun(t, okTurn, "activity", "--workspace", ws, "--json")
+	var feed []shape.Activity
+	if code != 0 || json.Unmarshal([]byte(out), &feed) != nil {
 		t.Fatalf("activity %d %s", code, out)
+	}
+	seen := false
+	for _, item := range feed {
+		if item.Ref == a.Ref {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Fatalf("activity feed %s", out)
 	}
 	if code, _, _ = shapeRun(t, okTurn, "activity", "--workspace", ws, "--since", "yesterday"); code != shapeExitUsage {
 		t.Fatalf("bad since %d", code)
@@ -100,8 +111,11 @@ func TestShapeImportExportAndShare(t *testing.T) {
 		t.Fatal("a dry run starts nothing")
 	}
 	code, out, _ := shapeRun(t, okTurn, "import", "--workspace", ws, "--file", file, "--no-run", "--json")
-	var imported shape.View
-	if code != 0 || json.Unmarshal([]byte(out), &imported) != nil || imported.ID == "" {
+	var imported struct {
+		Session shape.View            `json:"session"`
+		Read    shape.MarkdownPreview `json:"read"`
+	}
+	if code != 0 || json.Unmarshal([]byte(out), &imported) != nil || imported.Session.ID == "" || imported.Read.Title != "Tax per line" {
 		t.Fatalf("import %d %s", code, out)
 	}
 	if code, _, _ = shapeRun(t, okTurn, "import", "--workspace", ws); code != shapeExitUsage {

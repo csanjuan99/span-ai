@@ -104,18 +104,25 @@ func (o *shapeOpts) importFile() int {
 		}
 		return 0
 	}
-	s, _, err := shape.ImportMarkdown(o.ws, shape.ImportInput{
+	s, preview, err := shape.ImportMarkdown(o.ws, shape.ImportInput{
 		Repo: o.repo, Agent: o.agent, Model: o.model, Name: filepath.Base(o.xfer.file), Markdown: string(raw),
 	})
 	if err != nil {
 		return o.fail(err, false)
 	}
-	if o.xfer.noRun {
-		return o.show(s, nil)
+	if !o.xfer.noRun {
+		eng := &shape.Engine{Run: shapeAgents(o.ws, s.Agent, s.Model)}
+		next, resumeErr := eng.Resume(context.Background(), o.ws, s.ID, "", "")
+		if resumeErr != nil {
+			return o.turn(next, resumeErr)
+		}
+		s = next
 	}
-	eng := &shape.Engine{Run: shapeAgents(o.ws, s.Agent, s.Model)}
-	s, err = eng.Resume(context.Background(), o.ws, s.ID, "", "")
-	return o.turn(s, err)
+	// POST /shapes/import answers the session and what the file was read as.
+	if o.json {
+		return o.encode(map[string]any{"session": s.View(), "read": preview})
+	}
+	return o.show(s, nil)
 }
 
 func (o *shapeOpts) importJira(ctx context.Context) int {
