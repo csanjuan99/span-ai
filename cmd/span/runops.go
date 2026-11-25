@@ -23,17 +23,19 @@ import (
 const runopsUsage = `usage: ./span runs list|show|implementation|feature|acceptance|events <run> [--json] [--patch]
        ./span log <run> <path under iter/, ending .log> [--json]
        ./span pause <run> [--json]
+       ./span stop <run> [--json]
        ./span rewind <run> <stage> [--note "..."] [--no-resume] [--json]
        ./span note <run> <stage> --text "..." | --file path [--json]
        ./span stage-agent <run> <stage> <agent|any> [--json]
        ./span approve <run> <stage> [--environment name] [--no-resume] [--json]
        ./span answer <run> --answer "question=text"... | --file answers.json [--json]
        ./span delete <run> --yes [--json]
-       (all take --spans .span/runs; exit 0 done, 1 refused or failed, 2 usage)`
+       (all take --spans .span/runs; exit 0 done, 1 refused or failed, 2 usage; stop also 3 run finished, 4 run not found)`
 
 func runsCmd(args []string) int       { return runsMain(args, os.Stdout, os.Stderr) }
 func logCmd(args []string) int        { return logMain(args, os.Stdout, os.Stderr) }
 func pauseCmd(args []string) int      { return pauseMain(args, os.Stdout, os.Stderr) }
+func stopCmd(args []string) int       { return stopMain(args, os.Stdout, os.Stderr) }
 func rewindCmd(args []string) int     { return rewindMain(args, os.Stdout, os.Stderr) }
 func noteCmd(args []string) int       { return noteMain(args, os.Stdout, os.Stderr) }
 func stageAgentCmd(args []string) int { return stageAgentMain(args, os.Stdout, os.Stderr) }
@@ -269,6 +271,41 @@ func pauseMain(args []string, out, errw io.Writer) int {
 		return 1
 	}
 	return report(out, errw, v, result{ID: id, Action: "pause", Done: true, Reason: "the run holds before the next stage"})
+}
+
+// stopMain asks the process driving the run to cancel the stage in flight, as the page's
+// "Stop now" does. The request is a file that process reads, so it reaches a run driven by
+// `span serve`, `span run` or `span resume` alike. When nothing drives the run there is no
+// stage to cancel: that is said plainly and no request is left to cancel a later resume.
+// Exit 0 asked or nothing running, 3 the run is finished, 4 no such run.
+func stopMain(args []string, out, errw io.Writer) int {
+	fs, v := verbSet("stop", errw, false)
+	pos, ok := parseVerb(fs, args)
+	if !ok || len(pos) != 1 {
+		return usageError(errw)
+	}
+	id := pos[0]
+	snap, err := engine.Load(v.spans, id)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(errw, err)
+		return 4
+	}
+	if err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	if snap.Cursor.Done || snap.Cursor.Stop {
+		fmt.Fprintln(errw, "this run is finished; a stop only applies to a stage in flight")
+		return 3
+	}
+	if _, driven := engine.RunBusy(v.spans, id); !driven {
+		return report(out, errw, v, result{ID: id, Action: "stop", Done: false, Reason: "nothing is running this run"})
+	}
+	if err := engine.RequestStop(v.spans, id); err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	return report(out, errw, v, result{ID: id, Action: "stop", Done: true, Reason: "the stage in flight is cancelled; the run holds with the error"})
 }
 
 // rewindMain restarts a run at a stage, as the page's "Restart from a stage" does, with an

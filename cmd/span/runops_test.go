@@ -11,6 +11,7 @@ import (
 
 	"span/internal/decision"
 	"span/internal/engine"
+	"span/internal/runlock"
 )
 
 // opsRun writes a run with the given cursor and returns the state directory.
@@ -246,5 +247,39 @@ func TestDeleteNeedsConfirmation(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "run-1", "cursor.json")); err == nil {
 		t.Error("the run is still there")
+	}
+}
+
+func TestStopAsksTheProcessDrivingTheRunToCancelItsStage(t *testing.T) {
+	stop := func(a []string, o, e *bytes.Buffer) int { return stopMain(a, o, e) }
+	root := opsRun(t, engine.Cursor{Stage: "build"})
+	code, out, _ := call(stop, "run-1", "--json", "--spans", root)
+	if code != 0 || !strings.Contains(out, `"done": false`) || !strings.Contains(out, "nothing is running") {
+		t.Fatalf("a run nobody drives: exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "run-1", "stop")); !os.IsNotExist(err) {
+		t.Fatal("a stop with nothing running left a marker behind")
+	}
+	lock, err := runlock.Acquire(runlock.Run, filepath.Join(root, "run-1", "lock"), "run run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	code, out, errs := call(stop, "run-1", "--json", "--spans", root)
+	if code != 0 || !strings.Contains(out, `"done": true`) {
+		t.Fatalf("a run being driven: exit %d: %s %s", code, out, errs)
+	}
+	if _, err := os.Stat(filepath.Join(root, "run-1", "stop")); err != nil {
+		t.Errorf("no stop marker was written: %v", err)
+	}
+	if code, _, _ := call(stop, "--spans", root); code != 2 {
+		t.Errorf("a stop without a run is a usage error, got %d", code)
+	}
+	if code, _, _ := call(stop, "missing", "--spans", root); code != 4 {
+		t.Errorf("an unknown run is exit 4, got %d", code)
+	}
+	done := opsRun(t, engine.Cursor{Stage: "merge", Done: true})
+	if code, _, _ := call(stop, "run-1", "--spans", done); code != 3 {
+		t.Errorf("a finished run refuses a stop with exit 3, got %d", code)
 	}
 }

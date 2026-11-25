@@ -13,6 +13,7 @@ import (
 	"span/internal/agent"
 	"span/internal/engine"
 	"span/internal/live"
+	"span/internal/runlock"
 )
 
 func getAgent(t *testing.T, project string) agentPick {
@@ -337,5 +338,25 @@ func TestPausingWithNothingInFlightDoesNotQueueAFile(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, id, "pause")); !os.IsNotExist(err) {
 		t.Fatal("a pause with nothing in flight queued a file for later")
+	}
+}
+
+func TestStoppingARunAnotherProcessDrivesLeavesAMarker(t *testing.T) {
+	root := t.TempDir()
+	id := "2026-01-01-0000-stop2"
+	spanOnDisk(t, root, id, t.TempDir())
+	lock, err := runlock.Acquire(runlock.Run, filepath.Join(root, id, "lock"), "run "+id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	req := httptest.NewRequest(http.MethodPost, "/spans/"+id+"/stop", nil)
+	rec := httptest.NewRecorder()
+	New(root, "", nil, nil, live.New(), nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"stopped":true`) {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, id, "stop")); err != nil {
+		t.Fatalf("no stop marker for the other process: %v", err)
 	}
 }

@@ -1,8 +1,10 @@
 package engine
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -51,21 +53,28 @@ func runLockPath(root, id string) string { return filepath.Join(root, id, "lock"
 
 // acquire loads a run and takes its lock. It loads twice: the first read finds the run,
 // the second sees what the previous driver left once nobody else can write.
-func acquire(opt Options, id string) (*runner, func(), error) {
+//
+// The context it returns is cancelled when a stop marker appears for the run, so a stop
+// asked from another process ends the stage in flight like the page's button does.
+func acquire(ctx context.Context, opt Options, id string) (context.Context, *runner, func(), error) {
 	first, err := load(opt, id)
 	if err != nil {
-		return nil, nil, err
+		return ctx, nil, nil, err
 	}
 	lock, err := runlock.Acquire(runlock.Run, runLockPath(opt.Root, first.cur.ID), "run "+first.cur.ID)
 	if err != nil {
-		return nil, nil, err
+		return ctx, nil, nil, err
 	}
 	r, err := load(opt, id)
 	if err != nil {
 		lock.Release()
-		return nil, nil, err
+		return ctx, nil, nil, err
 	}
-	return r, lock.Release, nil
+	flight, stop := StopOnRequest(ctx, opt.Root, first.cur.ID)
+	return flight, r, func() {
+		stop()
+		lock.Release()
+	}, nil
 }
 
 // ClaimWorkspace takes the checkout before a run exists, so the launcher can configure the
@@ -113,8 +122,12 @@ func writeIgnoreOnce(dir string) {
 	if err != nil {
 		return
 	}
-	_, _ = file.WriteString("*\n")
-	_ = file.Close()
+	if _, err := file.WriteString("*\n"); err != nil {
+		log.Printf("write %s: %v", file.Name(), err)
+	}
+	if err := file.Close(); err != nil {
+		log.Printf("close %s: %v", file.Name(), err)
+	}
 }
 
 // clearBusyHold lifts a hold that only meant "the checkout was taken". Any other reason
@@ -160,6 +173,8 @@ func (r *runner) lockWorkspace() (func(), *runlock.BusyError) {
 func (r *runner) holdBusy(busy *runlock.BusyError) Result {
 	r.cur.Hold = true
 	r.cur.Reason = busy.Error()
-	_ = r.save()
+	if err := r.save(); err != nil {
+		log.Printf("save %s hold: %v", r.cur.ID, err)
+	}
 	return r.finish(statement.Hold)
 }

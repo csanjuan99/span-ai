@@ -70,6 +70,8 @@ func main() {
 		os.Exit(logCmd(os.Args[2:]))
 	case "pause":
 		os.Exit(pauseCmd(os.Args[2:]))
+	case "stop":
+		os.Exit(stopCmd(os.Args[2:]))
 	case "rewind":
 		os.Exit(rewindCmd(os.Args[2:]))
 	case "note":
@@ -961,7 +963,7 @@ const usageText = `./span repos [--path .]
 ./span decision show|choose <run> ...
 ./span implementation <run> --files|--diff <path>|--viewed <path>|--commits|--commit <sha>|--reasoning|--check|--audit [--json]   (./span implementation for each flag)
 ./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
-./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
+./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
 ./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
