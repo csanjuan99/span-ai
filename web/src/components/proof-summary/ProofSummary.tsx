@@ -31,9 +31,15 @@ export function ProofSummary({ proof }: { proof: Proof }) {
   return (
     <section aria-label="Proof of work" className="rounded-xl border border-border bg-card p-4 shadow-sm">
       <dl className="grid gap-4 sm:grid-cols-3">
-        <Cell label="Verdict" caption={proof.verdict.headline}>
-          <span className={tone.text}>{tone.label} risk</span>
-        </Cell>
+        {diff.files === 0 ? (
+          <Cell label="Verdict" caption="There is no diff to read for this run, so it was not assessed.">
+            <span className="text-muted-foreground">Not assessed</span>
+          </Cell>
+        ) : (
+          <Cell label="Verdict" caption={proof.verdict.headline}>
+            <span className={tone.text}>{tone.label} risk</span>
+          </Cell>
+        )}
         <Cell label="Diff" caption={diff.kinds}>
           <DiffTotals files={diff.files} added={diff.added} removed={diff.removed} />
         </Cell>

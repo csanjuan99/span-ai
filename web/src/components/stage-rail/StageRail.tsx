@@ -21,7 +21,8 @@ export function StageRail({
   return (
     <ol className="flex flex-wrap gap-x-2 gap-y-2 text-xs" aria-label="Stages">
       {stages.map((name) => {
-        const current = name === stage
+        // A finished run has no current stage: its last one is sealed like the rest.
+        const current = name === stage && verdict !== "done"
         const tone = current
           ? verdict === "stop"
             ? "bg-fail-soft text-fail"

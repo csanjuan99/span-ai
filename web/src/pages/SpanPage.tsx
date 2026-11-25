@@ -12,6 +12,7 @@ import { keptWork } from "@/lib/kept"
 import { doneOf } from "@/lib/done"
 import { proofOf } from "@/lib/proof"
 import { runDetails } from "@/lib/run-details"
+import { tidy } from "@/lib/tidy"
 import { sinceLine } from "@/lib/since"
 import { runningOf } from "@/lib/running"
 import { needsYou } from "@/lib/needs-you"
@@ -302,7 +303,7 @@ export function SpanPage() {
           sealed={sealed}
           durations={stageDurations(state.span?.statements ?? [])}
         />
-        <p className="text-pretty">{line}</p>
+        <p className="text-pretty">{tidy(line)}</p>
         {since !== "" && (cursor?.hold || cursor?.stop) ? (
           <p className="text-pretty text-sm tabular-nums text-muted-foreground">{since}</p>
         ) : null}
@@ -404,44 +405,46 @@ export function SpanPage() {
         </div>
         <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
           {kept !== null ? <SafeAndKept kept={kept} className="order-2 lg:order-none" /> : null}
-          <RunControls className="order-4 lg:order-none">
-            <StageAgent id={id} current={cursor?.stage ?? ""} choices={state.span?.stageAgents} />
-            {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
-              <InstructionNote
-                open={paused || showNote}
-                selected={selected}
-                timing={instructionTiming({ current, selected, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) })}
-                body={body}
-                note={note}
-                onSelect={setStage}
-                onBody={setBody}
-                onSave={(event) => void save(event)}
-                onSaveAndResume={canAct && !cursor?.done ? () => void saveAndResume() : undefined}
-                onOpen={() => {
-                  setStage(selected)
-                  setShowNote(true)
-                }}
-              />
-            ) : null}
-            <Rewind id={id} current={cursor?.stage ?? ""} blocked={restartBlocked} />
-            {!paused && !cursor?.done && !idle ? (
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap gap-2">
-                  {running === null ? (
-                    <Button type="button" variant="secondary" onClick={() => void pause()}>
-                      Pause after this stage
+          {cursor?.done ? null : (
+            <RunControls className="order-4 lg:order-none">
+              <StageAgent id={id} current={cursor?.stage ?? ""} choices={state.span?.stageAgents} />
+              {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
+                <InstructionNote
+                  open={paused || showNote}
+                  selected={selected}
+                  timing={instructionTiming({ current, selected, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) })}
+                  body={body}
+                  note={note}
+                  onSelect={setStage}
+                  onBody={setBody}
+                  onSave={(event) => void save(event)}
+                  onSaveAndResume={canAct && !cursor?.done ? () => void saveAndResume() : undefined}
+                  onOpen={() => {
+                    setStage(selected)
+                    setShowNote(true)
+                  }}
+                />
+              ) : null}
+              <Rewind id={id} current={cursor?.stage ?? ""} blocked={restartBlocked} />
+              {!paused && !cursor?.done && !idle ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {running === null ? (
+                      <Button type="button" variant="secondary" onClick={() => void pause()}>
+                        Pause after this stage
+                      </Button>
+                    ) : null}
+                    <Button type="button" variant="secondary" onClick={() => void stop()}>
+                      Stop now
                     </Button>
-                  ) : null}
-                  <Button type="button" variant="secondary" onClick={() => void stop()}>
-                    Stop now
-                  </Button>
+                  </div>
+                  <p className="text-pretty text-sm text-muted-foreground">
+                    The stage that is running finishes. The run holds before the next one, so you can choose the agent for it.
+                  </p>
                 </div>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  The stage that is running finishes. The run holds before the next one, so you can choose the agent for it.
-                </p>
-              </div>
-            ) : null}
-          </RunControls>
+              ) : null}
+            </RunControls>
+          )}
         </div>
       </div>
     </Shell>

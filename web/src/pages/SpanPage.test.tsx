@@ -370,3 +370,26 @@ describe("what a finished run shows on the page", () => {
     expect(screen.queryByRole("region", { name: "Run details" })).toBeNull()
   })
 })
+
+describe("a finished run leaves its controls behind", () => {
+  it("offers no restart, note or agent choice once the run is done", () => {
+    state = held({ done: true, hold: false, reason: "" }, [advance("merge")])
+    page()
+    expect(screen.queryByRole("region", { name: "Run controls" })).toBeNull()
+    expect(screen.getByRole("region", { name: "Safe and kept" })).toBeTruthy()
+  })
+
+  it("marks the last stage sealed instead of current", () => {
+    state = held({ done: true, stage: "note", hold: false, reason: "" }, [advance("note")])
+    page()
+    expect(screen.getByRole("list", { name: "Stages" }).querySelector("[aria-current]")).toBeNull()
+  })
+
+  it("says a run with no diff was not assessed instead of calling it low risk", () => {
+    state = { ...held({ stage: "prove" }), implementation: { stat: "", patch: "", truncated: false, commits: 0 } }
+    page()
+    const proof = screen.getByRole("region", { name: "Proof of work" })
+    expect(proof.textContent).toContain("Not assessed")
+    expect(proof.textContent).not.toContain("low risk")
+  })
+})

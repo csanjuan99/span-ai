@@ -1,3 +1,4 @@
+import { ClampedText } from "@/components/clamped-text/ClampedText"
 import { CircleCheckIcon, CircleXIcon, CirclePauseIcon, GitCommitHorizontalIcon, GitPullRequestIcon } from "lucide-react"
 
 import { CommandBlock } from "@/components/ledger/CommandBlock"
@@ -37,7 +38,7 @@ function Entry({ item }: { item: Statement }) {
         {item.weight ? <span className="text-xs text-muted-foreground">{item.weight}</span> : null}
         {clock !== "" ? <span className="ml-auto text-xs text-muted-foreground tabular-nums">{clock}</span> : null}
       </div>
-      <p className="pl-6.5 text-pretty">{item.reason}</p>
+      <ClampedText text={item.reason} className="pl-6.5 text-pretty" />
       {item.inconclusive ? (
         <p className="pl-6.5 text-sm text-hold">The same command passed and failed on this commit.</p>
       ) : null}
