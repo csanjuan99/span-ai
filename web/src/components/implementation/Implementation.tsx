@@ -4,7 +4,6 @@ import { Audit } from "@/components/implementation/report/Audit"
 import { Evidence } from "@/components/implementation/report/Evidence"
 import { Reasoning } from "@/components/implementation/report/Reasoning"
 import { Risks } from "@/components/implementation/report/Risks"
-import { Transcript } from "@/components/implementation/report/Transcript"
 import { Verdict } from "@/components/implementation/report/Verdict"
 import { DiffTotals } from "@/components/diff-totals/DiffTotals"
 import type { Change } from "@/lib/change"
@@ -29,12 +28,10 @@ export interface RunFacts {
 export function Implementation({
   change,
   truncated,
-  transcript,
   run,
 }: {
   change: Change
   truncated: boolean
-  transcript: string[]
   run: RunFacts
 }) {
   const { files, report } = change
@@ -74,7 +71,6 @@ export function Implementation({
       </section>
       <section aria-label="Record" className="flex flex-col gap-2">
         <Audit cursor={run.cursor} statements={run.statements} agents={run.agents} journal={run.journal} />
-        <Transcript lines={transcript} />
       </section>
     </div>
   )

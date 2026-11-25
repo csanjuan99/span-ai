@@ -17,7 +17,7 @@ const run: RunFacts = { cursor, statements: [], agents: {}, feature: null, journ
 const patch = ["diff --git a/pay.go b/pay.go", "--- a/pay.go", "+++ b/pay.go", "@@ -1,1 +1,2 @@", " a", "+charge"].join("\n")
 
 /** Renders the tab the way the page does: the change is built once and handed in. */
-function view(over: { stat?: string; patch?: string; truncated?: boolean; transcript?: string[]; run?: RunFacts } = {}) {
+function view(over: { stat?: string; patch?: string; truncated?: boolean; run?: RunFacts } = {}) {
   const facts = over.run ?? run
   const truncated = over.truncated ?? false
   const change = changeOf({
@@ -28,14 +28,14 @@ function view(over: { stat?: string; patch?: string; truncated?: boolean; transc
     cursor: facts.cursor,
     feature: facts.feature,
   })
-  return <Implementation change={change} truncated={truncated} transcript={over.transcript ?? []} run={facts} />
+  return <Implementation change={change} truncated={truncated} run={facts} />
 }
 
 describe("Implementation", () => {
   afterEach(cleanup)
 
   it("shows the diff with its line and the totals", () => {
-    render(view({ stat: " pay.go | 1 +", patch, transcript: ["wrote the charge"] }))
+    render(view({ stat: " pay.go | 1 +", patch }))
     expect(screen.getAllByText("pay.go").length).toBeGreaterThan(0)
     expect(screen.getByText("charge")).toBeTruthy()
     expect(screen.getAllByText("+1").length).toBeGreaterThan(0)
@@ -70,11 +70,6 @@ describe("Implementation", () => {
     expect(screen.getByText("double charge on a repeated webhook")).toBeTruthy()
   })
 
-  it("keeps the raw transcript reachable but closed", () => {
-    render(view({ transcript: ["wrote the charge"] }))
-    expect(screen.getByText("1 lines")).toBeTruthy()
-    expect(screen.getByText("wrote the charge")).toBeTruthy()
-  })
 
   it("tells the reader what the agent did not record instead of staying silent", () => {
     render(view({ stat: " pay.go | 1 +", patch }))

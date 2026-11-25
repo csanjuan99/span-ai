@@ -24,6 +24,7 @@ import { Implementation } from "@/components/implementation/Implementation"
 import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
+import { RawOutput } from "@/components/raw-output/RawOutput"
 import { Ledger } from "@/components/ledger/Ledger"
 import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { ProofSummary } from "@/components/proof-summary/ProofSummary"
@@ -345,13 +346,13 @@ export function SpanPage() {
             </TabsList>
             <TabsContent value="ledger" className="flex flex-col gap-6">
               <Ledger statements={state.span?.statements ?? []} />
+              <RawOutput transcript={state.transcript} statements={state.span?.statements ?? []} />
             </TabsContent>
             <TabsContent value="implementation">
               {state.span !== null && change !== null ? (
                 <Implementation
                   change={change}
                   truncated={state.implementation?.truncated ?? false}
-                  transcript={state.transcript}
                   run={{
                     cursor: state.span.cursor,
                     statements: state.span.statements,
