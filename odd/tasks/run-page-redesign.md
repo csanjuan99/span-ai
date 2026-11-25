@@ -26,7 +26,7 @@ S7. Mobile (390px) keeps one column with the "needs you" block first.
 | T2 | S2 | inline | `NeedsYou` block lifted out of the Ledger tab, covering every case | done, see git log |
 | T3 | S4 | inline | Run controls and "Safe and kept" aside | done, see git log |
 | T4 | S5 | inline | Proof summary from `buildReport` | done, see git log |
-| T5 | S5 | deferred | Backend: test counts from the prove gate (own feature) | |
+| T5 | S5 | inline | Backend: test counts parsed from each check's output (vitest, jest, pytest, go test -v) | done, see git log |
 | T7 | S8 | inline | Running card while the run goes on by itself | done, see git log |
 | T8 | S8 | inline | Done card: where the work went and the change link (Jira link needs the backend: no Jira URL on the page) | done, see git log |
 | T9 | S8 | inline | Relative times beside held and waiting | done, see git log |

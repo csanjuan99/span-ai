@@ -432,3 +432,20 @@ describe("shape client", () => {
     expect(body).toEqual({ workspace: "/w", project: "PRJ", confirm: true })
   })
 })
+
+describe("snapshot test counts", () => {
+  const cursorOf = { id: "r1", stage: "prove", iteration: 1, hold: true, stop: false, done: false }
+  const read = (commands: unknown[]) =>
+    snapshot({ cursor: cursorOf, statements: [{ stage: "prove", iteration: 1, verdict: "iterate", reason: "", commands }] })
+      .statements[0]?.commands ?? []
+
+  it("keeps the counts a check printed, and reads a field the engine left out as zero", () => {
+    const [counted] = read([{ command: "npm test", exitCode: 1, tests: { passed: 41, failed: 2 } }])
+    expect(counted?.tests).toEqual({ passed: 41, failed: 2, skipped: 0 })
+  })
+
+  it("leaves the counts out for a check that printed none", () => {
+    const [plain] = read([{ command: "go build ./...", exitCode: 0 }])
+    expect(plain?.tests).toBeUndefined()
+  })
+})

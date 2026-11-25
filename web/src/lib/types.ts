@@ -1,3 +1,10 @@
+/** What a check's own output said about its tests. Absent when it printed no count. */
+export interface TestCounts {
+  passed: number
+  failed: number
+  skipped: number
+}
+
 /** One sealed stage the page can read without the engine types. */
 export interface StatementCommand {
   command: string
@@ -9,6 +16,7 @@ export interface StatementCommand {
   /** Run-relative path to the full output. */
   logPath?: string
   fingerprint?: string
+  tests?: TestCounts
 }
 
 /** The control record for one stage. */

@@ -103,6 +103,24 @@ describe("buildReport evidence and gaps", () => {
     expect(report(patchFor("a.go", ["x"]), rounds).evidence.commands.map((item) => item.command)).toEqual(["new"])
   })
 
+  it("adds up the tests the latest checks counted, and says nothing when none did", () => {
+    const counted: Statement[] = [
+      {
+        stage: "prove",
+        iteration: 1,
+        verdict: "iterate",
+        reason: "",
+        commands: [
+          { command: "go build ./...", exitCode: 0 },
+          { command: "go test ./...", exitCode: 1, tests: { passed: 38, failed: 2, skipped: 0 } },
+          { command: "npm test", exitCode: 0, tests: { passed: 3, failed: 0, skipped: 1 } },
+        ],
+      },
+    ]
+    expect(report(patchFor("a.go", ["x"]), counted).evidence.tests).toEqual({ passed: 41, failed: 2, skipped: 1 })
+    expect(report(patchFor("a.go", ["x"]), statements).evidence.tests).toBeNull()
+  })
+
   it("treats repeated inspect returns as a risk", () => {
     const back: Statement = { stage: "inspect", iteration: 1, verdict: "stop", reason: "x", commands: [] }
     const ids = report(patchFor("a.go", ["x"]), [back, back]).risks.map((item) => item.id)

@@ -146,10 +146,14 @@ function command(value: unknown): StatementCommand {
     return { command: "", exitCode: 0 }
   }
   const error = text(value.error)
+  const tests = isRecord(value.tests)
+    ? { passed: count(value.tests.passed), failed: count(value.tests.failed), skipped: count(value.tests.skipped) }
+    : undefined
   return {
     command: text(value.command),
     exitCode: count(value.exitCode),
     ...(error === "" ? {} : { error }),
+    ...(tests === undefined ? {} : { tests }),
   }
 }
 

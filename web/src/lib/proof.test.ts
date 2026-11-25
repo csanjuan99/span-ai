@@ -20,6 +20,7 @@ function report(over: Partial<Report> = {}): Report {
         { stage: "prove", command: "go test ./...", exitCode: 0, ok: true },
       ],
       inspect: { verdict: "advance", reason: "" },
+      tests: null,
       sentBack: 0,
       repairs: 0,
       flaky: false,
@@ -35,7 +36,7 @@ describe("proofOf", () => {
     const proof = proofOf(report(), files)
     expect(proof.verdict).toEqual({ level: "low", headline: "Small change with passing checks." })
     expect(proof.diff).toEqual({ files: 3, added: 184, removed: 32, kinds: "A 1 · M 2" })
-    expect(proof.checks).toEqual({ passed: 2, total: 2, failing: "", inspect: "passed" })
+    expect(proof.checks).toEqual({ passed: 2, total: 2, failing: "", inspect: "passed", tests: null })
   })
 
   it("names the first check that failed, so the cell says what to look at", () => {
@@ -46,18 +47,19 @@ describe("proofOf", () => {
           { stage: "prove", command: "go test ./...", exitCode: 1, ok: false },
         ],
         inspect: null,
+        tests: null,
         sentBack: 0,
         repairs: 0,
         flaky: false,
       },
     })
     const proof = proofOf(failing, [])
-    expect(proof.checks).toEqual({ passed: 1, total: 2, failing: "go test ./... · exit 1", inspect: "not yet" })
+    expect(proof.checks).toEqual({ passed: 1, total: 2, failing: "go test ./... · exit 1", inspect: "not yet", tests: null })
   })
 
   it("says inspect blocked the change when it did not advance", () => {
     const blocked = report({
-      evidence: { commands: [], inspect: { verdict: "hold", reason: "needs a test" }, sentBack: 1, repairs: 0, flaky: false },
+      evidence: { commands: [], inspect: { verdict: "hold", reason: "needs a test" }, tests: null, sentBack: 1, repairs: 0, flaky: false },
     })
     expect(proofOf(blocked, []).checks.inspect).toBe("blocked")
   })
@@ -66,5 +68,12 @@ describe("proofOf", () => {
     const files = [file("d.go", "deleted"), file("r.go", "renamed"), file("a.go", "added"), file("m.go", "modified")]
     expect(proofOf(report(), files).diff.kinds).toBe("A 1 · M 1 · R 1 · D 1")
     expect(proofOf(report(), []).diff.kinds).toBe("")
+  })
+
+  it("carries the test counts when the checks printed them", () => {
+    const counted = report({
+      evidence: { ...report().evidence, tests: { passed: 41, failed: 2, skipped: 1 } },
+    })
+    expect(proofOf(counted, []).checks.tests).toEqual({ passed: 41, failed: 2 })
   })
 })

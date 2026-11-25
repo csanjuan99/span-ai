@@ -5,7 +5,14 @@ import type { Level, Report } from "@/lib/report"
 export interface Proof {
   verdict: { level: Level; headline: string }
   diff: { files: number; added: number; removed: number; kinds: string }
-  checks: { passed: number; total: number; failing: string; inspect: "passed" | "blocked" | "not yet" }
+  checks: {
+    passed: number
+    total: number
+    failing: string
+    inspect: "passed" | "blocked" | "not yet"
+    /** The tests the checks counted, or null when none printed a count. */
+    tests: { passed: number; failed: number } | null
+  }
 }
 
 const kinds = [
@@ -17,8 +24,8 @@ const kinds = [
 
 /**
  * Reads the proof from the report the page already builds, so the top of the page and the
- * Implementation tab never disagree. It adds no measurement of its own: a test count would
- * need the engine to report one, so the cell speaks of checks, which it does record.
+ * Implementation tab never disagree. It adds no measurement of its own. The test counts are
+ * the engine's, read from what each check printed; a check that printed none adds nothing.
  */
 export function proofOf(report: Report, files: DiffFile[]): Proof {
   const { verdict, totals, evidence } = report
@@ -35,6 +42,7 @@ export function proofOf(report: Report, files: DiffFile[]): Proof {
       total: evidence.commands.length,
       failing: failed === undefined ? "" : `${failed.command} · exit ${failed.exitCode}`,
       inspect: evidence.inspect === null ? "not yet" : evidence.inspect.verdict === "advance" ? "passed" : "blocked",
+      tests: evidence.tests === null ? null : { passed: evidence.tests.passed, failed: evidence.tests.failed },
     },
   }
 }

@@ -1,6 +1,6 @@
 import { splitPath, type DiffFile } from "@/lib/diff"
 import type { FeatureReport } from "@/lib/featuredoc"
-import type { Cursor, Statement } from "@/lib/types"
+import type { Cursor, Statement, TestCounts } from "@/lib/types"
 
 /** How worried a person should be. */
 export type Level = "high" | "medium" | "low"
@@ -33,6 +33,8 @@ export interface Group {
 export interface Evidence {
   commands: { stage: string; command: string; exitCode: number; ok: boolean }[]
   inspect: { verdict: string; reason: string } | null
+  /** The tests the latest checks counted, added up; null when none printed a count. */
+  tests: TestCounts | null
   sentBack: number
   repairs: number
   flaky: boolean
@@ -263,8 +265,10 @@ function lastOf(statements: Statement[], stage: string): Statement | undefined {
 }
 
 function evidenceOf(statements: Statement[]): Evidence {
-  const commands = [lastOf(statements, "prove"), lastOf(statements, "qa")]
-    .filter((item): item is Statement => item !== undefined)
+  const latest = [lastOf(statements, "prove"), lastOf(statements, "qa")].filter(
+    (item): item is Statement => item !== undefined,
+  )
+  const commands = latest
     .flatMap((item) =>
       item.commands.map((command) => ({
         stage: item.stage,
@@ -275,7 +279,17 @@ function evidenceOf(statements: Statement[]): Evidence {
     )
   const inspects = statements.filter((item) => item.stage === "inspect")
   const last = inspects[inspects.length - 1]
+  const counted = latest
+    .flatMap((item) => item.commands)
+    .flatMap((command) => (command.tests === undefined ? [] : [command.tests]))
   return {
+    tests:
+      counted.length === 0
+        ? null
+        : counted.reduce(
+            (sum, item) => ({ passed: sum.passed + item.passed, failed: sum.failed + item.failed, skipped: sum.skipped + item.skipped }),
+            { passed: 0, failed: 0, skipped: 0 },
+          ),
     commands,
     inspect: last === undefined ? null : { verdict: last.verdict, reason: last.reason },
     sentBack: inspects.filter((item) => item.verdict !== "advance").length,
