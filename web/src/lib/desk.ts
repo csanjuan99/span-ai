@@ -20,7 +20,7 @@ const groups: { key: GroupKey; title: string; hint: string }[] = [
     title: "Waiting for me",
     hint: "answer, decide or resolve",
   },
-  { key: "failed", title: "Failed", hint: "the run stopped and needs a look" },
+  { key: "failed", title: "Failed", hint: "a check did not pass" },
   { key: "running", title: "Running", hint: "nothing needed" },
   { key: "done", title: "Done", hint: "" },
 ]
@@ -46,25 +46,50 @@ const shown: Record<DeskFilter, GroupKey[]> = {
   done: ["done"],
 }
 
+/** A finished run stays on the desk this long; after that only the Done filter lists it. */
+const doneVisibleDays = 30
+
+function hiddenDone(run: SpanHead, now: Date): boolean {
+  if (groupOf(run) !== "done") {
+    return false
+  }
+  const moved = new Date(run.updatedAt)
+  return (
+    !Number.isNaN(moved.getTime()) &&
+    now.getTime() - moved.getTime() > doneVisibleDays * 86_400_000
+  )
+}
+
 /** The runs under the chosen filter, grouped, newest first inside a group. Empty groups are left out. */
-export function groupRuns(runs: SpanHead[], filter: DeskFilter): RunGroup[] {
+export function groupRuns(
+  runs: SpanHead[],
+  filter: DeskFilter,
+  now: Date
+): RunGroup[] {
   return groups
     .filter((group) => shown[filter].includes(group.key))
     .map((group) => ({
       ...group,
       runs: runs
-        .filter((run) => groupOf(run) === group.key)
+        .filter(
+          (run) =>
+            groupOf(run) === group.key &&
+            (filter === "done" || !hiddenDone(run, now))
+        )
         .sort((a, b) => b.id.localeCompare(a.id)),
     }))
     .filter((group) => group.runs.length > 0)
 }
 
 /** How many runs each filter would show. */
-export function deskCounts(runs: SpanHead[]): Record<DeskFilter, number> {
+export function deskCounts(
+  runs: SpanHead[],
+  now: Date
+): Record<DeskFilter, number> {
   const count = (keys: GroupKey[]) =>
     runs.filter((run) => keys.includes(groupOf(run))).length
   return {
-    all: runs.length,
+    all: runs.filter((run) => !hiddenDone(run, now)).length,
     needs: count(shown.needs),
     running: count(shown.running),
     done: count(shown.done),
@@ -84,9 +109,31 @@ export function searchRuns(runs: SpanHead[], query: string): SpanHead[] {
   )
 }
 
+function plural(count: number, one: string, many: string): string {
+  return `${count} ${count === 1 ? one : many}`
+}
+
+/** What a held run waits for, counted: "conflict in 3 files", "2 questions", "1 decision". */
+function needText(run: SpanHead): string {
+  switch (run.need) {
+    case "conflict":
+      return `conflict in ${plural(run.count, "file", "files")}`
+    case "questions":
+      return plural(run.count, "question", "questions")
+    case "decision":
+      return plural(run.count, "decision", "decisions")
+    default:
+      return ""
+  }
+}
+
 /** "merge · conflict in 3 files": the stage a run is at and why it waits. */
 export function pillOf(run: SpanHead): string {
   const group = groupOf(run)
+  const need = needText(run)
+  if (group === "waiting" && need !== "") {
+    return `${run.stage} · ${need}`
+  }
   const why = tidy(run.reason).replace(/\s+/g, " ").trim()
   if (group === "running") {
     return `${run.stage} · running`
@@ -123,4 +170,46 @@ export function agoOf(stamp: string, now: Date): string {
   }
   const days = Math.floor(hours / 24)
   return `${days} ${days === 1 ? "day" : "days"} ago`
+}
+
+/** The one thing a row offers: what to press, whether it is the main action, and where it goes. */
+export interface RowAction {
+  label: string
+  primary: boolean
+  to: string
+}
+
+const waitingLabels: Record<string, string> = {
+  conflict: "Resolve",
+  questions: "Answer",
+  decision: "Decide",
+}
+
+/** Resolve a conflict, answer questions, decide, resume a failed run, open a running one, read a finished one. */
+export function actionOf(run: SpanHead): RowAction {
+  const group = groupOf(run)
+  const to = `/spans/${run.id}`
+  switch (group) {
+    case "waiting":
+      return {
+        label: waitingLabels[run.need] ?? "Review",
+        primary: run.need === "conflict",
+        to,
+      }
+    case "failed":
+      return { label: "Resume", primary: false, to }
+    case "done":
+      return { label: "Summary", primary: false, to: `${to}/summary` }
+    default:
+      return { label: "Open", primary: false, to }
+  }
+}
+
+/** "started 12 min ago" for a running run, "2 h ago" for the others. Empty when the time is unknown. */
+export function whenOf(run: SpanHead, now: Date): string {
+  if (groupOf(run) === "running") {
+    const started = agoOf(run.startedAt, now)
+    return started === "" ? "" : `started ${started}`
+  }
+  return agoOf(run.updatedAt, now)
 }

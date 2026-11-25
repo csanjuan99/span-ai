@@ -14,7 +14,8 @@ const runs = [
     stage: "merge",
     issue: "SPAN-1",
     title: "Retry webhooks",
-    reason: "conflict in 3 files",
+    need: "conflict",
+    count: 3,
   }),
   head({
     id: "b",
@@ -82,5 +83,18 @@ describe("RunsDesk", () => {
     const onNew = show()
     fireEvent.click(screen.getByRole("button", { name: "New run" }))
     expect(onNew).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers the action that fits each row", () => {
+    show()
+    expect(
+      screen.getByRole("link", { name: "Resolve" }).getAttribute("href")
+    ).toBe("/spans/a")
+    expect(
+      screen.getByRole("link", { name: "Open" }).getAttribute("href")
+    ).toBe("/spans/b")
+    expect(
+      screen.getByRole("link", { name: "Summary" }).getAttribute("href")
+    ).toBe("/spans/c/summary")
   })
 })

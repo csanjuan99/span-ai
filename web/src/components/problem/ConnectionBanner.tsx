@@ -1,8 +1,58 @@
-import { CheckIcon, LoaderCircleIcon } from "lucide-react"
+"use client"
+
+import { CheckIcon, CircleAlertIcon, LoaderCircleIcon } from "lucide-react"
+import type { ReactNode } from "react"
 
 import type { ConnectionNotice } from "@/hooks/use-connection-notice"
+import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
-/** A calm line under the header while the live connection is down, and a short one when it returns. */
+const tones = {
+  hold: "bg-hold-soft text-hold",
+  pass: "bg-pass-soft text-pass",
+  fail: "bg-fail-soft text-fail",
+}
+
+function Banner({
+  tone,
+  icon,
+  children,
+  retry,
+}: {
+  tone: keyof typeof tones
+  icon: ReactNode
+  children: ReactNode
+  retry?: string
+}) {
+  return (
+    <p
+      role="status"
+      className={cn(
+        "flex flex-wrap items-center gap-3 rounded-[10px] px-4 py-2.5 text-[13px] leading-5 md:px-5",
+        tones[tone]
+      )}
+    >
+      {icon}
+      <span>{children}</span>
+      {retry !== undefined ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="ml-auto h-8 rounded-[10px] bg-card px-3 text-[13px] text-foreground"
+          onClick={() => window.location.reload()}
+        >
+          {retry}
+        </Button>
+      ) : null}
+    </p>
+  )
+}
+
+/**
+ * The line under the header while the live connection is down: calm for the first minute, a
+ * short one when it returns, and a plain statement when nothing answers after a minute.
+ */
 export function ConnectionBanner({
   notice,
   lastSeen,
@@ -15,28 +65,39 @@ export function ConnectionBanner({
   }
   if (notice === "back") {
     return (
-      <p
-        role="status"
-        className="flex items-center gap-2 rounded-lg bg-pass-soft px-3 py-2 text-sm text-pass"
+      <Banner
+        tone="pass"
+        icon={<CheckIcon aria-hidden="true" className="size-4" />}
       >
-        <CheckIcon aria-hidden="true" className="size-4" />
-        Back online. Updated just now.
-      </p>
+        <b>Back online.</b> Updated just now. This message closes by itself.
+      </Banner>
+    )
+  }
+  if (notice === "lost") {
+    return (
+      <Banner
+        tone="fail"
+        icon={<CircleAlertIcon aria-hidden="true" className="size-4" />}
+        retry="Retry"
+      >
+        <b>Span is not answering.</b>
+        {lastSeen !== "" ? ` Last seen ${lastSeen}.` : ""} Nothing was lost.
+      </Banner>
     )
   }
   return (
-    <p
-      role="status"
-      className="flex items-center gap-2 rounded-lg bg-hold-soft px-3 py-2 text-sm text-hold"
+    <Banner
+      tone="hold"
+      icon={
+        <LoaderCircleIcon
+          aria-hidden="true"
+          className="size-4 animate-spin motion-reduce:animate-none"
+        />
+      }
+      retry="Retry now"
     >
-      <LoaderCircleIcon
-        aria-hidden="true"
-        className="size-4 animate-spin motion-reduce:animate-none"
-      />
-      <span>
-        Reconnecting to Span… Your run keeps going on your machine.
-        {lastSeen !== "" ? ` Last updated ${lastSeen}.` : ""}
-      </span>
-    </p>
+      <b>Reconnecting to Span…</b> Your run keeps going on your machine.
+      {lastSeen !== "" ? ` Last updated ${lastSeen}.` : ""}
+    </Banner>
   )
 }

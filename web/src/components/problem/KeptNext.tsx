@@ -1,24 +1,38 @@
+import type { ReactNode } from "react"
+
+import { InfoIcon } from "lucide-react"
+
+function Row({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2">
+      <dt className="pt-0.5 text-xs font-medium text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="text-[13px] leading-5 text-pretty">{children}</dd>
+    </div>
+  )
+}
+
 /** What a problem leaves safe, and the one thing to do about it. */
 export function KeptNext({ kept, next }: { kept: string; next: string }) {
   return (
-    <dl className="grid gap-3 border-t border-border pt-3 text-sm sm:grid-cols-2">
-      <div className="flex flex-col gap-1">
-        <dt className="text-xs tracking-wide text-muted-foreground uppercase">
-          Kept
-        </dt>
-        <dd className="text-pretty">
-          <span aria-hidden="true" className="mr-1.5 font-mono text-pass">
+    <div className="rounded-[10px] bg-muted px-3.5 py-3">
+      <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
+        <InfoIcon className="size-4" aria-hidden="true" />
+        What to know
+      </div>
+      <dl>
+        <Row label="Kept">
+          <span
+            aria-hidden="true"
+            className="mr-1.5 font-mono font-semibold text-pass"
+          >
             +
           </span>
           {kept}
-        </dd>
-      </div>
-      <div className="flex flex-col gap-1">
-        <dt className="text-xs tracking-wide text-muted-foreground uppercase">
-          Next
-        </dt>
-        <dd className="text-pretty">{next}</dd>
-      </div>
-    </dl>
+        </Row>
+        <Row label="Next">{next}</Row>
+      </dl>
+    </div>
   )
 }

@@ -37,4 +37,39 @@ describe("useConnectionNotice", () => {
     })
     expect(result.current).toBe("idle")
   })
+
+  it("hands over to the error screen after a minute of reconnecting", () => {
+    const { result, rerender } = renderHook(
+      ({ on }) => useConnectionNotice(on),
+      { initialProps: { on: true } }
+    )
+    rerender({ on: false })
+    act(() => {
+      vi.advanceTimersByTime(59_000)
+    })
+    expect(result.current).toBe("reconnecting")
+    act(() => {
+      vi.advanceTimersByTime(1_500)
+    })
+    expect(result.current).toBe("lost")
+    rerender({ on: true })
+    expect(result.current).toBe("back")
+  })
+
+  it("starts counting again at the next drop", () => {
+    const { result, rerender } = renderHook(
+      ({ on }) => useConnectionNotice(on),
+      { initialProps: { on: true } }
+    )
+    rerender({ on: false })
+    act(() => {
+      vi.advanceTimersByTime(30_000)
+    })
+    rerender({ on: true })
+    rerender({ on: false })
+    act(() => {
+      vi.advanceTimersByTime(45_000)
+    })
+    expect(result.current).toBe("reconnecting")
+  })
 })

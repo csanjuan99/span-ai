@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import { agoOf, deskCounts, groupRuns, pillOf, searchRuns } from "@/lib/desk"
+import {
+  actionOf,
+  agoOf,
+  deskCounts,
+  groupRuns,
+  pillOf,
+  searchRuns,
+  whenOf,
+} from "@/lib/desk"
 import { head } from "@/test/heads"
 
 const runs = [
@@ -33,7 +41,10 @@ const runs = [
 describe("groupRuns", () => {
   it("orders the groups by what needs a person first", () => {
     expect(
-      groupRuns(runs, "all").map((group) => [group.key, group.runs.length])
+      groupRuns(runs, "all", clock).map((group) => [
+        group.key,
+        group.runs.length,
+      ])
     ).toEqual([
       ["waiting", 1],
       ["failed", 1],
@@ -43,14 +54,13 @@ describe("groupRuns", () => {
   })
 
   it("leaves out an empty group", () => {
-    expect(groupRuns(runs.slice(2), "all").map((group) => group.key)).toEqual([
-      "running",
-      "done",
-    ])
+    expect(
+      groupRuns(runs.slice(2), "all", clock).map((group) => group.key)
+    ).toEqual(["running", "done"])
   })
 
   it("filters: needs me is waiting and failed", () => {
-    expect(groupRuns(runs, "needs").map((group) => group.key)).toEqual([
+    expect(groupRuns(runs, "needs", clock).map((group) => group.key)).toEqual([
       "waiting",
       "failed",
     ])
@@ -59,7 +69,12 @@ describe("groupRuns", () => {
 
 describe("deskCounts", () => {
   it("counts the runs a person has to act on", () => {
-    expect(deskCounts(runs)).toEqual({ all: 4, needs: 2, running: 1, done: 1 })
+    expect(deskCounts(runs, clock)).toEqual({
+      all: 4,
+      needs: 2,
+      running: 1,
+      done: 1,
+    })
   })
 })
 
@@ -100,5 +115,91 @@ describe("agoOf", () => {
     expect(agoOf("", now)).toBe("")
     expect(agoOf("nope", now)).toBe("")
     expect(agoOf("2026-11-25T15:00:00Z", now)).toBe("")
+  })
+})
+
+const clock = new Date("2026-11-24T15:00:00Z")
+
+describe("pillOf by what a run waits for", () => {
+  it("counts the files, the questions and the decisions", () => {
+    const wait = (need: string, count: number) =>
+      pillOf(head({ id: "x", verdict: "hold", stage: "merge", need, count }))
+    expect(wait("conflict", 3)).toBe("merge · conflict in 3 files")
+    expect(wait("conflict", 1)).toBe("merge · conflict in 1 file")
+    expect(wait("questions", 3)).toBe("merge · 3 questions")
+    expect(wait("questions", 1)).toBe("merge · 1 question")
+    expect(wait("decision", 1)).toBe("merge · 1 decision")
+  })
+})
+
+describe("actionOf", () => {
+  it("offers the action that fits what the run needs", () => {
+    const of = (over: Partial<Parameters<typeof head>[0]>) =>
+      actionOf(head({ id: "x", ...over }))
+    expect(of({ verdict: "hold", need: "conflict", count: 2 })).toEqual({
+      label: "Resolve",
+      primary: true,
+      to: "/spans/x",
+    })
+    expect(of({ verdict: "hold", need: "questions" }).label).toBe("Answer")
+    expect(of({ verdict: "hold", need: "decision" }).label).toBe("Decide")
+    expect(of({ verdict: "hold" }).label).toBe("Review")
+    expect(of({ verdict: "stop" }).label).toBe("Resume")
+    expect(of({ verdict: "running" })).toEqual({
+      label: "Open",
+      primary: false,
+      to: "/spans/x",
+    })
+  })
+
+  it("sends a finished run to its summary", () => {
+    expect(actionOf(head({ id: "x", verdict: "done" }))).toEqual({
+      label: "Summary",
+      primary: false,
+      to: "/spans/x/summary",
+    })
+  })
+})
+
+describe("whenOf", () => {
+  it("says when a running run started, and when the others last moved", () => {
+    const moved = "2026-11-24T14:48:00Z"
+    expect(
+      whenOf(head({ id: "x", verdict: "running", startedAt: moved }), clock)
+    ).toBe("started 12 min ago")
+    expect(
+      whenOf(head({ id: "x", verdict: "hold", updatedAt: moved }), clock)
+    ).toBe("12 min ago")
+    expect(whenOf(head({ id: "x", verdict: "running" }), clock)).toBe("")
+  })
+})
+
+describe("old finished runs", () => {
+  const old = head({
+    id: "old",
+    verdict: "done",
+    updatedAt: "2026-10-01T10:00:00Z",
+  })
+  const fresh = head({
+    id: "fresh",
+    verdict: "done",
+    updatedAt: "2026-11-20T10:00:00Z",
+  })
+
+  it("stay out of All and Needs me but show under Done", () => {
+    expect(groupRuns([old, fresh], "all", clock)[0]?.runs).toEqual([fresh])
+    expect(groupRuns([old, fresh], "done", clock)[0]?.runs).toHaveLength(2)
+  })
+
+  it("count the same way", () => {
+    const counts = deskCounts([old, fresh], clock)
+    expect(counts.all).toBe(1)
+    expect(counts.done).toBe(2)
+  })
+
+  it("a finished run with an unknown time is never hidden", () => {
+    expect(
+      groupRuns([head({ id: "x", verdict: "done" })], "all", clock)
+    ).toHaveLength(1)
   })
 })

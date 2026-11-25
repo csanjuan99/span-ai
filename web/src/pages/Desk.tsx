@@ -4,7 +4,7 @@ import { EmptyDesk, sampleBrief } from "@/components/desk/EmptyDesk"
 import { Toasts } from "@/components/notify/Toasts"
 import { useNotifications } from "@/hooks/use-notifications"
 import { RunsDesk } from "@/components/desk/RunsDesk"
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 
 import {
@@ -42,7 +42,6 @@ import {
 } from "@/lib/jira-session"
 import { repoNames } from "@/lib/repos"
 import { setupSteps, type StepId } from "@/lib/setup"
-import { PromptHeading } from "@/components/shell/PromptHeading"
 import { Shell } from "@/components/shell/Shell"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
 import { Setup } from "@/components/setup/Setup"
@@ -119,6 +118,7 @@ export function Desk() {
   const [spans, setSpans] = useState<SpanHead[]>([])
   const [listed, setListed] = useState(false)
   const notifications = useNotifications(spans)
+  const formRef = useRef<HTMLFormElement>(null)
   const [starting, setStarting] = useState(false)
   const [now, setNow] = useState(() => new Date())
   const [url, setUrl] = useState("")
@@ -329,11 +329,26 @@ export function Desk() {
     }
   }
 
-  async function run(event: FormEvent<HTMLFormElement>) {
+  function run(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    return begin(new FormData(event.currentTarget))
+  }
+
+  // The empty desk starts the sample in one click: the form's own fields, with the sample as the story.
+  function startSample() {
+    setStory(sampleBrief.text)
+    setStarting(true)
+    if (formRef.current === null) {
+      return
+    }
+    const data = new FormData(formRef.current)
+    data.set("story", sampleBrief.text)
+    void begin(data)
+  }
+
+  async function begin(data: FormData) {
     setRunNote("")
     setStarted(null)
-    const data = new FormData(event.currentTarget)
     if (kind === "infer") {
       data.delete("kind")
     }
@@ -464,45 +479,6 @@ export function Desk() {
 
   return (
     <Shell path="~/span" status="desk" lines={lines}>
-      <header>
-        <PromptHeading as="h1">span desk</PromptHeading>
-        <p className="text-pretty text-muted-foreground">
-          Turn a Jira story into a reviewed pull request.
-        </p>
-        <p className="mt-1 text-sm">
-          <Link
-            className="text-primary underline-offset-4 hover:underline"
-            to="/metrics"
-          >
-            Metrics
-          </Link>{" "}
-          <span className="text-muted-foreground">
-            how the runs on this server went
-          </span>
-        </p>
-        <p className="mt-1 text-sm">
-          <Link
-            className="text-primary underline-offset-4 hover:underline"
-            to="/shaping"
-          >
-            Shape a story
-          </Link>{" "}
-          <span className="text-muted-foreground">
-            turn an idea into a sealed story before the run
-          </span>
-        </p>
-        <p className="mt-1 text-sm">
-          <Link
-            className="text-primary underline-offset-4 hover:underline"
-            to="/settings"
-          >
-            Settings
-          </Link>{" "}
-          <span className="text-muted-foreground">
-            the agent, checks, approvals and appearance
-          </span>
-        </p>
-      </header>
       {listNote !== "" ? (
         <p className="text-sm text-pretty text-destructive">{listNote}</p>
       ) : null}
@@ -518,10 +494,8 @@ export function Desk() {
       ) : null}
       {listed && spans.length === 0 ? (
         <EmptyDesk
-          onSample={() => {
-            setStory(sampleBrief.text)
-            setStarting(true)
-          }}
+          folder={workspace}
+          onSample={startSample}
           onStory={() => setStarting(true)}
         />
       ) : null}
@@ -529,6 +503,7 @@ export function Desk() {
         <>
           <Setup steps={steps} bodies={{ jira: jiraBody }} onGo={go} />
           <form
+            ref={formRef}
             className="flex flex-col gap-4"
             onSubmit={(event) => void run(event)}
           >
@@ -707,6 +682,23 @@ export function Desk() {
           </form>
         </>
       ) : null}
+      <nav
+        aria-label="More"
+        className="flex flex-wrap gap-x-6 gap-y-1 text-[13px]"
+      >
+        <Link
+          className="text-primary underline-offset-4 hover:underline"
+          to="/shaping"
+        >
+          Shape a story
+        </Link>
+        <Link
+          className="text-primary underline-offset-4 hover:underline"
+          to="/metrics"
+        >
+          Metrics
+        </Link>
+      </nav>
       <Toasts
         toasts={notifications.toasts}
         onOpen={(runId) => navigate(`/spans/${runId}`)}

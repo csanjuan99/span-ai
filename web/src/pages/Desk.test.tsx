@@ -263,7 +263,7 @@ describe("Desk", () => {
     expect(await screen.findByLabelText("Story")).toBeTruthy()
   })
 
-  it("starts from the sample brief when there are no runs", async () => {
+  it("starts the sample brief in one click when there are no runs", async () => {
     render(
       <MemoryRouter>
         <Desk />
@@ -272,8 +272,9 @@ describe("Desk", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Start with the sample brief" })
     )
-    const story = (await screen.findByLabelText("Story")) as HTMLTextAreaElement
-    expect(story.value).toContain("Add a /healthz endpoint")
-    expect(startRun).not.toHaveBeenCalled()
+    await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+    const sent = startRun.mock.calls[0]?.[0] as FormData
+    expect(sent.get("story")).toContain("Add a /healthz endpoint")
+    expect(sent.get("workspace")).toBe(".")
   })
 })

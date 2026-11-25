@@ -12,6 +12,9 @@ export function head(over: Partial<SpanHead> & { id: string }): SpanHead {
     branch: "",
     reason: "",
     updatedAt: "",
+    startedAt: "",
+    need: "",
+    count: 0,
     ...over,
   }
 }
