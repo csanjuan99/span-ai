@@ -20,6 +20,14 @@ func TestCountTestsReadsTheSummaryOfEachRunner(t *testing.T) {
 		{"pytest", "=========== 2 failed, 41 passed, 1 skipped in 3.20s ===========\n", statement.TestCounts{Passed: 41, Failed: 2, Skipped: 1}},
 		{"pytest all green", "============ 41 passed in 0.52s ============\n", statement.TestCounts{Passed: 41}},
 		{"go test -v counts the top-level tests only", "=== RUN   TestA\n--- PASS: TestA (0.00s)\n=== RUN   TestB\n--- FAIL: TestB (0.00s)\n    --- FAIL: TestB/sub (0.00s)\n=== RUN   TestC\n--- SKIP: TestC (0.00s)\nFAIL\n", statement.TestCounts{Passed: 1, Failed: 1, Skipped: 1}},
+		{"go test -json counts the top-level tests only", `{"Action":"run","Test":"TestA"}
+{"Action":"output","Test":"TestA","Output":"--- PASS: TestA\n"}
+{"Action":"pass","Test":"TestA"}
+{"Action":"fail","Test":"TestB/sub"}
+{"Action":"fail","Test":"TestB"}
+{"Action":"skip","Test":"TestC"}
+{"Action":"fail","Package":"span/x"}
+`, statement.TestCounts{Passed: 1, Failed: 1, Skipped: 1}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

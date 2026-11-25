@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -142,5 +143,49 @@ func TestSaveWithNothingChangedWritesNothing(t *testing.T) {
 	}
 	if fileOf(t, path) != editBody {
 		t.Fatal("the file changed")
+	}
+}
+
+func TestAStageAgentAndTheDoneStatusAreSavedAndRead(t *testing.T) {
+	project, path := editProject(t, editBody)
+	code, out, body := postConfig(t, "/config", project, url.Values{"agents.build": {"codex"}, "doneStatus": {"Done"}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d %s", code, body)
+	}
+	if out.Config == nil || out.Config.Agents["build"] != "codex" || out.Config.Agents["frame"] != "" || out.Config.DoneStatus != "Done" {
+		t.Fatalf("config = %+v", out.Config)
+	}
+	if got := fileOf(t, path); !strings.Contains(got, "# Hand-written.") || !strings.Contains(got, "build: codex") || !strings.Contains(got, "doneStatus: Done") {
+		t.Fatalf("file:\n%s", got)
+	}
+}
+
+func TestAnUnknownStageOrAgentIsRefusedAndNothingIsWritten(t *testing.T) {
+	project, path := editProject(t, editBody)
+	for _, fields := range []url.Values{{"agents.prove": {"codex"}}, {"agents.build": {"nobody"}}} {
+		if code, _, _ := postConfig(t, "/config", project, fields); code == http.StatusOK {
+			t.Fatalf("%v was accepted", fields)
+		}
+	}
+	if fileOf(t, path) != editBody {
+		t.Fatal("the file changed")
+	}
+}
+
+func TestPreviewSaysWhatTheSaveDoesToRuns(t *testing.T) {
+	project, _ := editProject(t, editBody)
+	_, out, _ := postConfig(t, "/config/preview", project, url.Values{"merge": {"hold"}, "agents.build": {"codex"}, "doneStatus": {"Done"}})
+	text := ""
+	for _, item := range out.Effects {
+		text += item.Label + ": " + item.Text + "\n"
+	}
+	for _, want := range []string{"A run that reaches merge will stop and ask you.", "next build stage", "uses codex", "moves its story to Done"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in\n%s", want, text)
+		}
+	}
+	_, none, _ := postConfig(t, "/config/preview", project, url.Values{"merge": {"auto"}})
+	if len(none.Effects) != 0 {
+		t.Fatalf("a save that changes nothing has effects: %+v", none.Effects)
 	}
 }

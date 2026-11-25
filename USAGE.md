@@ -301,6 +301,15 @@ The desk fills the field's suggestions from `GET /branches?path=<folder>`: the l
 an empty field means (`base:` in `span.yaml`, else `dev`). The placeholder shows `master`
 when the kind is `hotfix`.
 
+## First-run checks
+
+The welcome page (`/welcome`) checks your setup against the running server instead of guessing.
+
+- `GET /onboarding/folder?path=<folder>` reads one folder: `exists`, `git`, the checked-out `branch`, the `origin` remote URL, and `dirty`, the number of files with uncommitted changes (untracked ones included). `reason` says why a folder cannot be used.
+- `GET /onboarding/folders?path=<folder>` lists the directories under a path for the Browse picker, hidden folders left out, each marked when it is a git repository, with `parent` for the way up. An empty path starts at your home folder.
+- `POST /jira/check` (`project`, `url`, `email`, `token`) asks Jira whether it accepts the account, without saving it. It answers `status`: `ok`, `unauthorized`, `unreachable` or `invalid`, and a `message`. An empty `token` tests the one already saved. `POST /jira/account` saves it.
+- `GET /agent` gives each CLI that is not on your PATH an `install` command. The page shows it with a Copy button. Whether a CLI is logged in cannot be read, so Span never claims it is.
+
 The merge stage checks it too. If the change targets another branch (for example `main`
 when the run's base is `dev`), the run holds instead of merging: retarget the change
 (`gh pr edit <n> --base <base>`) or approve the merge stage to merge it where it is; the run's base then becomes that branch, so
@@ -791,8 +800,13 @@ anything else is refused, so the picker never leaves a file in a home directory.
 
 The Settings page edits the base branch, the three check lists (`prove.focused`, `prove.fast`,
 `prove.acceptance`), `qa.command`, `repair.maxAttempts` and the `stages` modes (`open`, `merge`,
-`promote`, `plan`, `conflict`). A change shows under **What changes** as the old and new value
+`promote`, `plan`, `conflict`), the CLI of each model stage (`agents.frame`, `agents.build`,
+`agents.inspect`) and `jira.doneStatus`. A change shows under **What changes** as the old and new value
 before anything is written; **Save N changes** writes it and **Discard changes** drops it.
+
+`jira.doneStatus` moves the story to that status when a run ends; a story that cannot be moved is
+noted in the run and never fails it. Without the key nothing is moved. Test counts are also read
+from `go test -json`. The **What changes** panel lists what each save does to runs.
 
 A save rewrites only the lines of the keys that changed. Comments, key order and every other key
 stay as they were, and the new file is checked with the same rules as a run before it replaces
@@ -900,8 +914,8 @@ The project picks a default agent. One run can override it per stage without tou
 frame, build, and inspect. The choice lives in `.span/runs/<id>/agents.json` and applies
 the next time that stage starts.
 
-Resolution order for a stage: the run's choice, then `agent:` from the policy, then the
-first ready CLI. An empty choice, or `Policy default`, clears the exception. Inspect keeps
+Resolution order for a stage: the run's choice, then `agents.<stage>` from the policy, then
+`agent:` from the policy, then the first ready CLI. An empty choice, or `Policy default`, clears the exception. Inspect keeps
 using a different CLI from build when nothing was chosen, so the review is not the model
 that wrote the change.
 
@@ -1288,7 +1302,7 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | GET | `/jira/search?path=&jql=` | Up to 20 issues. Empty `jql` lists issues assigned to the current user |
 | POST | `/quickstart` | Fields `workspace`, `repo`, `kind`, `issue`, `story`, and `file`. `202` and `{"id","stage"}` when a run starts. Configuration text stays `200` |
 | GET | `/spans` | `Accept: application/json` returns `{"spans":[...]}`. Any other accept is the desk |
-| GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, and gate. Any other accept is the span page |
+| GET | `/spans/<id>` | `Accept: application/json` returns the cursor, statements, acceptance lines, gate, and what the run is about: `title` (the brief's first line without the story key) and `repo` (the folder it writes in). Any other accept is the span page |
 | GET | `/spans/<id>/implementation` | `git diff <base>...<head>` stat and a patch capped at 256 KiB |
 | GET | `/spans/<id>/feature` | The run's `odd/tasks/<feature>.md`, capped at 64 KiB, for the report. Empty when there is none |
 | GET | `/spans/<id>/acceptance` | Each acceptance line, its declaration, and the gate result |

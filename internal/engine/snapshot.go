@@ -32,6 +32,8 @@ func Load(root, id string) (Snapshot, error) {
 		snap.Cursor.Reason = interruptedReason
 	}
 	snap.Label = Label(snap.Cursor)
+	snap.Title = titleOf(dir, snap.Cursor.Issue)
+	snap.Repo = RepoName(snap.Cursor.Workspace)
 	snap.Statements = readStatements(dir)
 	if choices := ReadStageAgents(dir); len(choices) > 0 {
 		snap.StageAgents = choices
@@ -163,6 +165,12 @@ type Head struct {
 	Reason string `json:"reason,omitempty"`
 	// UpdatedAt is when the cursor last moved, in RFC 3339 and UTC.
 	UpdatedAt string `json:"updatedAt,omitempty"`
+	// StartedAt is when the run was opened, in RFC 3339 and UTC. A run that never recorded it has none.
+	StartedAt string `json:"startedAt,omitempty"`
+	// Need is what a held run waits for: conflict, questions or decision. Count says how many
+	// files, questions or decisions. A run that waits for something else has neither.
+	Need  string `json:"need,omitempty"`
+	Count int    `json:"count,omitempty"`
 }
 
 // Heads reads the cursor of every run under root, newest id last.
@@ -185,8 +193,8 @@ func Heads(root string) []Head {
 			ID: cur.ID, Label: Label(cur), Issue: cur.Issue,
 			Repo: RepoName(cur.Workspace), Stage: cur.Stage, Verdict: verdictOf(cur),
 			Title: titleOf(dir, cur.Issue), Branch: cur.Branch, Reason: cur.Reason,
-			UpdatedAt: movedAt(dir),
-		})
+			UpdatedAt: movedAt(dir), StartedAt: startedAt(cur),
+		}.withNeed(cur))
 	}
 	sort.Slice(heads, func(i, j int) bool { return heads[i].ID < heads[j].ID })
 	return heads
@@ -203,6 +211,40 @@ func verdictOf(cur Cursor) string {
 	default:
 		return "running"
 	}
+}
+
+// withNeed names what a held run waits for, so the desk can say "3 questions" and offer Answer
+// instead of a generic Review. A run that is not held, or waits for something else, has none.
+func (h Head) withNeed(cur Cursor) Head {
+	if !cur.Hold || cur.Done || cur.Stop {
+		return h
+	}
+	switch {
+	case cur.Decision != nil:
+		h.Need, h.Count = "decision", 1
+	case cur.Conflict != nil:
+		h.Need, h.Count = "conflict", conflictFiles(cur.Conflict)
+	case len(cur.Questions) > 0:
+		h.Need, h.Count = "questions", len(cur.Questions)
+	}
+	return h
+}
+
+// conflictFiles counts the files that conflict across every group.
+func conflictFiles(c *Conflict) int {
+	total := 0
+	for _, group := range c.Groups {
+		total += len(group.Files)
+	}
+	return total
+}
+
+// startedAt is when the run was opened. A cursor without it has no time.
+func startedAt(cur Cursor) string {
+	if cur.StartedAt.IsZero() {
+		return ""
+	}
+	return cur.StartedAt.UTC().Format(time.RFC3339)
 }
 
 // titleOf is what the run is about: the first line of its brief, without the story key a

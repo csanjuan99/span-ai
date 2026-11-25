@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"span/internal/agent"
 	"span/internal/prove"
 )
 
@@ -26,6 +27,11 @@ type Changes struct {
 	Acceptance *[]string
 	QA         *string
 	Repair     *int
+	// Agents sets the CLI of the stages it names; an empty name clears the entry. A stage it
+	// does not name is left alone.
+	Agents map[string]string
+	// DoneStatus is the Jira status a finished run moves its story to; empty clears it.
+	DoneStatus *string
 }
 
 // DiffLine is one value a save would change: the key as a person reads it, and its
@@ -149,6 +155,17 @@ func editsOf(current File, c Changes) ([]edit, error) {
 		})
 	}
 	scalar("qa", "command", current.QA.Command, c.QA)
+	for stage := range c.Agents {
+		if !isAgentStage(stage) {
+			return nil, fmt.Errorf("agents: %q is not one of %s", stage, strings.Join(AgentStageNames, ", "))
+		}
+	}
+	for _, stage := range AgentStageNames {
+		if value, ok := c.Agents[stage]; ok {
+			scalar("agents", stage, strings.TrimSpace(current.Agents[stage]), &value)
+		}
+	}
+	scalar("jira", "doneStatus", current.DoneStatus(), c.DoneStatus)
 	if c.Repair != nil {
 		if *c.Repair < 1 || *c.Repair > MaxRepairAttempts {
 			return nil, fmt.Errorf("repair.maxAttempts is %d, allowed 1 to %d", *c.Repair, MaxRepairAttempts)
@@ -180,6 +197,10 @@ func checkValue(item edit) error {
 	case "stages.plan":
 		if item.after != "auto" && item.after != "hold" && item.after != "conditional" {
 			return fmt.Errorf("stages.plan %q is not auto, conditional or hold", item.after)
+		}
+	case "agents.frame", "agents.build", "agents.inspect":
+		if item.after != "" && !agent.Known(item.after) {
+			return fmt.Errorf("%s %q is not one of auto, any, or %s", item.label, item.after, agent.IDs())
 		}
 	case "qa.command":
 		if item.after != "" {

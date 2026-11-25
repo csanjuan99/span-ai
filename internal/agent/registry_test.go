@@ -180,3 +180,18 @@ func TestKnownAcceptsEveryWayAPolicyCanNameAnAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestAMissingCLIComesWithItsInstallCommand(t *testing.T) {
+	dir := home(t, ".pi/agent/npm/node_modules/gentle-pi")
+	look(t, "pi")
+	byID := map[string]State{}
+	for _, row := range Report(dir) {
+		byID[row.ID] = row
+	}
+	if byID["pi"].Install != "" {
+		t.Fatalf("an installed CLI offers no install: %+v", byID["pi"])
+	}
+	if byID["codex"].Install == "" || byID["cursor"].Install == "" {
+		t.Fatalf("missing CLIs need an install command: %+v", byID)
+	}
+}

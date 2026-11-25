@@ -32,6 +32,9 @@ type File struct {
 	// Models picks one model per CLI, by CLI id (cursor, claude, codex, pi). A CLI without an
 	// entry runs on the model Gentle AI configured for it.
 	Models map[string]string `yaml:"models"`
+	// Agents picks the CLI for one stage that calls a model (frame, build, inspect). A stage
+	// without an entry uses Agent. A run's own choice for a stage still wins over both.
+	Agents map[string]string `yaml:"agents"`
 	// Base is the branch new runs start from and open their change into when the run does
 	// not name one. Empty keeps the defaults: dev for feat and fix, master for hotfix.
 	Base     string              `yaml:"base"`
@@ -46,6 +49,10 @@ type File struct {
 	Commit   Commit              `yaml:"commit"`
 	Limits   Limits              `yaml:"limits"`
 }
+
+// AgentStageNames are the stages that call a model, which are the ones agents: can name.
+// The engine runs the same three, and a test keeps the two lists equal.
+var AgentStageNames = []string{"frame", "build", "inspect"}
 
 // Limits bound what one run may spend. An absent limit is no limit.
 type Limits struct {
@@ -79,9 +86,13 @@ type Commit struct {
 	Allow []string `yaml:"allow"`
 }
 
-// Jira names the status used when a story cannot be implemented yet.
+// Jira names the statuses Span moves a story to.
 type Jira struct {
+	// BlockStatus is the status for a story that cannot be implemented yet.
 	BlockStatus string `yaml:"blockStatus"`
+	// DoneStatus is the status a story moves to when its run finishes. Empty leaves the
+	// story where it is, which is what a span.yaml without the key has always done.
+	DoneStatus string `yaml:"doneStatus"`
 }
 
 // QA is the acceptance command. Browser asks for Playwright when no command is set.
@@ -223,6 +234,17 @@ func (f File) Validate() error {
 			return fmt.Errorf("models.%s: %q is not a model name", id, model)
 		}
 	}
+	for stage, name := range f.Agents {
+		if !isAgentStage(stage) {
+			return fmt.Errorf("agents: %q is not one of %s", stage, strings.Join(AgentStageNames, ", "))
+		}
+		if !agent.Known(name) {
+			return fmt.Errorf("agents.%s: %q is not one of auto, any, or %s", stage, name, agent.IDs())
+		}
+	}
+	if strings.ContainsAny(f.Jira.DoneStatus, "\r\n") {
+		return fmt.Errorf("jira.doneStatus must be one line")
+	}
 	if raw := f.Limits.StageTimeout; raw != "" {
 		limit, err := time.ParseDuration(raw)
 		if err != nil || limit < MinStageTimeout || limit > MaxStageTimeout {
@@ -293,6 +315,16 @@ func (f File) Inherit(folder File) File {
 	if agent := strings.TrimSpace(f.Agent); (agent == "" || strings.EqualFold(agent, "any")) && strings.TrimSpace(folder.Agent) != "" {
 		f.Agent = folder.Agent
 	}
+	if len(folder.Agents) > 0 {
+		agents := make(map[string]string, len(f.Agents)+len(folder.Agents))
+		for stage, name := range folder.Agents {
+			agents[stage] = name
+		}
+		for stage, name := range f.Agents {
+			agents[stage] = name
+		}
+		f.Agents = agents
+	}
 	if len(folder.Models) == 0 {
 		return f
 	}
@@ -306,6 +338,28 @@ func (f File) Inherit(folder File) File {
 	f.Models = models
 	return f
 }
+
+func isAgentStage(stage string) bool {
+	for _, name := range AgentStageNames {
+		if name == stage {
+			return true
+		}
+	}
+	return false
+}
+
+// StageAgent is the CLI span.yaml names for one stage, or "" when the stage follows the
+// project's agent. "auto" and "any" leave the pick to the first ready CLI, the same as no entry.
+func (f File) StageAgent(stage string) string {
+	name := strings.TrimSpace(f.Agents[stage])
+	if agent.Auto(name) {
+		return ""
+	}
+	return name
+}
+
+// DoneStatus is the Jira status a finished run moves its story to. Empty means it does not.
+func (f File) DoneStatus() string { return strings.TrimSpace(f.Jira.DoneStatus) }
 
 // ModelFor is the model chosen for a CLI id, or "" when the CLI keeps its own.
 func (f File) ModelFor(id string) string { return f.Models[id] }

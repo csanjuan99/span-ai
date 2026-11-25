@@ -1,6 +1,7 @@
 package prove
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,10 +20,13 @@ var (
 )
 
 // CountTests reads how many tests passed, failed and were skipped from what a check printed.
-// It understands the summary lines of vitest, jest and pytest, and the "--- PASS" lines of
+// It understands the summary lines of vitest, jest and pytest, the events of go test -json, and the "--- PASS" lines of
 // go test -v (top-level tests only, so a subtest is not counted twice). ok is false when the
 // output holds no count, which is the common case for a build or a linter: nothing is guessed.
 func CountTests(text string) (statement.TestCounts, bool) {
+	if counts, ok := fromGoJSON(text); ok {
+		return counts, true
+	}
 	if found := lastMatch(jsSummary, text); found != "" {
 		return fromPairs(found)
 	}
@@ -75,6 +79,42 @@ func fromGoVerbose(text string) (statement.TestCounts, bool) {
 		case strings.HasPrefix(line, "--- FAIL:"):
 			counts.Failed++
 		case strings.HasPrefix(line, "--- SKIP:"):
+			counts.Skipped++
+			ran = true
+		}
+	}
+	return counts, ran
+}
+
+// goEvent is the part of a `go test -json` line that says how a test ended.
+type goEvent struct {
+	Action string `json:"Action"`
+	Test   string `json:"Test"`
+}
+
+// fromGoJSON counts the final pass, fail and skip events of go test -json for top-level tests.
+// A subtest is a name with a slash, and counting it too would count one test twice. Lines that
+// are not JSON are ignored, so output mixed with a build log still reads.
+func fromGoJSON(text string) (statement.TestCounts, bool) {
+	var counts statement.TestCounts
+	ran := false
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var event goEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil || event.Test == "" || strings.Contains(event.Test, "/") {
+			continue
+		}
+		switch event.Action {
+		case "pass":
+			counts.Passed++
+			ran = true
+		case "fail":
+			counts.Failed++
+			ran = true
+		case "skip":
 			counts.Skipped++
 			ran = true
 		}

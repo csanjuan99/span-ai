@@ -322,6 +322,10 @@ type Snapshot struct {
 	Gate        *qa.Gate              `json:"gate,omitempty"`
 	StageAgents map[string]string     `json:"stageAgents,omitempty"`
 	Label       string                `json:"label,omitempty"`
+	// Title is what the run is about: the first line of its brief without the story key.
+	Title string `json:"title,omitempty"`
+	// Repo is the folder the run writes in.
+	Repo string `json:"repo,omitempty"`
 }
 
 // Start creates a span and walks until it holds, stops, or finishes.
@@ -814,7 +818,7 @@ func (r *runner) exec(ctx context.Context, stage string) (string, string, error)
 	case promote:
 		return r.doPromote(ctx)
 	case note:
-		return r.doNote()
+		return r.doNote(ctx)
 	default:
 		return "", "", fmt.Errorf("unknown stage %s", stage)
 	}
@@ -1753,12 +1757,28 @@ func (r *runner) doPromote(ctx context.Context) (string, string, error) {
 	})
 }
 
-func (r *runner) doNote() (string, string, error) {
+func (r *runner) doNote(ctx context.Context) (string, string, error) {
 	reason := "no frame time"
 	if r.cur.FrameAdvancedAt != nil {
 		reason = "lead time " + r.opt.now().Sub(*r.cur.FrameAdvancedAt).String()
 	}
+	reason += r.moveStory(ctx)
 	return r.record(note, statement.Advance, reason, nil)
+}
+
+// moveStory moves the run's Jira story to jira.doneStatus when the policy names one. It says
+// what happened so the ledger shows it, and a story that cannot be moved never fails the run:
+// the change is already merged. Without the key nothing happens, as before.
+func (r *runner) moveStory(ctx context.Context) string {
+	status := r.policy().DoneStatus()
+	issue := strings.TrimSpace(r.opt.Issue)
+	if status == "" || issue == "" || r.opt.Issues == nil {
+		return ""
+	}
+	if err := r.opt.Issues.Transition(ctx, issue, status); err != nil {
+		return "; the Jira story was not moved to " + status + ": " + err.Error()
+	}
+	return "; moved " + issue + " to " + status
 }
 
 // settleRewind reads the commit the branch is on after a person restarted the run. Only build

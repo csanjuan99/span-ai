@@ -154,13 +154,13 @@ func (r *runner) noteAgent(stage, binary string) {
 	r.journal("agent.run", detail)
 }
 
-// pick decides which binary runs a stage. The run's choice for that stage wins, then
-// the policy, then the first ready CLI. Inspect keeps using a different CLI from build
+// pick decides which binary runs a stage. The run's choice for that stage wins, then the
+// stage's entry in the policy, then the policy's agent, then the first ready CLI. Inspect keeps using a different CLI from build
 // when nothing was chosen, so a review is not the model that wrote the change.
 func (r *runner) pick(stage string) (string, error) {
 	want := ""
 	if UsesAgent(stage) {
-		want = r.agentWanted(ReadStageAgents(r.spanDir())[stage])
+		want = r.wantedFor(stage, ReadStageAgents(r.spanDir())[stage])
 	}
 	sel, err := r.opt.Agents.Select(want)
 	if err != nil {

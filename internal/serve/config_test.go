@@ -63,3 +63,15 @@ func TestAnUnreadablePolicySaysWhyInsteadOfFailing(t *testing.T) {
 		t.Fatalf("view = %+v", view)
 	}
 }
+
+func TestAProjectWithoutAgentsReadsEveryStageOnTheProjectAgent(t *testing.T) {
+	view := getConfig(t, t.TempDir())
+	if view.Agent != "auto" || view.DoneStatus != "" || len(view.Agents) != 3 {
+		t.Fatalf("view = %+v", view)
+	}
+	for stage, name := range view.Agents {
+		if name != "" {
+			t.Fatalf("%s = %q", stage, name)
+		}
+	}
+}

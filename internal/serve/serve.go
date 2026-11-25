@@ -141,6 +141,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, set)
 	})
 	mux.HandleFunc("GET /branches", handleBranches)
+	mux.HandleFunc("GET /onboarding/folder", handleFolder)
+	mux.HandleFunc("GET /onboarding/folders", handleFolders)
+	mux.HandleFunc("POST /jira/check", handleJiraCheck)
 	mux.HandleFunc("GET /jira", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("path")
 		account, err := jira.Load(project)

@@ -21,6 +21,9 @@ type Spec struct {
 	// ModelFlag selects the model for one run. It is passed with the model as a separate
 	// argument, never joined, so a value cannot become a flag of its own.
 	ModelFlag string
+	// Install is the command a person runs to get the CLI. It is shown beside a CLI that
+	// is not on PATH; Span never runs it.
+	Install string
 }
 
 // Specs is the registry and the order agent: any follows.
@@ -28,23 +31,27 @@ var Specs = []Spec{
 	{
 		ID: "cursor", Label: "Cursor", Binary: "cursor-agent",
 		Args: []string{"-p", "--trust", "--force"}, ModelFlag: "--model",
-		Marker: ".cursor/rules/gentle-ai.mdc",
+		Install: "curl https://cursor.com/install -fsS | bash",
+		Marker:  ".cursor/rules/gentle-ai.mdc",
 	},
 	{
 		ID: "claude", Label: "Claude", Binary: "claude",
 		Args: []string{"-p", "--dangerously-skip-permissions"}, ModelFlag: "--model",
-		Marker: ".claude/CLAUDE.md", Needle: "Organic Driven Development",
+		Install: "npm install -g @anthropic-ai/claude-code",
+		Marker:  ".claude/CLAUDE.md", Needle: "Organic Driven Development",
 	},
 	{
 		ID: "codex", Label: "Codex", Binary: "codex",
 		Args: []string{"exec", "--approve-for-me"}, ModelFlag: "--model",
-		Marker: ".codex/AGENTS.md", Needle: "Organic Driven Development",
+		Install: "npm install -g @openai/codex",
+		Marker:  ".codex/AGENTS.md", Needle: "Organic Driven Development",
 	},
 	{
 		// Pi runs once with --print and trusts project-local files with --approve.
 		ID: "pi", Label: "Pi", Binary: "pi",
 		Args: []string{"--print", "--approve"}, ModelFlag: "--model",
-		Marker: ".pi/agent/npm/node_modules/gentle-pi",
+		Install: "npm install -g @mariozechner/pi-coding-agent",
+		Marker:  ".pi/agent/npm/node_modules/gentle-pi",
 	},
 }
 
@@ -85,6 +92,8 @@ type State struct {
 	Gentle    bool   `json:"gentle"`
 	Ready     bool   `json:"ready"`
 	Reason    string `json:"reason,omitempty"`
+	// Install is the command that installs the CLI. It is only set while the CLI is missing.
+	Install string `json:"install,omitempty"`
 }
 
 // IsID reports whether value is exactly the id of a CLI Span knows.
@@ -168,10 +177,14 @@ func Report(home string) []State {
 		installed := spec.Installed()
 		gentle := spec.Gentle(home)
 		ready, reason := spec.Ready(home)
-		out = append(out, State{
+		state := State{
 			ID: spec.ID, Label: spec.Label, Binary: spec.Binary,
 			Installed: installed, Gentle: gentle, Ready: ready, Reason: reason,
-		})
+		}
+		if !installed {
+			state.Install = spec.Install
+		}
+		out = append(out, state)
 	}
 	return out
 }

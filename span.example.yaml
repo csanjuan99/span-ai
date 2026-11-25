@@ -12,6 +12,10 @@ run:
 rules: rules.md
 # cursor, claude, codex, pi, or any.
 agent: any
+# Optional CLI per stage that calls a model (frame, build, inspect). A stage without an
+# entry follows agent. A CLI chosen for a run's stage still wins over this.
+agents:
+  build: claude
 # One model per CLI id (cursor, claude, codex, pi), passed as --model. Gentle AI and its
 # configuration are required: a CLI without an entry keeps the model Gentle AI set up.
 # models:
@@ -33,6 +37,8 @@ stages:
   conflict: hold
 jira:
   blockStatus: Block
+  # Move the story to this status when a run finishes. Without it the story stays put.
+  doneStatus: Done
 prove:
   # Scoped to the files that declare this story's criteria. {files} is replaced.
   focused:
