@@ -9,6 +9,7 @@ import { AppearanceFields } from "@/components/settings-edit/AppearanceFields"
 import { ApprovalsFields } from "@/components/settings-edit/ApprovalsFields"
 import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
 import { ChecksFields } from "@/components/settings-edit/ChecksFields"
+import { ConnectionSection } from "@/components/settings-edit/ConnectionSection"
 import { JiraSection } from "@/components/settings-edit/JiraSection"
 import { SettingsNav } from "@/components/settings-edit/SettingsNav"
 import {
@@ -151,6 +152,12 @@ export function ProjectSettings() {
         ) : null}
         <SettingsNav current={current} onPick={setCurrent} />
         <div className="flex min-w-0 flex-col gap-6">
+          <Section
+            name="Connection"
+            hint="The Span server this page talks to, and its access token."
+          >
+            <ConnectionSection />
+          </Section>
           <Section name="Project" hint="Where Span works.">
             {note !== "" ? (
               <p className="text-sm text-pretty text-destructive">{note}</p>

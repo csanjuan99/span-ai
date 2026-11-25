@@ -13,7 +13,21 @@ function keepPagesLocal(request: { headers: { accept?: string } }): string | und
   return request.headers.accept?.includes("text/html") ? "/index.html" : undefined
 }
 
-const routes = ["/quickstart", "/repos", "/jira", "/agent", "/agents", "/config", "/branches", "/metrics", "/onboarding", "/shapes", "/spans"]
+const routes = [
+  "/quickstart",
+  "/repos",
+  "/jira",
+  "/agent",
+  "/agents",
+  "/config",
+  "/branches",
+  "/metrics",
+  "/onboarding",
+  "/shapes",
+  "/spans",
+  "/start",
+  "/health",
+]
 
 // https://vite.dev/config/
 export default defineConfig({

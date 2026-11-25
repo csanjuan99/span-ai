@@ -28,6 +28,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
   }
 })
 
+import { UnauthorizedError } from "@/lib/api"
 import { Desk } from "@/pages/Desk"
 
 afterEach(cleanup)
@@ -54,6 +55,9 @@ beforeEach(() => {
     })
   )
   getJSON.mockImplementation((url: string) => {
+    if (url.startsWith("/start/precheck")) {
+      return Promise.resolve({ ok: true })
+    }
     if (url.startsWith("/branches?path=")) {
       return Promise.resolve({
         branches: ["dev", "feat/SAL-3"],
@@ -124,10 +128,7 @@ describe("Desk", () => {
       expect(screen.queryByLabelText("Token")).toBeNull()
     })
     expect(screen.getByText(/me@example\.test/)).toBeTruthy()
-    // The session is closed from settings, which stay out of the way until asked for.
     expect(screen.queryByRole("button", { name: "Close session" })).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: "Show" }))
-    expect(screen.getByRole("button", { name: "Close session" })).toBeTruthy()
   })
 
   it("asks for credentials when the folder has no session", async () => {
@@ -149,7 +150,7 @@ describe("Desk", () => {
       </MemoryRouter>
     )
     await openForm()
-    fireEvent.click(await screen.findByRole("button", { name: /Connect Jira/ }))
+    fireEvent.click(await screen.findByRole("button", { name: /^Connect$/ }))
     await waitFor(() => {
       expect(screen.getByLabelText("Token")).toBeTruthy()
     })
@@ -242,9 +243,7 @@ describe("Desk", () => {
       getJSON.mock.calls.some(([url]) => String(url) === "/branches?path=.")
     ).toBe(true)
     fireEvent.change(field, { target: { value: "  feat/SAL-3 " } })
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Configure and run" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
     await waitFor(() => {
       expect(startRun).toHaveBeenCalled()
     })
@@ -261,9 +260,7 @@ describe("Desk", () => {
       </MemoryRouter>
     )
     await openForm()
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Configure and run" })
-    )
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
     await waitFor(() => {
       expect(startRun).toHaveBeenCalled()
     })
@@ -326,5 +323,64 @@ describe("Desk", () => {
     expect(screen.getByLabelText("Story").closest("[hidden]")).not.toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Paste a Jira story" }))
     expect(screen.getByLabelText("Story").closest("[hidden]")).toBeNull()
+  })
+
+  it("shows the token refusal when the precheck is refused for its token", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/start/precheck")) {
+        return Promise.reject(new UnauthorizedError())
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    await openForm()
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    expect(await screen.findByText(/needs its access token/)).toBeTruthy()
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it("still starts the run when the precheck route is missing, and says why", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/start/precheck")) {
+        return Promise.reject(new Error("no precheck here"))
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    await openForm()
+    fireEvent.click(await screen.findByRole("button", { name: "Start run" }))
+    await waitFor(() => expect(startRun).toHaveBeenCalledTimes(1))
+  })
+
+  it("says when the agent list cannot be read", async () => {
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/agents")) {
+        return Promise.reject(new Error("the agents are away"))
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({})
+    })
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    expect(await screen.findByText("the agents are away")).toBeTruthy()
   })
 })

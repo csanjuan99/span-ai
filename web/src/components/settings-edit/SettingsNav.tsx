@@ -4,6 +4,7 @@ import {
   BellIcon,
   BotIcon,
   FolderIcon,
+  LinkIcon,
   PauseIcon,
   ShieldCheckIcon,
   SparklesIcon,
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils"
 
 /** The sections of the settings page, in the order the design lists them. */
 export const settingsSections: { name: string; icon: LucideIcon }[] = [
+  { name: "Connection", icon: LinkIcon },
   { name: "Project", icon: FolderIcon },
   { name: "Agents", icon: BotIcon },
   { name: "Checks", icon: ShieldCheckIcon },
