@@ -414,21 +414,22 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, configView(r.URL.Query().Get("path")))
 	})
-	mux.HandleFunc("POST /config/preview", previewConfig)
-	mux.HandleFunc("POST /config", saveConfig)
+	mux.HandleFunc("POST /config/preview", settingsRoute(false))
+	mux.HandleFunc("POST /config", settingsRoute(true))
 	mux.HandleFunc("GET /agent", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, agentView(r.URL.Query().Get("path")))
 	})
 	mux.HandleFunc("POST /agent", func(w http.ResponseWriter, r *http.Request) {
-		project, path, ok := agentPolicyPath(w, r)
-		if !ok {
-			return
-		}
-		if err := policy.SetAgent(path, r.PostForm.Get("agent")); err != nil {
+		if err := r.ParseForm(); err != nil {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, agentView(project))
+		view, err := ChooseAgent(r.PostForm.Get("project"), r.PostForm.Get("agent"))
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
 	})
 	mux.HandleFunc("GET /agent/models", func(w http.ResponseWriter, r *http.Request) {
 		view, err := modelsOf(r.Context(), r.URL.Query().Get("cli"))
@@ -439,24 +440,16 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, view)
 	})
 	mux.HandleFunc("POST /agent/model", func(w http.ResponseWriter, r *http.Request) {
-		project, path, ok := agentPolicyPath(w, r)
-		if !ok {
-			return
-		}
-		cli, model := r.PostForm.Get("cli"), strings.TrimSpace(r.PostForm.Get("model"))
-		// Clearing a model is always allowed: a CLI that stopped being ready must not keep a
-		// saved model the person can no longer remove.
-		if model != "" {
-			if err := canChooseModel(cli); err != nil {
-				writeErr(w, err)
-				return
-			}
-		}
-		if err := policy.SetModel(path, cli, model); err != nil {
+		if err := r.ParseForm(); err != nil {
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, agentView(project))
+		view, err := ChooseModel(r.PostForm.Get("project"), r.PostForm.Get("cli"), r.PostForm.Get("model"))
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, view)
 	})
 	mux.HandleFunc("POST /spans/{id}/instructions", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
@@ -936,25 +929,17 @@ func configureOnly(ctx context.Context, req setup.Request) (string, error) {
 	return b.String(), nil
 }
 
-// agentPolicyPath reads the form of a request that writes span.yaml and returns the project
-// and the policy path. span.yaml is optional, so a write may create it, but only inside a
-// project folder that exists: an empty path would write next to the server.
-func agentPolicyPath(w http.ResponseWriter, r *http.Request) (string, string, bool) {
-	if err := r.ParseForm(); err != nil {
-		writeErr(w, err)
-		return "", "", false
-	}
-	project := r.PostForm.Get("project")
+// policyFile is the span.yaml of a project folder, refusing a folder that is neither there nor
+// a git repository or Span project, so a save never creates span.yaml in a random place.
+func policyFile(project string) (string, error) {
 	if info, err := os.Stat(project); project == "" || err != nil || !info.IsDir() {
-		writeErr(w, fmt.Errorf("project %q is not a folder", project))
-		return "", "", false
+		return "", fmt.Errorf("project %q is not a folder", project)
 	}
 	path := filepath.Join(project, policy.Name)
 	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) && !spanProject(project) {
-		writeErr(w, fmt.Errorf("%s is not a git repository or a Span project, so span.yaml is not created there", project))
-		return "", "", false
+		return "", fmt.Errorf("%s is not a git repository or a Span project, so span.yaml is not created there", project)
 	}
-	return project, path, true
+	return path, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

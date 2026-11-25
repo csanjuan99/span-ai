@@ -107,45 +107,46 @@ func changesOf(form url.Values) (policy.Changes, error) {
 	return changes, nil
 }
 
-// previewConfig says what a save would change in span.yaml and writes nothing.
-func previewConfig(w http.ResponseWriter, r *http.Request) {
-	_, path, ok := agentPolicyPath(w, r)
-	if !ok {
-		return
-	}
-	changes, err := changesOf(r.PostForm)
+// editConfig previews or saves the form fields into the span.yaml of a project. A save
+// validates the file before replacing it, so a refused change leaves it as it was.
+func editConfig(project string, form url.Values, save bool) (configEdit, error) {
+	path, err := policyFile(project)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return configEdit{}, err
 	}
-	preview, err := policy.PreviewEdit(path, changes)
+	changes, err := changesOf(form)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return configEdit{}, err
 	}
-	writeJSON(w, http.StatusOK, configEdit{Lines: preview.Lines, Effects: effectsOf(preview.Lines)})
-}
-
-// saveConfig writes the changes into span.yaml and returns what changed with the settings as
-// they now read. The file is validated before it is replaced, so a refused change leaves it
-// as it was.
-func saveConfig(w http.ResponseWriter, r *http.Request) {
-	project, path, ok := agentPolicyPath(w, r)
-	if !ok {
-		return
-	}
-	changes, err := changesOf(r.PostForm)
-	if err != nil {
-		writeErr(w, err)
-		return
+	if !save {
+		preview, err := policy.PreviewEdit(path, changes)
+		if err != nil {
+			return configEdit{}, err
+		}
+		return configEdit{Lines: preview.Lines, Effects: effectsOf(preview.Lines)}, nil
 	}
 	preview, err := policy.Edit(path, changes)
 	if err != nil {
-		writeErr(w, err)
-		return
+		return configEdit{}, err
 	}
 	view := configView(project)
-	writeJSON(w, http.StatusOK, configEdit{Lines: preview.Lines, Effects: effectsOf(preview.Lines), Config: &view})
+	return configEdit{Lines: preview.Lines, Effects: effectsOf(preview.Lines), Config: &view}, nil
+}
+
+// settingsRoute answers POST /config/preview (save false) and POST /config (save true).
+func settingsRoute(save bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			writeErr(w, err)
+			return
+		}
+		edit, err := editConfig(r.PostForm.Get("project"), r.PostForm, save)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, edit)
+	}
 }
 
 // effectsOf says what a save does to runs, from the lines it writes. It states only what the

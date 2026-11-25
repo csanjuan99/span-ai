@@ -62,6 +62,8 @@ func main() {
 		os.Exit(qaCmd(os.Args[2:]))
 	case "transcript":
 		os.Exit(transcriptCmd(os.Args[2:]))
+	case "settings":
+		os.Exit(settingsCmd(os.Args[2:]))
 	case "runs":
 		os.Exit(runsCmd(os.Args[2:]))
 	case "log":
@@ -684,14 +686,11 @@ func jiraMain(args []string, out, errw io.Writer) int {
 	}
 	switch args[0] {
 	case "status":
-		_, pos, project, asJSON, code := jiraFlags("jira status", args[1:], errw, nil)
+		call, code := jiraVerb("jira status", args[1:], errw, 0, jiraUsage, nil)
 		if code != 0 {
 			return code
 		}
-		if len(pos) != 0 {
-			fmt.Fprintln(errw, jiraUsage)
-			return 2
-		}
+		project, asJSON := call.project, call.asJSON
 		account, err := jira.Load(project)
 		view := jira.View(account, err == nil)
 		if asJSON {
@@ -707,14 +706,11 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		}
 		return 0
 	case "logout":
-		_, pos, project, asJSON, code := jiraFlags("jira logout", args[1:], errw, nil)
+		call, code := jiraVerb("jira logout", args[1:], errw, 0, jiraUsage, nil)
 		if code != 0 {
 			return code
 		}
-		if len(pos) != 0 {
-			fmt.Fprintln(errw, jiraUsage)
-			return 2
-		}
+		project, asJSON := call.project, call.asJSON
 		if _, err := jira.Path(project); err != nil {
 			return jiraFail(out, errw, asJSON, err)
 		}
@@ -734,7 +730,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		return 0
 	case "configure":
 		var site, email, token string
-		_, pos, project, asJSON, code := jiraFlags("jira configure", args[1:], errw, func(fs *flag.FlagSet) {
+		call, code := jiraVerb("jira configure", args[1:], errw, 0, jiraUsage, func(fs *flag.FlagSet) {
 			fs.StringVar(&site, "url", "", "jira site, such as https://example.atlassian.net")
 			fs.StringVar(&email, "email", "", "atlassian account email; empty uses a bearer token")
 			fs.StringVar(&token, "token", "", "api token")
@@ -742,10 +738,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		if code != 0 {
 			return code
 		}
-		if len(pos) != 0 {
-			fmt.Fprintln(errw, jiraUsage)
-			return 2
-		}
+		project, asJSON := call.project, call.asJSON
 		if err := jira.Save(project, jira.Account{BaseURL: site, Email: email, Token: token}); err != nil {
 			return jiraFail(out, errw, asJSON, err)
 		}
@@ -760,14 +753,11 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintf(out, "saved %s\n", project)
 		return 0
 	case "issue":
-		_, pos, project, asJSON, code := jiraFlags("jira issue", args[1:], errw, nil)
+		call, code := jiraVerb("jira issue", args[1:], errw, 1, "usage: ./span jira issue [--project .] [--json] AET-1234", nil)
 		if code != 0 {
 			return code
 		}
-		if len(pos) != 1 {
-			fmt.Fprintln(errw, "usage: ./span jira issue [--project .] [--json] AET-1234")
-			return 2
-		}
+		project, asJSON, pos := call.project, call.asJSON, call.pos
 		account, err := jira.Load(project)
 		if err != nil {
 			return jiraFail(out, errw, asJSON, err)
@@ -783,16 +773,13 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		return 0
 	case "search":
 		var jql string
-		_, pos, project, asJSON, code := jiraFlags("jira search", args[1:], errw, func(fs *flag.FlagSet) {
+		call, code := jiraVerb("jira search", args[1:], errw, 0, jiraUsage, func(fs *flag.FlagSet) {
 			fs.StringVar(&jql, "jql", "", "query; empty lists your recent issues")
 		})
 		if code != 0 {
 			return code
 		}
-		if len(pos) != 0 {
-			fmt.Fprintln(errw, jiraUsage)
-			return 2
-		}
+		project, asJSON := call.project, call.asJSON
 		account, err := jira.Load(project)
 		if err != nil {
 			return jiraFail(out, errw, asJSON, err)
@@ -834,8 +821,17 @@ func jiraFail(out, errw io.Writer, asJSON bool, err error) int {
 	return 1
 }
 
-// jiraFlags reads the shared jira flags. Positionals are returned so a flag may follow the key.
-func jiraFlags(name string, args []string, errw io.Writer, extra func(*flag.FlagSet)) (*flag.FlagSet, []string, string, bool, int) {
+// jiraArgs is what every jira verb reads before it acts: the positionals, the folder that owns
+// the login and whether the answer is JSON.
+type jiraArgs struct {
+	pos     []string
+	project string
+	asJSON  bool
+}
+
+// jiraVerb reads the shared jira flags, which may follow the positionals, and checks that the
+// verb got exactly want of them. A non-zero code means the usage was already printed.
+func jiraVerb(name string, args []string, errw io.Writer, want int, usage string, extra func(*flag.FlagSet)) (jiraArgs, int) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(errw)
 	project := fs.String("project", ".", "folder that owns this Jira login")
@@ -845,9 +841,13 @@ func jiraFlags(name string, args []string, errw io.Writer, extra func(*flag.Flag
 	}
 	pos, ok := parseVerb(fs, args)
 	if !ok {
-		return nil, nil, "", false, 2
+		return jiraArgs{}, 2
 	}
-	return fs, pos, *project, *asJSON, 0
+	if len(pos) != want {
+		fmt.Fprintln(errw, usage)
+		return jiraArgs{}, 2
+	}
+	return jiraArgs{pos: pos, project: *project, asJSON: *asJSON}, 0
 }
 
 // options builds a run's engine options. explicit says the person named policyPath
@@ -962,6 +962,7 @@ const usageText = `./span repos [--path .]
 ./span implementation <run> --files|--diff <path>|--viewed <path>|--commits|--commit <sha>|--reasoning|--check|--audit [--json]   (./span implementation for each flag)
 ./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
 ./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|rewind|note|stage-agent|approve|answer|delete <run> ...   (./span runs for each verb's flags)
+./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
 ./span resume <id> [--workspace .]
