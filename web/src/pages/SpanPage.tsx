@@ -27,6 +27,7 @@ import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
 import { RawOutput } from "@/components/raw-output/RawOutput"
+import { AgentBlocked } from "@/components/problem/AgentBlocked"
 import { ConnectionBanner } from "@/components/problem/ConnectionBanner"
 import { ProblemCard } from "@/components/problem/ProblemCard"
 import { PageProblem } from "@/components/problem/PageProblem"
@@ -110,7 +111,7 @@ export function SpanPage() {
   const lastSeen = clockOf(state.frames.at(-1)?.at ?? state.agentAt)
   const questions = waitingQuestions(cursor ?? null)
   const waiting = questions.length > 0
-  const agentBlock = agentBlockLine(cursor?.agentBlock)
+  const agentBlock = agentBlockLine(cursor?.agentBlock, { stage: cursor?.stage ?? "", sealed })
   const failure = activeFailure({
     statements: state.span?.statements ?? [],
     cursor: cursor ?? null,
@@ -350,11 +351,7 @@ export function SpanPage() {
             {needs !== null ? (
               <NeedsYou needs={needs} where={where}>
                 {agentBlock !== null ? (
-                  <section className="flex flex-col gap-1" aria-label="Agent blocked">
-                    <h2 className="text-base font-medium">{agentBlock.title}</h2>
-                    <p className="text-pretty text-sm">{agentBlock.detail}</p>
-                    <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
-                  </section>
+                  <AgentBlocked line={agentBlock} />
                 ) : null}
                 {approval !== null ? (
                   <ActionWithHint label={approval.label} hint={approval.hint} onClick={() => void approve()} />

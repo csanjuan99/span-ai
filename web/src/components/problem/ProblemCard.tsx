@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
-import { CopyChip } from "@/components/ledger/CopyChip"
+import { KeptNext } from "@/components/problem/KeptNext"
+import { CommandLine } from "@/components/problem/CommandLine"
 import { cn } from "@/lib/utils"
 
 /** The colour of the label: something is wrong (fail), waiting on a person (hold) or just missing (info). */
@@ -52,36 +53,8 @@ export function ProblemCard({
       <p className="text-sm text-pretty">
         <b>Cause.</b> {cause}
       </p>
-      {command !== undefined ? (
-        <div className="flex items-center gap-3 rounded-lg bg-surface-code px-3 py-2 font-mono text-sm">
-          <span className="text-muted-foreground" aria-hidden="true">
-            $
-          </span>
-          <span className="min-w-0 flex-1 truncate">{command}</span>
-          <CopyChip label="command" value={command}>
-            Copy
-          </CopyChip>
-        </div>
-      ) : null}
-      <dl className="grid gap-3 border-t border-border pt-3 text-sm sm:grid-cols-2">
-        <div className="flex flex-col gap-1">
-          <dt className="text-xs tracking-wide text-muted-foreground uppercase">
-            Kept
-          </dt>
-          <dd className="text-pretty">
-            <span aria-hidden="true" className="mr-1.5 font-mono text-pass">
-              +
-            </span>
-            {kept}
-          </dd>
-        </div>
-        <div className="flex flex-col gap-1">
-          <dt className="text-xs tracking-wide text-muted-foreground uppercase">
-            Next
-          </dt>
-          <dd className="text-pretty">{next}</dd>
-        </div>
-      </dl>
+      {command !== undefined ? <CommandLine command={command} /> : null}
+      <KeptNext kept={kept} next={next} />
       {children !== undefined ? (
         <div className="flex flex-wrap gap-2">{children}</div>
       ) : null}
