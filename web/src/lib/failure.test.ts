@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { activeFailure, approvalOf, attemptLine, holdAction, holderOf, isCheckoutBusy } from "@/lib/failure"
+import { activeFailure, approvalLede, approvalOf, attemptLine, checksBefore, holdAction, holderOf, isCheckoutBusy } from "@/lib/failure"
 import type { Cursor, Statement } from "@/lib/types"
 
 function cursor(over: Partial<Cursor> = {}): Cursor {
@@ -186,5 +186,34 @@ describe("holderOf", () => {
     expect(holderOf("another run is active in this checkout (pid 4321 shape)")).toBe("")
     expect(holderOf("another run is active in this checkout (another process)")).toBe("")
     expect(holderOf("prove exited 1")).toBe("")
+  })
+})
+
+describe("an approval's explanation", () => {
+  it("names the sealed stages and the checks that passed before it", () => {
+    expect(approvalLede("open", ["prove", "qa", "inspect"])).toBe(
+      "prove, qa and inspect passed on this commit. The stage is held by its mode, so it waits for a person. A retry would hold again."
+    )
+    expect(
+      checksBefore(
+        [
+          {
+            stage: "prove",
+            iteration: 1,
+            verdict: "advance",
+            reason: "",
+            commands: [{ command: "go test ./...", exitCode: 0, output: "" }],
+          },
+          {
+            stage: "open",
+            iteration: 1,
+            verdict: "hold",
+            reason: "open is hold",
+            commands: [{ command: "gh pr create", exitCode: 0 }],
+          },
+        ],
+        "open"
+      ).map((command) => command.command)
+    ).toEqual(["go test ./..."])
   })
 })

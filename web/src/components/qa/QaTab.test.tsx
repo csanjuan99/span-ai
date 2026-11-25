@@ -58,6 +58,10 @@ describe("QaTab", () => {
     })
     render(<QaTab id="r1" />)
     expect(await screen.findByText("The fast gate failed")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Overview" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Cases" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Log" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Transcript" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Open log" })).toBeTruthy()
     expect(
       (
@@ -66,6 +70,7 @@ describe("QaTab", () => {
         }) as HTMLButtonElement
       ).disabled
     ).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: "Cases" }))
     fireEvent.click(await screen.findByRole("button", { name: /TestRetry/ }))
     expect(screen.getByText("want 4s")).toBeTruthy()
   })

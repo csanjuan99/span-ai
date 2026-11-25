@@ -124,6 +124,25 @@ describe("a stage held by its mode", () => {
     expect(resumeRun).not.toHaveBeenCalled()
   })
 
+  it("lists the checks that passed before open", () => {
+    state = held({ stage: "open", reason: "open is hold" }, [
+      {
+        ...advance("prove"),
+        commands: [{ command: "go test ./...", exitCode: 0, output: "" }],
+      },
+    ])
+    page()
+    expect(
+      screen.getByText(
+        /prove passed on this commit. The stage is held by its mode/
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "Checks that passed on this commit" })
+    ).toBeTruthy()
+    expect(screen.getByText("$ go test ./...")).toBeTruthy()
+  })
+
   it("keeps the ordinary retry for a hold caused by a failure", () => {
     state = held({ stage: "merge", reason: "merge outcome unknown: network" })
     page()
@@ -432,6 +451,12 @@ describe("a checkout another run holds", () => {
         .getByRole("link", { name: "Open the other run" })
         .getAttribute("href")
     ).toBe("/spans/span-7f3a")
+    expect(
+      screen.getByText("Nothing yet. Build starts from the last sealed stage.")
+    ).toBeTruthy()
+    expect(
+      screen.getByText("Build starts as soon as the checkout is free.")
+    ).toBeTruthy()
   })
 
   it("offers no link when the holder is not a run", () => {
@@ -691,6 +716,7 @@ describe("the ways out of a failed check", () => {
   it("says what a note does and offers the restart at build as a danger action", () => {
     state = failed()
     page()
+    expect(screen.getByText("prove · exit 1")).toBeTruthy()
     expect(
       screen.getByText(/Save an instruction for prove, then resume/)
     ).toBeTruthy()
@@ -701,6 +727,16 @@ describe("the ways out of a failed check", () => {
     expect(
       screen.getByRole("button", { name: "Start again at build" })
     ).toBeTruthy()
+  })
+
+  it("names the repair attempt when the statement records a cap", () => {
+    state = failed()
+    const prove = state.span?.statements.find((item) => item.stage === "prove")
+    if (prove !== undefined) {
+      prove.cap = 3
+    }
+    page()
+    expect(screen.getByText("prove · attempt 1 of 3 · exit 1")).toBeTruthy()
   })
 
   it("keeps the restart row collapsed until it is asked for", () => {
@@ -769,6 +805,44 @@ describe("the run's actions in the command palette", () => {
       ?.commands.find((command) => command.id === "resume")
       ?.run()
     await waitFor(() => expect(resumeRun).toHaveBeenCalledOnce())
+  })
+
+  it("offers resume and relaunch when the agent is blocked", () => {
+    state = held({
+      stage: "build",
+      reason: "agent blocked",
+      agentBlock: {
+        kind: "quota",
+        agent: "claude-code",
+        detail: "usage limit reached",
+      },
+    })
+    state = {
+      ...state,
+      agent: {
+        id: "span-1",
+        running: false,
+        relaunch: true,
+        name: "",
+        pid: 0,
+        stage: "build",
+        elapsed: "",
+        summary: "paused",
+      },
+    }
+    page()
+    expect(screen.getByRole("heading", { name: "claude-code is out of quota" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Relaunch" })).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Nothing in the code changes. Build starts again with the same instructions."
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByText("Build runs with the agent you choose in Run controls.")
+    ).toBeTruthy()
+    expect(screen.getAllByRole("button", { name: /Restart from a stage/ }).length).toBeGreaterThan(0)
   })
 
   it("offers only the reading actions once the run is done", () => {

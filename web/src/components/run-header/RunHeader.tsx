@@ -47,7 +47,7 @@ export function RunHeader({
           {conflict ? "On hold · conflict" : badge.label}
         </span>
       </div>
-      <h1 className="text-2xl leading-8 font-semibold tracking-tight text-balance">
+      <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em] text-balance">
         {title}
       </h1>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] leading-5 text-muted-foreground">

@@ -663,7 +663,9 @@ func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, 
 		writeConflict(w, "this run is waiting for an answer")
 		return
 	}
-	if snap.Cursor.Hold {
+	// An agent that cannot run is a hold, and the board's Relaunch starts that stage again.
+	// Every other hold stays paused until Resume, so a waiting answer is not skipped.
+	if snap.Cursor.Hold && snap.Cursor.AgentBlock == nil {
 		writeConflict(w, "this run is paused")
 		return
 	}
@@ -754,6 +756,10 @@ func review(hub *live.Hub, id string, cur engine.Cursor) agentBody {
 		body.Summary = "finished"
 	case cur.Hold || engine.Waiting(cur):
 		body.Summary = "paused"
+		// The agent-blocked board offers Relaunch beside Resume. Other holds do not.
+		if cur.AgentBlock != nil {
+			body.Relaunch = true
+		}
 	default:
 		body.Summary = "not running"
 		body.Relaunch = true

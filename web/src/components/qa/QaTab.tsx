@@ -13,13 +13,20 @@ import { useRunResource } from "@/hooks/use-run-resource"
 import { acceptQa, readQa } from "@/lib/qa"
 import { reasonText } from "@/lib/guards"
 
-type Pane = "proof" | "transcript"
+type Pane = "overview" | "cases" | "log" | "transcript"
 
-/** The QA tab: the proof, its cases, a gate's whole log and what the agent printed. */
+const panes: { value: Pane; label: string }[] = [
+  { value: "overview", label: "Overview" },
+  { value: "cases", label: "Cases" },
+  { value: "log", label: "Log" },
+  { value: "transcript", label: "Transcript" },
+]
+
+/** The QA tab: overview, cases, a gate's whole log, and what the agent printed. */
 export function QaTab({ id }: { id: string }) {
   const proof = useRunResource(id, readQa)
   const [failure, setFailure] = useState("")
-  const [pane, setPane] = useState<Pane>("proof")
+  const [pane, setPane] = useState<Pane>("overview")
   const [log, setLog] = useState("")
   const [reason, setReason] = useState("")
   const [version, setVersion] = useState(0)
@@ -40,20 +47,21 @@ export function QaTab({ id }: { id: string }) {
     }
   }
 
-  if (log !== "") {
-    return <LogViewer id={id} gate={log} onClose={() => setLog("")} />
-  }
+  const logged =
+    log !== ""
+      ? log
+      : (view?.gates.find((gate) => gate.ran && gate.lines > 0)?.name ?? "")
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex gap-2" role="group" aria-label="QA view">
-        {(["proof", "transcript"] as const).map((item) => (
+      <div className="flex flex-wrap gap-2" role="group" aria-label="QA view">
+        {panes.map((item) => (
           <PillToggle
-            key={item}
-            on={pane === item}
-            onClick={() => setPane(item)}
-            className="capitalize"
+            key={item.value}
+            on={pane === item.value}
+            onClick={() => setPane(item.value)}
           >
-            {item}
+            {item.label}
           </PillToggle>
         ))}
       </div>
@@ -63,9 +71,32 @@ export function QaTab({ id }: { id: string }) {
         </p>
       ) : null}
       {pane === "transcript" ? <Transcript id={id} /> : null}
-      {pane === "proof" && view !== null ? (
+      {pane === "cases" ? <Cases id={id} version={version} /> : null}
+      {pane === "log" ? (
+        logged === "" ? (
+          <p className="text-sm text-pretty text-muted-foreground">
+            This run has no log yet.
+          </p>
+        ) : (
+          <LogViewer
+            id={id}
+            gate={logged}
+            onClose={() => {
+              setLog("")
+              setPane("overview")
+            }}
+          />
+        )
+      ) : null}
+      {pane === "overview" && view !== null ? (
         <>
-          <Overview view={view} onOpenLog={setLog} />
+          <Overview
+            view={view}
+            onOpenLog={(gate) => {
+              setLog(gate)
+              setPane("log")
+            }}
+          />
           {view.state === "ok" &&
           view.verdict === "fail" &&
           view.accepted === null ? (
@@ -90,9 +121,6 @@ export function QaTab({ id }: { id: string }) {
                 Record the risk
               </Button>
             </div>
-          ) : null}
-          {view.state === "ok" || view.cases > 0 ? (
-            <Cases id={id} version={version} />
           ) : null}
         </>
       ) : null}

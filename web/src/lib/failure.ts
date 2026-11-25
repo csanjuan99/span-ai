@@ -185,3 +185,46 @@ export function attemptLine(failure: Failure): string {
   }
   return `attempt ${failure.iteration} of ${failure.cap}`
 }
+
+/** Checks that already advanced, before the stage a person is about to approve. */
+export function checksBefore(
+  statements: Statement[],
+  stage: string
+): Statement["commands"] {
+  const at = stages.indexOf(stage as (typeof stages)[number])
+  const seen = new Set<string>()
+  const out: Statement["commands"] = []
+  for (const item of statements) {
+    if (item.verdict !== "advance") {
+      continue
+    }
+    const index = stages.indexOf(item.stage as (typeof stages)[number])
+    if (at >= 0 && (index < 0 || index >= at)) {
+      continue
+    }
+    for (const command of item.commands ?? []) {
+      if (seen.has(command.command)) {
+        continue
+      }
+      seen.add(command.command)
+      out.push(command)
+    }
+  }
+  return out
+}
+
+/** Why an approval is waiting, naming the stages that already sealed. */
+export function approvalLede(stage: string, sealedNames: string[]): string {
+  const at = stages.indexOf(stage as (typeof stages)[number])
+  const prior = stages.filter(
+    (name) => sealedNames.includes(name) && stages.indexOf(name) < at
+  )
+  const list =
+    prior.length === 0
+      ? ""
+      : prior.length === 1
+        ? (prior[0] ?? "")
+        : `${prior.slice(0, -1).join(", ")} and ${prior[prior.length - 1] ?? ""}`
+  const lead = list === "" ? "" : `${list} passed on this commit. `
+  return `${lead}The stage is held by its mode, so it waits for a person. A retry would hold again.`
+}

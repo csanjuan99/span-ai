@@ -8,6 +8,9 @@ import { dayLabel } from "@/lib/clock"
 import { durationText, type FileLetter, type Summary } from "@/lib/summary"
 import { cn } from "@/lib/utils"
 
+const proofCell =
+  "border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
+
 const letterTone = {
   A: "bg-pass-soft text-pass",
   M: "bg-accent text-primary",
@@ -72,7 +75,7 @@ export function SummaryHead({
           {done ? "Done" : "In progress"}
         </Pill>
       </div>
-      <h1 className="text-2xl font-semibold tracking-tight text-balance">
+      <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em] text-balance">
         {summary.title}
       </h1>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
@@ -133,7 +136,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
           className="grid overflow-hidden rounded-[14px] border border-border bg-card shadow-sm sm:grid-cols-3"
         >
           <FigureCell
-            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
+            className={proofCell}
             label="Diff"
             value={
               <>
@@ -146,7 +149,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
             caption={letterCounts(summary.files)}
           />
           <FigureCell
-            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
+            className={proofCell}
             label="Tests"
             value={
               summary.tests === null
@@ -160,7 +163,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
             }
           />
           <FigureCell
-            className="border-t border-border p-4 first:border-t-0 sm:border-t-0 sm:border-l sm:px-5 sm:first:border-l-0"
+            className={proofCell}
             label="Risks"
             value={`${summary.risks.length} noted`}
             caption={

@@ -306,6 +306,37 @@ func TestRelaunchRefusesALiveStoppedOrWaitingRun(t *testing.T) {
 	}
 }
 
+func TestRelaunchResumesAnAgentThatIsBlocked(t *testing.T) {
+	root := t.TempDir()
+	writeCursor(t, root, engine.Cursor{
+		ID: "span-1", Stage: "build", Hold: true,
+		Reason: "agent quota exhausted (claude-code): usage limit reached",
+		AgentBlock: &engine.AgentBlock{
+			Kind: "quota", Agent: "claude-code", Detail: "usage limit reached",
+		},
+	})
+	var got Signal
+	handler := New(root, "", nil, func(_ context.Context, id string, signal Signal) error {
+		if id != "span-1" || !signal.Resume {
+			t.Fatalf("id %s signal %+v", id, signal)
+		}
+		got = signal
+		return nil
+	}, live.New(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/spans/span-1/relaunch", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || !got.Resume {
+		t.Fatalf("status %d signal %+v body %s", rec.Code, got, rec.Body.String())
+	}
+	status := httptest.NewRequest(http.MethodGet, "/spans/span-1/agent", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, status)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"relaunch":true`) {
+		t.Fatalf("status %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestApproveReleasesAHeldStageAndResumesTheRun(t *testing.T) {
 	root := t.TempDir()
 	writeCursor(t, root, engine.Cursor{ID: "span-1", Stage: "merge", Hold: true, GitSHA: "abc123", Reason: "merge is hold"})

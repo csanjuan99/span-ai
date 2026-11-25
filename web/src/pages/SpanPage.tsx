@@ -19,8 +19,10 @@ import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
 import {
   activeFailure,
+  approvalLede,
   approvalOf,
   attemptLine,
+  checksBefore,
   holdAction,
   holderOf,
   isCheckoutBusy,
@@ -164,7 +166,11 @@ export function SpanPage() {
   // The failing statement stays on disk through a busy checkout, an approval and a conflict,
   // but none of those wait on the fix, so the failed check only shows when nothing else does.
   const showFailure =
-    failure !== null && !busy && approval === null && conflictKind === null
+    failure !== null &&
+    agentBlock === null &&
+    !busy &&
+    approval === null &&
+    conflictKind === null
   const needs = needsYou({
     agentBlocked: agentBlock !== null,
     questions: waiting,
@@ -211,9 +217,16 @@ export function SpanPage() {
   const attempt = failure === null ? "" : attemptLine(failure)
   const stageNumber =
     Math.max(stages.indexOf(current as (typeof stages)[number]), 0) + 1
+  const failedWhere = [
+    current,
+    attempt,
+    failure?.command ? `exit ${failure.command.exitCode}` : "",
+  ]
+    .filter((part) => part !== "")
+    .join(" · ")
   const where =
-    needs?.kind === "failed" && attempt !== ""
-      ? `${current} · ${attempt}${failure?.command ? ` · exit ${failure.command.exitCode}` : ""}`
+    needs?.kind === "failed" && failedWhere !== current
+      ? failedWhere
       : needs?.kind === "questions"
         ? `${current} · ${questions.length} open`
         : needs?.kind === "busy"
@@ -234,12 +247,20 @@ export function SpanPage() {
           : needs.kind === "conflict" && cursor?.conflict !== undefined
             ? `Conflict · ${cursor.conflict.groups.length} ${cursor.conflict.groups.length === 1 ? "group" : "groups"}`
             : needs.label
+  const earlierChecks =
+    needs?.kind === "approval" && approval !== null
+      ? checksBefore(state.span?.statements ?? [], approval.stage)
+      : []
+  const passedChecks = earlierChecks.filter((command) => command.exitCode === 0)
   // Where nothing else explains the hold, say it in a heading and a line.
   const lede =
     needs?.kind === "approval" && approval !== null
       ? {
-          title: `Approve ${approval.stage} to ${approval.stage === "merge" ? "merge this change" : "go on"}`,
-          body: approval.hint,
+          title:
+            approval.stage === "open"
+              ? "Approve open to publish this change"
+              : `Approve ${approval.stage} to ${approval.stage === "merge" ? "merge this change" : "go on"}`,
+          body: approvalLede(approval.stage, sealed),
         }
       : needs?.kind === "busy"
         ? {
@@ -342,6 +363,11 @@ export function SpanPage() {
       say: "The run is continuing.",
       failed: "the run did not continue",
     })
+
+  const openNote = () => {
+    setStage(selected)
+    setShowNote(true)
+  }
 
   async function approve() {
     if (approval === null) {
@@ -474,8 +500,7 @@ export function SpanPage() {
         : !waiting &&
             cursor?.decision === undefined &&
             canAct &&
-            action !== null &&
-            needs.kind !== "agent-blocked"
+            action !== null
           ? { label: action.label, hint: action.hint, run: () => void resume() }
           : null
   const asideTitle =
@@ -484,11 +509,50 @@ export function SpanPage() {
       : needs?.kind === "approval"
         ? "If you approve"
         : needs?.kind === "busy"
-          ? "When the other run ends"
+          ? "If you resume when it is free"
           : "If you resume"
   const whereLine = [state.span?.repo, cursor?.branch]
     .filter(Boolean)
     .join(" · ")
+  const stageWord =
+    current === ""
+      ? "This stage"
+      : current.charAt(0).toUpperCase() + current.slice(1)
+  const changes =
+    needs?.kind === "agent-blocked"
+      ? `Nothing in the code changes. ${stageWord} starts again with the same instructions.`
+      : needs?.kind === "busy"
+        ? `Nothing yet. ${stageWord} starts from the last sealed stage.`
+        : needs?.kind === "approval" && cursor?.stage === "open"
+          ? `Opens a change from ${cursor.branch} into ${cursor.base}. Nothing is merged yet.`
+          : needs?.kind === "approval" && cursor?.stage === "merge"
+            ? `Merges ${cursor.branch} into ${cursor.base}.`
+            : (primary?.hint ?? "")
+  const nextRows =
+    needs?.kind === "failed" && next !== undefined
+      ? [
+          {
+            label: "Next",
+            body: `${stageWord} runs again. If it passes, the run moves to ${next}.`,
+          },
+        ]
+      : needs?.kind === "busy"
+        ? [
+            {
+              label: "Next",
+              body: `${stageWord} starts as soon as the checkout is free.`,
+            },
+          ]
+        : needs?.kind === "agent-blocked"
+          ? [
+              {
+                label: "Next",
+                body: `${stageWord} runs with the agent you choose in Run controls.`,
+              },
+            ]
+          : needs?.kind === "approval" && next !== undefined
+            ? [{ label: "Next", body: `The run moves to ${next}.` }]
+            : []
   // A decision or a conflict draws its own right column, so the band gets none beside it.
   const ownsAside = cursor?.decision !== undefined || conflict !== undefined
   const aside =
@@ -498,15 +562,11 @@ export function SpanPage() {
           title={asideTitle}
           icon={RotateCcw}
           rows={[
-            { label: "Does", body: primary.hint },
+            { label: "Changes", body: changes },
             {
               label: "Where",
               body: (
-                <span className="font-mono text-xs break-all">
-                  {[state.span.repo, cursor?.branch]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
+                <span className="font-mono text-xs break-all">{whereLine}</span>
               ),
             },
             ...(kept !== null
@@ -517,26 +577,24 @@ export function SpanPage() {
                   },
                 ]
               : []),
-            ...(needs?.kind === "failed" && next !== undefined
-              ? [
-                  {
-                    label: "Next",
-                    body: `${current} runs again. If it passes, the run moves to ${next}.`,
-                  },
-                ]
-              : []),
+            ...nextRows,
           ]}
         />
         <Button type="button" className="h-10 w-full" onClick={primary.run}>
           {primary.label}
         </Button>
         {holder !== "" ? (
-          <Link
-            className="self-start text-sm text-primary underline-offset-4 hover:underline"
-            to={`/spans/${holder}`}
-          >
-            Open the other run
-          </Link>
+          <div className="flex flex-col gap-1">
+            <Link
+              className="self-start text-sm text-primary underline-offset-4 hover:underline"
+              to={`/spans/${holder}`}
+            >
+              Open the other run
+            </Link>
+            <p className="text-xs text-pretty text-muted-foreground">
+              You can let it finish or stop it from there.
+            </p>
+          </div>
         ) : null}
         {state.agent?.relaunch ? (
           <Button
@@ -548,10 +606,7 @@ export function SpanPage() {
             Relaunch
           </Button>
         ) : null}
-        {!cursor?.stop &&
-        !waiting &&
-        cursor?.decision === undefined &&
-        approval === null ? (
+        {!cursor?.stop && !waiting && cursor?.decision === undefined ? (
           <div className="flex flex-col gap-3 pt-1">
             <span className="text-xs font-medium tracking-wide text-muted-foreground">
               Other ways out
@@ -561,10 +616,7 @@ export function SpanPage() {
                 type="button"
                 variant="outline"
                 className="h-10 w-full"
-                onClick={() => {
-                  setStage(selected)
-                  setShowNote(true)
-                }}
+                onClick={openNote}
               >
                 <MessageSquare aria-hidden="true" />
                 Leave a note for {selected}
@@ -574,7 +626,10 @@ export function SpanPage() {
                 when this stage starts again.
               </p>
             </div>
-            {needs?.kind === "failed" && restartBlocked === "" ? (
+            {(needs?.kind === "failed" ||
+              needs?.kind === "agent-blocked" ||
+              needs?.kind === "approval") &&
+            restartBlocked === "" ? (
               <div className="flex flex-col gap-1.5">
                 <Button
                   type="button"
@@ -583,7 +638,9 @@ export function SpanPage() {
                   onClick={() => setRestartAt(restartStage(current))}
                 >
                   <Undo2 aria-hidden="true" />
-                  Restart from {restartStage(current)}…
+                  {needs?.kind === "failed"
+                    ? `Restart from ${restartStage(current)}…`
+                    : "Restart from a stage…"}
                 </Button>
                 <p className="text-xs text-pretty text-muted-foreground">
                   The attempt so far stays on disk as its own iteration. The
@@ -606,10 +663,7 @@ export function SpanPage() {
           ...(canAct && !waiting ? { resume: () => void resume() } : {}),
           ...(!waiting && !cursor?.stop && cursor?.decision === undefined
             ? {
-                note: () => {
-                  setStage(selected)
-                  setShowNote(true)
-                },
+                note: openNote,
               }
             : {}),
           ...(!paused && !idle && running === null
@@ -707,6 +761,33 @@ export function SpanPage() {
                   ) : null}
                   {lede !== null ? (
                     <Lede title={lede.title} body={lede.body} />
+                  ) : null}
+                  {passedChecks.length > 0 ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-baseline gap-2">
+                        <h3 className="text-sm leading-5 font-semibold">
+                          Checks that passed on this commit
+                        </h3>
+                        <span className="text-xs text-muted-foreground">
+                          {passedChecks.length} of {earlierChecks.length}
+                        </span>
+                      </div>
+                      <ul className="flex flex-col gap-1">
+                        {passedChecks.map((command) => (
+                          <li
+                            key={command.command}
+                            className="flex items-baseline justify-between gap-3 font-mono text-xs"
+                          >
+                            <span className="min-w-0 truncate">
+                              $ {command.command}
+                            </span>
+                            <span className="shrink-0 text-muted-foreground">
+                              exit {command.exitCode}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : null}
                   {showFailure ? (
                     <FailureCard id={id} failure={failure} />
@@ -890,10 +971,7 @@ export function SpanPage() {
                         : undefined
                     }
                     hold={Boolean(cursor?.hold)}
-                    onOpen={() => {
-                      setStage(selected)
-                      setShowNote(true)
-                    }}
+                    onOpen={openNote}
                   />
                 ) : null}
                 <Rewind

@@ -3,6 +3,8 @@
 import { VerdictPill } from "@/components/qa/Pill"
 import { exitLabel, seconds, type QaView } from "@/lib/qa"
 
+const gateColumns = "grid-cols-[88px_88px_56px_64px_minmax(0,1fr)]"
+
 /** What the proof says, in the words the data allows: no pass is claimed that no gate showed. */
 export function Overview({
   view,
@@ -43,6 +45,13 @@ export function Overview({
         </p>
       ) : null}
       {view.gates.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-lg leading-[26px] font-semibold">Gates</h2>
+            <span className="text-xs leading-4 text-muted-foreground">
+              In the order they ran
+            </span>
+          </div>
         <div
           className="overflow-hidden rounded-[14px] border border-border bg-card"
           role="table"
@@ -50,7 +59,7 @@ export function Overview({
         >
           <div
             role="row"
-            className="grid grid-cols-[88px_88px_56px_64px_minmax(0,1fr)] gap-3 bg-muted px-4 py-2 text-xs text-muted-foreground max-sm:hidden"
+            className={`grid ${gateColumns} gap-3 bg-muted px-4 py-2 text-xs text-muted-foreground max-sm:hidden`}
           >
             <span role="columnheader">Gate</span>
             <span role="columnheader">Verdict</span>
@@ -62,7 +71,7 @@ export function Overview({
             <div
               key={gate.name}
               role="row"
-              className="grid grid-cols-[88px_88px_56px_64px_minmax(0,1fr)] items-center gap-3 border-t border-border px-4 py-2.5 text-sm max-sm:grid-cols-2"
+              className={`grid ${gateColumns} items-center gap-3 border-t border-border px-4 py-2.5 text-sm max-sm:grid-cols-2`}
             >
               <span role="cell" className="font-medium">
                 {gate.name}
@@ -95,6 +104,7 @@ export function Overview({
               </span>
             </div>
           ))}
+        </div>
         </div>
       ) : null}
       <p className="text-xs text-muted-foreground">
