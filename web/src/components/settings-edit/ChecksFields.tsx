@@ -19,6 +19,11 @@ export function ChecksFields({ props }: { props: EditProps }) {
         fallback={String(configDefaults.repair)}
         placeholder="1 to 8"
       />
+      <p className="pt-2 text-xs text-muted-foreground">
+        Test counts are read from what each check prints: vitest, jest, pytest,
+        go test -v and go test -json. A check that prints no count shows its
+        exit code only.
+      </p>
     </>
   )
 }

@@ -4,7 +4,7 @@ import { SettingsIcon } from "lucide-react"
 
 import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
 import { Button } from "@/components/ui/button"
-import type { ConfigLine } from "@/lib/types"
+import type { ConfigEffect, ConfigLine } from "@/lib/types"
 
 function DiffRow({
   number,
@@ -41,6 +41,7 @@ export function WhatChanges({
   folder,
   count,
   lines,
+  effects,
   error,
   saving,
   onSave,
@@ -49,6 +50,7 @@ export function WhatChanges({
   folder: string
   count: number
   lines: ConfigLine[]
+  effects: ConfigEffect[]
   error: string
   saving: boolean
   onSave: () => void
@@ -100,20 +102,24 @@ export function WhatChanges({
           <SettingsIcon className="size-4" aria-hidden="true" />
           If you save
         </div>
-        <div className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2">
-          <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-            Writes to
+        {[
+          ...effects,
+          { label: "Writes to", text: `${folder}/span.yaml` },
+          {
+            label: "Not touched",
+            text: "Your comments, the order of keys, sealed stages and past proof.",
+          },
+        ].map((row) => (
+          <div
+            key={`${row.label}-${row.text}`}
+            className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2"
+          >
+            <div className="pt-0.5 text-xs font-medium text-muted-foreground">
+              {row.label}
+            </div>
+            <div className="text-[13px] break-words">{row.text}</div>
           </div>
-          <div className="font-mono text-xs break-all">{folder}/span.yaml</div>
-        </div>
-        <div className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2">
-          <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-            Not touched
-          </div>
-          <div className="text-[13px]">
-            Your comments, the order of keys, and every other setting.
-          </div>
-        </div>
+        ))}
       </div>
       <Button
         className="h-10 w-full"

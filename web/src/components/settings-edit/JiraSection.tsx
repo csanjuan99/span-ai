@@ -2,10 +2,23 @@
 
 import { useEffect, useState } from "react"
 
-import { jiraSessionOf, noSession, readJiraSession } from "@/lib/jira-session"
+import {
+  jiraSessionOf,
+  noSession,
+  readJiraSession,
+  type JiraSession,
+} from "@/lib/jira-session"
+
+import { TextField, type EditProps } from "./fields"
 
 /** What Span knows about the Jira account saved for the folder. Setting it up lives on the desk. */
-export function JiraSection({ folder }: { folder: string }) {
+export function JiraSection({
+  folder,
+  props,
+}: {
+  folder: string
+  props: EditProps
+}) {
   const [session, setSession] = useState(noSession)
   const [failed, setFailed] = useState(false)
 
@@ -29,6 +42,28 @@ export function JiraSection({ folder }: { folder: string }) {
     }
   }, [folder])
 
+  return (
+    <>
+      <JiraAccount session={session} failed={failed} />
+      <TextField
+        props={props}
+        name="doneStatus"
+        label="Move story on done"
+        fallback="leave the story where it is"
+        placeholder="Done"
+      />
+    </>
+  )
+}
+
+/** Which Jira account is saved for the folder, or why it is not known. */
+function JiraAccount({
+  session,
+  failed,
+}: {
+  session: JiraSession
+  failed: boolean
+}) {
   if (failed) {
     return (
       <p className="text-sm text-pretty text-hold">
@@ -45,7 +80,7 @@ export function JiraSection({ folder }: { folder: string }) {
     )
   }
   return (
-    <div className="grid grid-cols-[16px_minmax(0,1fr)] gap-2 text-sm">
+    <div className="grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-2 text-sm">
       <span aria-hidden="true" className="font-mono font-semibold text-pass">
         +
       </span>

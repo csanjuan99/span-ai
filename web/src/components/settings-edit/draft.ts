@@ -10,6 +10,10 @@ export const textKeys = [
   "plan",
   "conflict",
   "qa",
+  "doneStatus",
+  "agents.frame",
+  "agents.build",
+  "agents.inspect",
 ] as const
 
 /** The settings whose value is a list of checks, typed one per line. */
@@ -32,6 +36,10 @@ export function savedDraft(config: ProjectConfig): Record<DraftKey, string> {
     plan: config.stages.plan,
     conflict: config.stages.conflict,
     qa: config.qa,
+    doneStatus: config.doneStatus,
+    "agents.frame": config.agents.frame,
+    "agents.build": config.agents.build,
+    "agents.inspect": config.agents.inspect,
     focused: config.prove.focused.join("\n"),
     fast: config.prove.fast.join("\n"),
     acceptance: config.prove.acceptance.join("\n"),
@@ -44,6 +52,10 @@ export const defaultDraft: Record<DraftKey, string> = {
   base: "",
   ...configDefaults.stages,
   qa: "",
+  doneStatus: "",
+  "agents.frame": "",
+  "agents.build": "",
+  "agents.inspect": "",
   focused: "",
   fast: "",
   acceptance: "",

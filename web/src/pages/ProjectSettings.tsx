@@ -4,6 +4,8 @@ import { useEffect, useState, type ReactNode } from "react"
 
 import { NotificationPrefs } from "@/components/notify/NotificationPrefs"
 import { AgentPicker } from "@/components/agent-picker/AgentPicker"
+import { AgentsFields } from "@/components/settings-edit/AgentsFields"
+import { AppearanceFields } from "@/components/settings-edit/AppearanceFields"
 import { ApprovalsFields } from "@/components/settings-edit/ApprovalsFields"
 import { ChecksFields } from "@/components/settings-edit/ChecksFields"
 import { JiraSection } from "@/components/settings-edit/JiraSection"
@@ -19,18 +21,19 @@ import { TextField, type EditProps } from "@/components/settings-edit/fields"
 import { useConfigPreview } from "@/components/settings-edit/useConfigPreview"
 import { WhatChanges } from "@/components/settings-edit/WhatChanges"
 import { Shell } from "@/components/shell/Shell"
-import { useOptionalTheme } from "@/components/theme-provider"
 import { Input } from "@/components/ui/input"
 import { getJSON, projectConfig, saveConfig } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
-import type { ProjectConfig } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import type { AgentChoice, ProjectConfig } from "@/lib/types"
 
-const themes = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-] as const
+const noAgents: AgentChoice = {
+  agents: [],
+  selected: "any",
+  chosen: "",
+  exists: false,
+  reason: "",
+  models: {},
+}
 
 function Section({
   name,
@@ -62,8 +65,8 @@ export function ProjectSettings() {
   const [draft, setDraft] = useState<Draft>({})
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState("")
-  const theme = useOptionalTheme()
   const [current, setCurrent] = useState("Project")
+  const [pick, setPick] = useState<AgentChoice>(noAgents)
 
   useEffect(() => {
     let live = true
@@ -170,7 +173,8 @@ export function ProjectSettings() {
             name="Agents"
             hint="Which CLI writes the code, and on which model. Saved to span.yaml."
           >
-            <AgentPicker project={folder} />
+            <AgentPicker project={folder} onLoaded={setPick} />
+            <AgentsFields props={props} agents={pick.agents} />
           </Section>
           <Section
             name="Checks"
@@ -188,45 +192,13 @@ export function ProjectSettings() {
             name="Jira"
             hint="Optional. Reads stories and moves them when a run finishes."
           >
-            <JiraSection folder={folder} />
+            <JiraSection folder={folder} props={props} />
           </Section>
           <Section
             name="Appearance"
-            hint="How Span looks. Saved in this browser."
+            hint="How Span looks and moves. Saved in this browser."
           >
-            {theme !== undefined ? (
-              <FieldRow
-                label="Theme"
-                fallback="System"
-                changed={theme.theme !== "system"}
-                unsaved={false}
-              >
-                <div
-                  role="group"
-                  aria-label="Theme"
-                  className="flex w-fit gap-1 rounded-[14px] bg-muted p-1"
-                >
-                  {themes.map((item) => (
-                    <button
-                      key={item.value}
-                      type="button"
-                      aria-pressed={theme.theme === item.value}
-                      onClick={() => theme.setTheme(item.value)}
-                      className={cn(
-                        "h-9 rounded-[10px] px-4 text-[13px] font-medium text-muted-foreground",
-                        "aria-pressed:bg-card aria-pressed:font-semibold aria-pressed:text-primary aria-pressed:shadow-sm"
-                      )}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Motion follows your system. Reduced motion turns off the
-                  start-up animation and skeleton shimmer.
-                </p>
-              </FieldRow>
-            ) : null}
+            <AppearanceFields />
           </Section>
           <Section
             name="Notifications"
@@ -245,6 +217,7 @@ export function ProjectSettings() {
             folder={folder}
             count={count}
             lines={preview.lines}
+            effects={preview.effects}
             error={preview.error}
             saving={saving}
             onSave={save}

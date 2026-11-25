@@ -23,9 +23,32 @@ vi.mock("@/lib/api", async (importOriginal) => {
     saveConfig: (project: string, edits: unknown) => saveConfig(project, edits),
   }
 })
-vi.mock("@/components/agent-picker/AgentPicker", () => ({
-  AgentPicker: () => <p>agent picker</p>,
-}))
+vi.mock("@/components/agent-picker/AgentPicker", async () => {
+  const { useEffect } = await import("react")
+  const ready = {
+    id: "codex",
+    label: "Codex",
+    binary: "codex",
+    installed: true,
+    gentle: true,
+    ready: true,
+  }
+  return {
+    AgentPicker: ({ onLoaded }: { onLoaded?: (choice: unknown) => void }) => {
+      useEffect(() => {
+        onLoaded?.({
+          agents: [ready],
+          selected: "any",
+          chosen: "",
+          exists: false,
+          reason: "",
+          models: {},
+        })
+      }, [onLoaded])
+      return <p>agent picker</p>
+    },
+  }
+})
 
 import { projectConfig } from "@/lib/api"
 import { ThemeProvider } from "@/components/theme-provider"
@@ -102,9 +125,15 @@ describe("ProjectSettings", () => {
 
     async function edited() {
       getJSON.mockResolvedValue(saved)
-      previewConfig.mockResolvedValue([
-        { key: "stages.merge", before: "auto", after: "hold" },
-      ])
+      previewConfig.mockResolvedValue({
+        lines: [{ key: "stages.merge", before: "auto", after: "hold" }],
+        effects: [
+          {
+            label: "Next stage",
+            text: "A run that reaches merge will stop and ask you.",
+          },
+        ],
+      })
       show()
       await screen.findByDisplayValue("go test ./...")
       fireEvent.change(screen.getByLabelText("merge approval"), {
@@ -118,6 +147,11 @@ describe("ProjectSettings", () => {
       expect(await within(panel).findByText(/merge hold/)).toBeTruthy()
       expect(within(panel).getByText(/merge auto/)).toBeTruthy()
       expect(within(panel).getByText("1 unsaved")).toBeTruthy()
+      expect(
+        within(panel).getByText(
+          "A run that reaches merge will stop and ask you."
+        )
+      ).toBeTruthy()
       expect(previewConfig).toHaveBeenCalledWith(".", { merge: "hold" })
       expect(saveConfig).not.toHaveBeenCalled()
     })
@@ -126,6 +160,7 @@ describe("ProjectSettings", () => {
       await edited()
       saveConfig.mockResolvedValue({
         lines: [{ key: "stages.merge", before: "auto", after: "hold" }],
+        effects: [],
         config: projectConfig({ ...saved, stages: { merge: "hold" } }),
       })
       const panel = await screen.findByRole("region", { name: "What changes" })
@@ -178,13 +213,16 @@ describe("ProjectSettings", () => {
 
     it("sends one command per line for a list of checks", async () => {
       getJSON.mockResolvedValue(saved)
-      previewConfig.mockResolvedValue([
-        {
-          key: "prove.fast",
-          before: "go test ./...",
-          after: "go vet ./..., go test ./...",
-        },
-      ])
+      previewConfig.mockResolvedValue({
+        lines: [
+          {
+            key: "prove.fast",
+            before: "go test ./...",
+            after: "go vet ./..., go test ./...",
+          },
+        ],
+        effects: [],
+      })
       show()
       await screen.findByDisplayValue("go test ./...")
       fireEvent.change(screen.getByLabelText("Fast"), {
@@ -193,6 +231,25 @@ describe("ProjectSettings", () => {
       await waitFor(() =>
         expect(previewConfig).toHaveBeenCalledWith(".", {
           fast: ["go vet ./...", "go test ./..."],
+        })
+      )
+    })
+
+    it("sets the CLI of one stage and the Jira status without touching the rest", async () => {
+      getJSON.mockResolvedValue(saved)
+      previewConfig.mockResolvedValue({ lines: [], effects: [] })
+      show()
+      await screen.findByDisplayValue("go test ./...")
+      fireEvent.change(screen.getByLabelText("build agent"), {
+        target: { value: "codex" },
+      })
+      fireEvent.change(screen.getByLabelText("Move story on done"), {
+        target: { value: "Done" },
+      })
+      await waitFor(() =>
+        expect(previewConfig).toHaveBeenCalledWith(".", {
+          "agents.build": "codex",
+          doneStatus: "Done",
         })
       )
     })

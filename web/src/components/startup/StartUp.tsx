@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 
+import { applyMotion, motionReduced } from "@/lib/motion"
 import { cn } from "@/lib/utils"
 import { stages } from "@/lib/types"
 
@@ -12,7 +13,7 @@ const holdMs = 250
 /** Whether this tab already showed the start-up, or the person asked for less motion. */
 function skipped(): boolean {
   try {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (motionReduced()) {
       return true
     }
     return window.sessionStorage.getItem(seenKey) === "1"
@@ -40,6 +41,9 @@ function remember(): boolean {
 export function StartUp() {
   const [open, setOpen] = useState(() => !skipped())
   const [filled, setFilled] = useState(0)
+
+  // The saved motion choice reaches the whole page from here, the one component every load mounts.
+  useEffect(() => applyMotion(), [])
 
   useEffect(() => {
     if (!open) {
