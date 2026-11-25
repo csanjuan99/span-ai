@@ -327,3 +327,26 @@ func TestJiraCreateIsAStepThatSaysWhyItStays(t *testing.T) {
 		t.Fatalf("jira step %+v", step)
 	}
 }
+
+func TestPlanForAStepThatStaysSaysNothingChanges(t *testing.T) {
+	f := &fake{replies: []string{reply(t, splitTurn())}}
+	e, ws := engine(t, f)
+	s := start(t, e, ws)
+	if _, err := e.AcceptSplit(ws, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	v, err := History(ws, s.ID, HistoryFilter{Kind: "split"})
+	if err != nil || len(v.Events) != 1 {
+		t.Fatalf("%v %v", historyIDs(v), err)
+	}
+	plan, err := PlanUndo(ws, s.ID, v.Events[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Target.Undoable || !strings.HasPrefix(plan.After, "Nothing changes") || !strings.Contains(plan.After, "own sessions") {
+		t.Fatalf("a plan that cannot happen does not promise a put-back: %+v", plan)
+	}
+	if _, err := e.Undo(ws, s.ID, v.Events[0].ID, false); codeOf(err) != "shape_not_undoable" {
+		t.Fatalf("undo of a step that stays: %v", err)
+	}
+}

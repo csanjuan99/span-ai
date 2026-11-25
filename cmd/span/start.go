@@ -18,7 +18,8 @@ const startUsage = `usage: ./span start precheck [--workspace .] [--story ...] [
        ./span start sealed [--workspace .]
        ./span start run-key [--workspace .] [--shape ID]
        ./span start health [--url http://127.0.0.1:8787] [--json]
-       (exit 0 ok, 2 usage, 3 refused, 6/8/14-19 start refusal codes with --json)`
+       (exit 0 ok, 1 error, 2 usage, 3 refused, 6 run exists, 8 Jira signed out, 14 not a git repository,
+        15 base missing, 16 checkout busy, 17 no agent, 18 token refused; text and --json exit alike)`
 
 func startCmd(args []string) int { return startMain(args, os.Stdout, os.Stderr) }
 
@@ -60,10 +61,15 @@ func startMain(args []string, out, errw io.Writer) int {
 			fmt.Fprintln(out, "nothing blocks a start")
 			return 0
 		}
+		// Text and JSON exit alike: a script chains on the refusal's number, and --json only
+		// changes how the refusal is printed.
 		if *asJSON {
-			return emitOne(ref)
+			if c := emitOne(ref); c != 0 {
+				return c
+			}
+		} else {
+			fmt.Fprintln(errw, ref.Error())
 		}
-		fmt.Fprintln(errw, ref.Error())
 		return start.ExitCode(ref, false)
 	case "what-will-happen":
 		return emitOne(start.WhatWillHappen(*project, *kind, *base))

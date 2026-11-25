@@ -801,6 +801,9 @@ func PlanUndo(workspace, id, hid string) (UndoPlan, error) {
 			plan.Changes = append(plan.Changes, change)
 		}
 	}
+	if !plan.Target.Undoable {
+		plan.After = "Nothing changes: " + plan.Target.Why
+	}
 	if plan.After == "" {
 		plan.After = "Put back: " + strings.ToLower(target.Summary[:1]) + target.Summary[1:]
 	}

@@ -397,8 +397,15 @@ When nothing blocks, the body is `{ "ok": true }`.
 - `POST /spans` starts one run per named repository (same fields as `POST /quickstart`) and returns `results` per repo plus refusals when a repo cannot start.
 
 From a shell, `./span start precheck|what-will-happen|sealed|run-key|health` mirrors those routes. Add
-`--json` for machine-readable output. Remote checks use `SPAN_TOKEN` and `--serve http://127.0.0.1:8787`
-when the verbs call `health` against a running server.
+`--json` for machine-readable output. `health` is the one verb that talks to a running server:
+`./span start health --url http://host:8787` sends `SPAN_TOKEN` (from the environment) as the bearer
+token, prints `connected` or `refused`, and exits `0` or `18`; an unreachable server exits `1`. The other
+verbs read the project folder with the same code the routes use.
+
+`precheck` exits `0` when nothing blocks. A refusal exits with its number, in text and with `--json` alike
+(`--json` prints the route's `{number, code, message}`): `6` a run for that story exists, `8` Jira is signed
+out, `14` the folder is not a git repository, `15` the base branch is missing, `16` the checkout is busy,
+`17` no agent is ready, `18` the token was refused. Usage errors exit `2` and any other failure `1`.
 
 `POST /quickstart` remains for the older desk path; new UI prefers precheck and `POST /spans`.
 
