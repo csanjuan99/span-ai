@@ -1,10 +1,35 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 
 import { Input } from "@/components/ui/input"
 import { reasonText } from "@/lib/guards"
 import { foldLog, readGateLog, seconds, type GateLog } from "@/lib/qa"
+import { cn } from "@/lib/utils"
+
+/** A text-only action in the log's toolbar. */
+function LinkButton({
+  onClick,
+  strong = false,
+  children,
+}: {
+  onClick: () => void
+  strong?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "text-sm text-primary underline-offset-4 hover:underline",
+        strong && "font-medium"
+      )}
+    >
+      {children}
+    </button>
+  )
+}
 
 /** A gate's whole log with its own line numbers, quiet stretches folded and a search over all of it. */
 export function LogViewer({
@@ -50,9 +75,21 @@ export function LogViewer({
     () => (log === null ? [] : foldLog(log.lines, log.matches, opened)),
     [log, opened]
   )
-  const hits = new Set(log?.matches ?? [])
   const matches = log?.matches ?? []
-  const shown = matches.length === 0 ? 0 : ((hit % matches.length) + matches.length) % matches.length
+  const hits = new Set(matches)
+  const shown =
+    matches.length === 0
+      ? 0
+      : ((hit % matches.length) + matches.length) % matches.length
+
+  function openFold(id: string) {
+    setOpened((now) => new Set(now).add(id))
+  }
+
+  function search(value: string) {
+    setQ(value)
+    setHit(0)
+  }
 
   function revealMatch(step: number) {
     const next = (shown + step + matches.length) % matches.length
@@ -68,12 +105,14 @@ export function LogViewer({
       (item) => item.kind === "fold" && n >= item.from && n <= item.to
     )
     if (fold !== undefined && fold.kind === "fold") {
-      setOpened((now) => new Set(now).add(fold.id))
+      openFold(fold.id)
     }
     // The fold opens on the next render, so the line is not in the document until the frame after that.
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        document.getElementById(`log-line-${n}`)?.scrollIntoView({ block: "center" })
+        document
+          .getElementById(`log-line-${n}`)
+          ?.scrollIntoView({ block: "center" })
       })
     })
   }
@@ -81,13 +120,7 @@ export function LogViewer({
   return (
     <section aria-label={`Log of ${gate}`} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-sm text-primary underline-offset-4 hover:underline"
-        >
-          Overview
-        </button>
+        <LinkButton onClick={onClose}>Overview</LinkButton>
         <h2 className="text-lg font-semibold">Log · {gate}</h2>
         {log !== null ? (
           <span className="text-xs text-muted-foreground tabular-nums">
@@ -102,53 +135,28 @@ export function LogViewer({
           aria-label="Search the log"
           placeholder="Search the log"
           value={q}
-          onChange={(event) => {
-            setQ(event.target.value)
-            setHit(0)
-          }}
+          onChange={(event) => search(event.target.value)}
           className="max-w-sm"
         />
         {q !== "" ? (
-          <button
-            type="button"
-            className="text-sm text-primary underline-offset-4 hover:underline"
-            onClick={() => {
-              setQ("")
-              setHit(0)
-            }}
-          >
-            Clear search
-          </button>
+          <LinkButton onClick={() => search("")}>Clear search</LinkButton>
         ) : null}
         {matches.length > 0 ? (
           <>
-            <p role="status" className="text-xs text-muted-foreground tabular-nums">
+            <p
+              role="status"
+              className="text-xs text-muted-foreground tabular-nums"
+            >
               {shown + 1} of {matches.length} matches
             </p>
-            <button
-              type="button"
-              className="text-sm text-primary underline-offset-4 hover:underline"
-              onClick={() => revealMatch(-1)}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="text-sm text-primary underline-offset-4 hover:underline"
-              onClick={() => revealMatch(1)}
-            >
-              Next
-            </button>
+            <LinkButton onClick={() => revealMatch(-1)}>Previous</LinkButton>
+            <LinkButton onClick={() => revealMatch(1)}>Next</LinkButton>
           </>
         ) : null}
         {log !== null && log.firstError > 0 ? (
-          <button
-            type="button"
-            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-            onClick={() => reveal(log.firstError)}
-          >
+          <LinkButton strong onClick={() => reveal(log.firstError)}>
             Jump to first error: line {log.firstError}
-          </button>
+          </LinkButton>
         ) : null}
       </div>
       {problem !== "" ? (
@@ -168,7 +176,7 @@ export function LogViewer({
             <button
               key={item.id}
               type="button"
-              onClick={() => setOpened((now) => new Set(now).add(item.id))}
+              onClick={() => openFold(item.id)}
               className="block min-h-7 w-full bg-muted px-3.5 text-left text-primary"
             >
               Show {item.count} quiet lines ({item.from}–{item.to})
@@ -177,13 +185,14 @@ export function LogViewer({
             <div
               key={item.line.n}
               id={`log-line-${item.line.n}`}
-              className={
+              className={cn(
+                "grid grid-cols-[60px_minmax(0,1fr)] pr-3.5 whitespace-pre",
                 item.line.kind === "err"
-                  ? "grid grid-cols-[60px_minmax(0,1fr)] bg-fail-soft pr-3.5 whitespace-pre text-fail"
+                  ? "bg-fail-soft text-fail"
                   : hits.has(item.line.n)
-                    ? "grid grid-cols-[60px_minmax(0,1fr)] bg-accent-soft pr-3.5 whitespace-pre"
-                    : "grid grid-cols-[60px_minmax(0,1fr)] pr-3.5 whitespace-pre text-code-comment"
-              }
+                    ? "bg-accent-soft"
+                    : "text-code-comment"
+              )}
             >
               <span className="pr-2 text-right text-muted-foreground tabular-nums">
                 {item.line.n}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 
 import { Cases } from "@/components/qa/Cases"
 import { LogViewer } from "@/components/qa/LogViewer"
@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input"
 import { designField } from "@/lib/field-class"
 import { cn } from "@/lib/utils"
 import { useRunResource } from "@/hooks/use-run-resource"
-import { acceptQa, readQa } from "@/lib/qa"
+import { acceptQa, firstLoggedGate, readQa } from "@/lib/qa"
 import { reasonText } from "@/lib/guards"
 
 type Pane = "overview" | "cases" | "log" | "transcript"
@@ -32,6 +32,7 @@ export function QaTab({ id }: { id: string }) {
   const [log, setLog] = useState("")
   const [reason, setReason] = useState("")
   const [version, setVersion] = useState(0)
+  const reasonField = useRef<HTMLInputElement>(null)
 
   const view = proof.state.status === "ready" ? proof.state.value : null
   const unread = proof.state.status === "error" ? proof.state.message : ""
@@ -50,9 +51,7 @@ export function QaTab({ id }: { id: string }) {
   }
 
   const logged =
-    log !== ""
-      ? log
-      : (view?.gates.find((gate) => gate.ran && gate.lines > 0)?.name ?? "")
+    log !== "" ? log : (firstLoggedGate(view?.gates ?? [])?.name ?? "")
 
   return (
     <div className="flex flex-col gap-6">
@@ -98,9 +97,11 @@ export function QaTab({ id }: { id: string }) {
               setLog(gate)
               setPane("log")
             }}
+            onOpenCases={() => setPane("cases")}
+            onAccept={() => reasonField.current?.focus()}
           />
           {view.state === "ok" &&
-          view.verdict === "fail" &&
+          (view.verdict === "fail" || view.verdict === "held") &&
           view.accepted === null ? (
             <div className="flex flex-col gap-2 rounded-[14px] border border-border bg-card p-4">
               <label htmlFor="qa-accept" className="text-sm font-medium">
@@ -108,6 +109,7 @@ export function QaTab({ id }: { id: string }) {
               </label>
               <Input
                 id="qa-accept"
+                ref={reasonField}
                 className={cn("h-auto", designField)}
                 placeholder="Why is the risk acceptable?"
                 value={reason}

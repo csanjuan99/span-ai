@@ -80,6 +80,16 @@ export interface QaCase {
   history: QaHistory[]
 }
 
+/** Whether a gate ran and left a log to open. */
+export function hasLog(gate: QaGate): boolean {
+  return gate.ran && gate.lines > 0
+}
+
+/** The first gate with a log, which the Log tab opens when none is chosen. */
+export function firstLoggedGate(gates: QaGate[]): QaGate | undefined {
+  return gates.find(hasLog)
+}
+
 /** The case list, as GET /spans/{id}/qa/cases returns it. */
 export interface QaCasesView {
   cases: QaCase[]
