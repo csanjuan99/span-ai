@@ -700,7 +700,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		} else {
 			fmt.Fprintf(out, "configured %t\nproject %s\nsite %s\nemail %s\nauth %s\n", view.Configured, project, view.BaseURL, view.Email, view.Auth)
 		}
-		if err != nil {
+		if err != nil && !asJSON {
 			fmt.Fprintln(errw, err)
 			return 1
 		}

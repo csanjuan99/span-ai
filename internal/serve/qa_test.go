@@ -278,3 +278,21 @@ func TestAGateLogHasWholeLogLineNumbersFirstErrorAndMatches(t *testing.T) {
 		t.Fatalf("an unknown gate answers 404, got %d", code)
 	}
 }
+
+func TestAMissingRunAnswersEveryQAReadingWithAJSONNotFound(t *testing.T) {
+	root := t.TempDir()
+	for _, target := range []string{"/spans/SPAN-404/qa", "/spans/SPAN-404/qa/cases", "/spans/SPAN-404/qa/cases/TestX"} {
+		rec := httptest.NewRecorder()
+		Handler(root, "").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s: status %d, want 404", target, rec.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: body %q is not JSON: %v", target, rec.Body.String(), err)
+		}
+		if body["error"] != "not_found" || body["message"] == "" {
+			t.Fatalf("%s: body %v, want error not_found and a message", target, body)
+		}
+	}
+}

@@ -409,7 +409,7 @@ func answerMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	done := outcome{ID: id, Action: "answer", Stage: res.Stage, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
+	done := outcome{ID: id, Action: "answer", Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
 	return reportOutcome(out, errw, v.asJSON, done)
 }
 

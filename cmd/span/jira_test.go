@@ -19,8 +19,11 @@ func TestJiraJSONMatchesTheAccountRouteAndFlagsFollowTheKey(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errw := jiraCall("status", "--project", dir, "--json")
 	var view jira.Public
-	if code != 1 || json.Unmarshal([]byte(out), &view) != nil || view.Configured || !strings.Contains(errw, "not_configured") {
-		t.Fatalf("unconfigured status %d %s %s", code, out, errw)
+	if code != 0 || json.Unmarshal([]byte(out), &view) != nil || view.Configured || errw != "" {
+		t.Fatalf("unconfigured status --json answers the route's body and exits 0: %d %s %s", code, out, errw)
+	}
+	if code, _, errw = jiraCall("status", "--project", dir); code != 1 || !strings.Contains(errw, "not_configured") {
+		t.Fatalf("unconfigured status in text keeps exit 1: %d %s", code, errw)
 	}
 	if code, _, _ = jiraCall("status", "--project", dir, "extra"); code != 2 {
 		t.Fatalf("an extra argument is a usage error, got %d", code)

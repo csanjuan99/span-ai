@@ -281,3 +281,31 @@ func TestMergeTakesTheAnswerOfAnotherSessionWhenItWins(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeKeepsAQuestionBothSessionsAnsweredTheSameOnce(t *testing.T) {
+	ws := gitRepo(t)
+	mk := func(idea string) *Session {
+		s, err := Create(ws, StartInput{Idea: idea})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved(t, ws, s.ID, func(s *Session) {
+			s.Status = StatusReady
+			s.Map = Map{
+				Rules:    []Rule{cmpRule("R1", "A replay is logged with who pressed it.")},
+				Examples: []Example{},
+				Questions: []Question{
+					answered("Q1", "Is a replay logged with who pressed it?", "Yes, in the audit trail", "A1"),
+				},
+			}
+		})
+	}
+	a, b := mk("replay a"), mk("replay b")
+	if _, err := Merge(ws, MergeInput{Into: a.Ref(), From: []string{b.Ref()}}); err != nil {
+		t.Fatal(err)
+	}
+	target := mustLoad(t, ws, a.ID)
+	if len(target.Map.Questions) != 1 {
+		t.Fatalf("the same answered question was copied: %+v", target.Map.Questions)
+	}
+}
