@@ -14,6 +14,7 @@ import (
 )
 
 const startUsage = `usage: ./span start precheck [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--json]
+       ./span start branches [--workspace .] [--json]
        ./span start what-will-happen [--project .] [--kind ...] [--base ...]
        ./span start sealed [--workspace .]
        ./span start run-key [--workspace .] [--shape ID]
@@ -71,6 +72,19 @@ func startMain(args []string, out, errw io.Writer) int {
 			fmt.Fprintln(errw, ref.Error())
 		}
 		return start.ExitCode(ref, false)
+	case "branches":
+		list, err := start.ListBranches(context.Background(), *workspace)
+		if err != nil {
+			fmt.Fprintln(errw, err)
+			return 1
+		}
+		if *asJSON {
+			return emitOne(list)
+		}
+		for _, name := range list.Branches {
+			fmt.Fprintln(out, name)
+		}
+		return 0
 	case "what-will-happen":
 		return emitOne(start.WhatWillHappen(*project, *kind, *base))
 	case "sealed":

@@ -396,7 +396,7 @@ When nothing blocks, the body is `{ "ok": true }`.
 - `GET /start/run-key?path=&shape=` returns the Jira key or the next preview span id for the run label.
 - `POST /spans` starts one run per named repository (same fields as `POST /quickstart`) and returns `results` per repo plus refusals when a repo cannot start.
 
-From a shell, `./span start precheck|what-will-happen|sealed|run-key|health` mirrors those routes. Add
+From a shell, `./span start precheck|branches|what-will-happen|sealed|run-key|health` mirrors those routes (`branches` is `GET /branches`: the branch names the base field suggests, with `--json` `{branches, default}`). Add
 `--json` for machine-readable output. `health` is the one verb that talks to a running server:
 `./span start health --url http://host:8787` sends `SPAN_TOKEN` (from the environment) as the bearer
 token, prints `connected` or `refused`, and exits `0` or `18`; an unreachable server exits `1`. The other
@@ -984,7 +984,7 @@ advances, holds and stops with the median and p90 time. A stage's time runs from
 sealed record to its own, so it includes waiting on a person. The agents table counts the
 stages each CLI and model ran and how they ended; runs started before the journal recorded
 agents do not appear in it. Cost and tokens are not shown because runs do not record them.
-The same data is `GET /metrics` with `Accept: application/json`.
+The same data is `GET /metrics` with `Accept: application/json`, and `./span metrics [--json] [--spans .span/runs]` prints it from the state directory with the same code (`--json` is the route's body; a folder with no runs is an empty report).
 
 ### Choosing the model of each agent
 

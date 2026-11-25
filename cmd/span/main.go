@@ -66,6 +66,8 @@ func main() {
 		os.Exit(settingsCmd(os.Args[2:]))
 	case "start":
 		os.Exit(startCmd(os.Args[2:]))
+	case "metrics":
+		os.Exit(metricsCmd(os.Args[2:]))
 	case "runs":
 		os.Exit(runsCmd(os.Args[2:]))
 	case "log":
@@ -982,7 +984,8 @@ const usageText = `./span repos [--path .]
 ./span qa show|cases|case|rerun|accept|log <run> ...; ./span transcript <run> [--stage name]   (./span qa for each verb's flags)
 ./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|story|delete <run> ...   (./span runs for each verb's flags)
 ./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
-./span start precheck|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--json]
+./span metrics [--json] [--spans .span/runs]
+./span start precheck|branches|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--json]
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
 ./span resume <id> [--workspace .]
