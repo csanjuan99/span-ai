@@ -104,9 +104,7 @@ describe("JiraLookup", () => {
         })}
       />
     )
-    expect(
-      screen.getByText("SPAN-5030 is not in the project SPAN")
-    ).toBeTruthy()
+    expect(screen.getByText("SPAN-5030 is not in project SPAN")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Search by text" }))
     expect(onSearch).toHaveBeenCalledWith("SPAN-5030")
     rerender(
@@ -122,6 +120,9 @@ describe("JiraLookup", () => {
     )
     expect(
       screen.getByText("Your Jira account cannot open SPAN-512")
+    ).toBeTruthy()
+    expect(
+      screen.getByText(/Jira answered 403 for carlos@acme\.com\./)
     ).toBeTruthy()
     expect(
       screen

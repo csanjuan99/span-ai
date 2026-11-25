@@ -67,7 +67,7 @@ export function ProblemCard({
         {command !== undefined ? <CommandLine command={command} /> : null}
         <KeptNext kept={kept} next={next} marked={marked} />
         {children !== undefined ? (
-          <div className="flex flex-col gap-2 [&>*]:h-10 [&>*]:w-full [&>*]:rounded-[10px]">
+          <div className="flex flex-col gap-2 [&>*]:h-11 [&>*]:w-full [&>*]:rounded-[10px] md:[&>*]:h-10">
             {children}
           </div>
         ) : null}

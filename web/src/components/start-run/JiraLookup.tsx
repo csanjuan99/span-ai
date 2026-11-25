@@ -15,6 +15,7 @@ import { useState, type ReactNode } from "react"
 import { IdChip } from "@/components/list-controls/IdChip"
 import { Pill as StatusPill } from "@/components/onboarding/Pill"
 import { KeptNext } from "@/components/problem/KeptNext"
+import { problemTones } from "@/components/problem/ProblemCard"
 import { Panel } from "@/components/shaping/session-ui"
 import { noteText } from "@/components/shaping/styles"
 import { Button } from "@/components/ui/button"
@@ -83,14 +84,15 @@ interface Failure {
 /** What a refused lookup says, from what Jira answered. */
 function failureOf(
   lookup: { key: string; reason: string },
-  host: string
+  host: string,
+  email: string
 ): Failure {
   const { key, reason } = lookup
   if (/404|not found/i.test(reason)) {
     return {
       mark: "Not found",
       icon: SearchIcon,
-      title: `${key} is not in the project ${key.split("-")[0] ?? ""}`.trim(),
+      title: `${key} is not in project ${key.split("-")[0] ?? ""}`.trim(),
       body: "Jira answered 404. The key may have a typo, or the story was deleted or moved to another project.",
       kept: "The key you typed and every other choice on this screen.",
       next: "Check the key, or search by words from the title.",
@@ -101,7 +103,7 @@ function failureOf(
       mark: "No permission",
       icon: LockIcon,
       title: `Your Jira account cannot open ${key}`,
-      body: "Jira answered 403. The story exists, but its project or security level is closed to this account.",
+      body: `Jira answered 403${email === "" ? "" : ` for ${email}`}. The story exists, but its project or security level is closed to this account.`,
       kept: "Your connection to Jira and the key you typed.",
       next: "Ask the project admin for access, or paste the story text.",
     }
@@ -200,43 +202,50 @@ function Refused({
   session: JiraSession
   props: JiraProps
 }) {
-  const failure = failureOf(lookup, hostOf(session.baseUrl))
+  const failure = failureOf(lookup, hostOf(session.baseUrl), session.email)
   const Icon = failure.icon
   const kind = failure.mark === "Offline" ? "fail" : "hold"
   const open = `${session.baseUrl.replace(/\/$/, "")}/browse/${lookup.key}`
   return (
-    <Panel role="alert" className="flex flex-col gap-3 p-4">
-      <StatusPill tone={kind} size="sm">
-        <Icon className="size-3.5" aria-hidden="true" />
+    <Panel role="alert" className="overflow-hidden">
+      <div
+        className={cn(
+          "flex items-center gap-2 px-4 py-2.5 text-xs font-medium",
+          problemTones[kind]
+        )}
+      >
+        <Icon className="size-4" aria-hidden="true" />
         {failure.mark}
-      </StatusPill>
-      <h3 className="text-base font-semibold text-balance">{failure.title}</h3>
-      <p className="text-sm text-pretty text-muted-foreground">
-        {failure.body}
-      </p>
-      <KeptNext kept={failure.kept} next={failure.next} marked={false} />
-      <div className="flex flex-wrap items-center gap-3">
-        {failure.mark === "Not found" ? (
-          <Button type="button" onClick={() => props.onSearch(lookup.key)}>
-            <SearchIcon aria-hidden="true" />
-            Search by text
-          </Button>
-        ) : null}
-        {failure.mark === "Offline" ? (
-          <Button type="button" onClick={props.onLoadOne}>
-            <RefreshCwIcon aria-hidden="true" />
-            Retry look up
-          </Button>
-        ) : null}
-        <PasteInsteadButton onPaste={props.onPasteInstead} />
-        {failure.mark === "No permission" && session.baseUrl !== "" ? (
-          <JiraLink
-            href={open}
-            className="text-primary underline-offset-4 hover:underline"
-          >
-            Open {lookup.key} in Jira
-          </JiraLink>
-        ) : null}
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <h3 className="text-base font-semibold text-balance">
+          {failure.title}
+        </h3>
+        <p className="text-sm text-pretty">{failure.body}</p>
+        <KeptNext kept={failure.kept} next={failure.next} marked={false} />
+        <div className="flex flex-wrap items-center gap-3">
+          {failure.mark === "Not found" ? (
+            <Button type="button" onClick={() => props.onSearch(lookup.key)}>
+              <SearchIcon aria-hidden="true" />
+              Search by text
+            </Button>
+          ) : null}
+          {failure.mark === "Offline" ? (
+            <Button type="button" onClick={props.onLoadOne}>
+              <RefreshCwIcon aria-hidden="true" />
+              Retry look up
+            </Button>
+          ) : null}
+          <PasteInsteadButton onPaste={props.onPasteInstead} />
+          {failure.mark === "No permission" && session.baseUrl !== "" ? (
+            <JiraLink
+              href={open}
+              className="text-primary underline-offset-4 hover:underline"
+            >
+              Open {lookup.key} in Jira
+            </JiraLink>
+          ) : null}
+        </div>
       </div>
     </Panel>
   )

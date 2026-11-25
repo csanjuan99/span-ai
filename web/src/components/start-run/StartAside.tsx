@@ -25,7 +25,7 @@ export interface AsideProps {
 function SettingsLink({ section }: { section: string }) {
   return (
     <Link
-      className="block text-primary underline-offset-4 hover:underline"
+      className="flex min-h-11 items-center text-primary underline-offset-4 hover:underline md:min-h-0"
       to="/settings"
     >
       Settings · {section}
