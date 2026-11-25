@@ -1,35 +1,88 @@
-import { useState, type FormEvent } from "react"
+"use client"
+
+import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
 
-import { answerRun, approveStage, branchLine, decideRun, pauseRun, readStory, relaunchRun, resumeRun, saveInstruction, stopRun } from "@/lib/api"
+import {
+  answerRun,
+  approveStage,
+  branchLine,
+  decideRun,
+  pauseRun,
+  readStory,
+  relaunchRun,
+  resumeRun,
+  saveInstruction,
+  stopRun,
+} from "@/lib/api"
 import { agentBlockLine } from "@/lib/agent-block"
 import { conflictHold, proposalKey } from "@/lib/conflict"
-import { activeFailure, approvalOf, holdAction, isCheckoutBusy } from "@/lib/failure"
+import {
+  activeFailure,
+  approvalOf,
+  attemptLine,
+  holdAction,
+  holderOf,
+  isCheckoutBusy,
+} from "@/lib/failure"
+import { changeOf } from "@/lib/change"
+import { keptWork } from "@/lib/kept"
+import { doneOf } from "@/lib/done"
+import { proofOf } from "@/lib/proof"
+import { runDetails } from "@/lib/run-details"
+import { tidy } from "@/lib/tidy"
+import { sinceLine } from "@/lib/since"
+import { runningOf } from "@/lib/running"
+import { needsYou } from "@/lib/needs-you"
 import { instructionTiming, noteStage, stageLine } from "@/lib/stage-copy"
-import { agentLine, timelineLines, withAgent } from "@/lib/timeline"
+import { agentLine, clockOf, timelineLines, withAgent } from "@/lib/timeline"
 import { waitingQuestions } from "@/lib/waiting"
-import { stages } from "@/lib/types"
 import { useSpan } from "@/hooks/use-span"
 import { ConflictPanel } from "@/components/conflict/ConflictPanel"
 import { FailureCard } from "@/components/failure/FailureCard"
 import { Implementation } from "@/components/implementation/Implementation"
 import { useEvents } from "@/hooks/use-events"
 import { useFeature } from "@/hooks/use-feature"
+import { InstructionNote } from "@/components/instruction-note/InstructionNote"
+import { RawOutput } from "@/components/raw-output/RawOutput"
+import { AgentBlocked } from "@/components/problem/AgentBlocked"
+import { ConnectionBanner } from "@/components/problem/ConnectionBanner"
+import { ProblemCard } from "@/components/problem/ProblemCard"
+import { PageProblem } from "@/components/problem/PageProblem"
+import { RunSkeleton } from "@/components/problem/RunSkeleton"
+import { useConnectionNotice } from "@/hooks/use-connection-notice"
 import { Ledger } from "@/components/ledger/Ledger"
+import { LedgerSummary } from "@/components/ledger/LedgerSummary"
+import { NeedsYou } from "@/components/needs-you/NeedsYou"
+import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
 import { Rewind } from "@/components/rewind/Rewind"
+import { FilesChanged } from "@/components/files-changed/FilesChanged"
+import { FinishedRecord } from "@/components/finished-record/FinishedRecord"
+import { DoneCard } from "@/components/done-card/DoneCard"
+import { RunningCard } from "@/components/running-card/RunningCard"
+import { RunControls } from "@/components/run-controls/RunControls"
+import { SafeAndKept } from "@/components/safe-and-kept/SafeAndKept"
 import { StageAgent } from "@/components/stage-agent/StageAgent"
 import { Shell } from "@/components/shell/Shell"
 import { StageRail } from "@/components/stage-rail/StageRail"
+import { stageDurations } from "@/lib/stage-times"
 import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ActionWithHint } from "@/components/action-with-hint/ActionWithHint"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 
 /** Three readings of one run. The socket wakes the page. The statements stay the record. */
+const tabs = [
+  { value: "ledger", label: "Ledger" },
+  { value: "implementation", label: "Implementation" },
+  { value: "qa", label: "QA" },
+] as const
+
+const tabClass =
+  "h-9 rounded-[10px] text-[13px] data-active:bg-card data-active:font-semibold data-active:text-primary dark:data-active:border-transparent dark:data-active:bg-card dark:data-active:text-primary"
+
 export function SpanPage() {
   const params = useParams()
   const id = params.id ?? ""
@@ -47,9 +100,19 @@ export function SpanPage() {
   const [stage, setStage] = useState("")
   const selected =
     stage ||
-    noteStage({ current, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) }) ||
+    noteStage({
+      current,
+      hold: Boolean(cursor?.hold),
+      stop: Boolean(cursor?.stop),
+    }) ||
     noteStage({ current, hold: paused, stop: Boolean(cursor?.stop) })
-  const verdict = cursor?.done ? "done" : cursor?.stop ? "stop" : cursor?.hold ? "hold" : "running"
+  const verdict = cursor?.done
+    ? "done"
+    : cursor?.stop
+      ? "stop"
+      : cursor?.hold
+        ? "hold"
+        : "running"
   const line =
     state.agent?.summary === "not running"
       ? "No agent is running this stage. Relaunch starts it again."
@@ -61,17 +124,6 @@ export function SpanPage() {
           done: cursor?.done ?? false,
         })
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setNote("")
-    try {
-      await saveInstruction(id, selected, body)
-      setNote("Instruction saved.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the instruction was not saved")
-    }
-  }
-
   const lines = withAgent(
     timelineLines({
       statements: state.span?.statements ?? [],
@@ -79,13 +131,20 @@ export function SpanPage() {
       frames: state.frames,
       actions: state.actions,
     }),
-    agentLine(state.agent, state.agentAt),
+    agentLine(state.agent, state.agentAt)
   )
-  const sealed = (state.span?.statements ?? []).filter((item) => item.verdict === "advance").map((item) => item.stage)
+  const sealed = (state.span?.statements ?? [])
+    .filter((item) => item.verdict === "advance")
+    .map((item) => item.stage)
   const socket = state.connected ? "socket open" : "socket closed"
+  const notice = useConnectionNotice(state.connected)
+  const lastSeen = clockOf(state.frames.at(-1)?.at ?? state.agentAt)
   const questions = waitingQuestions(cursor ?? null)
   const waiting = questions.length > 0
-  const agentBlock = agentBlockLine(cursor?.agentBlock)
+  const agentBlock = agentBlockLine(cursor?.agentBlock, {
+    stage: cursor?.stage ?? "",
+    sealed,
+  })
   const failure = activeFailure({
     statements: state.span?.statements ?? [],
     cursor: cursor ?? null,
@@ -94,6 +153,7 @@ export function SpanPage() {
   // the page that there is nothing to do. The agent poll can.
   const idle = state.agent?.summary === "not running"
   const busy = isCheckoutBusy(cursor?.reason ?? "")
+  const holder = holderOf(cursor?.reason ?? "")
   // A conflict hold is answered on the conflict cards, not by fixing a failed check.
   const conflictKind = conflictHold(cursor?.reason ?? "")
   const conflict = cursor?.conflict
@@ -108,275 +168,534 @@ export function SpanPage() {
   })
   const canAct = Boolean(cursor?.hold) || idle
   const approval = waiting ? null : approvalOf(cursor ?? null)
+  // The failing statement stays on disk through a busy checkout, an approval and a conflict,
+  // but none of those wait on the fix, so the failed check only shows when nothing else does.
+  const showFailure =
+    failure !== null && !busy && approval === null && conflictKind === null
+  const needs = needsYou({
+    agentBlocked: agentBlock !== null,
+    questions: waiting,
+    decision: cursor?.decision !== undefined,
+    conflict: conflict !== undefined || conflictKind !== null,
+    approval: approval !== null,
+    busy,
+    failed: showFailure,
+    stop: Boolean(cursor?.stop),
+    idle,
+    hold: Boolean(cursor?.hold),
+    done: Boolean(cursor?.done),
+  })
+  // While the agent works and nothing asks for a person, the page says so instead of staying blank.
+  const running =
+    needs === null &&
+    cursor !== undefined &&
+    !cursor.done &&
+    state.agent?.running === true
+      ? runningOf({
+          stage: cursor.stage,
+          agent: state.agent.name,
+          branch: cursor.branch,
+          workspace: cursor.workspace,
+          transcript: state.transcript,
+        })
+      : null
+  const done =
+    cursor?.done === true
+      ? doneOf({
+          sealed: new Set(sealed).size,
+          merged: sealed.includes("merge"),
+          sha: cursor.gitSHA,
+          base: cursor.base,
+          branch: cursor.branch,
+          issue: cursor.issue,
+          changeURL: cursor.changeURL,
+        })
+      : null
+  // The ledger is the only clock the page has: a hold began when the last statement was written.
+  const lastStamp =
+    [...(state.span?.statements ?? [])].reverse().find((item) => item.time)
+      ?.time ?? ""
+  const since =
+    cursor?.done === true
+      ? ""
+      : sinceLine(
+          waiting ? "waiting since" : cursor?.stop ? "stopped" : "held",
+          lastStamp,
+          new Date()
+        )
+  const attempt = failure === null ? "" : attemptLine(failure)
+  const where =
+    needs?.kind === "failed" && attempt !== ""
+      ? `${current} · ${attempt}`
+      : current
 
-  async function answer(answers: { question: string; body: string }[]) {
+  /**
+   * Runs one action the page offers and says what happened. Every action reports its failure
+   * the same way, so the person always reads either the confirmation or the reason.
+   */
+  async function act(
+    request: () => Promise<unknown>,
+    outcome: {
+      log: string
+      say: string | ((result: unknown) => string)
+      failed: string
+    }
+  ): Promise<boolean> {
     setNote("")
     try {
-      await answerRun(id, answers)
-      state.note("answer saved")
-      setNote("Answer saved. Frame is reading the story again.")
+      const result = await request()
+      if (outcome.log !== "") {
+        state.note(outcome.log)
+      }
+      setNote(
+        typeof outcome.say === "function" ? outcome.say(result) : outcome.say
+      )
+      return true
     } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the answer was not saved")
+      setNote(err instanceof Error ? err.message : outcome.failed)
+      return false
     }
   }
 
+  const asked = (what: string) => (why: unknown) =>
+    typeof why === "string" && why !== "" ? why : `${what} requested.`
+
+  const saveNote = () =>
+    act(() => saveInstruction(id, selected, body), {
+      log: "",
+      say: "Instruction saved.",
+      failed: "the instruction was not saved",
+    })
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await saveNote()
+  }
+
+  // The note is read when the stage starts again, so it is saved first and only then does the run go on.
+  async function saveAndResume() {
+    if (await saveNote()) {
+      await resume()
+    }
+  }
+
+  const answer = (answers: { question: string; body: string }[]) =>
+    act(() => answerRun(id, answers), {
+      log: "answer saved",
+      say: "Answer saved. Frame is reading the story again.",
+      failed: "the answer was not saved",
+    })
+
   async function decide(option: string, text: string) {
-    setNote("")
     const open = cursor?.decision
     if (open === undefined) {
       return
     }
-    try {
-      await decideRun(id, open.id, option, text)
-      state.note("decision saved")
-      setNote("Decision saved. The run is going on.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the decision was not saved")
-    }
+    await act(() => decideRun(id, open.id, option, text), {
+      log: "decision saved",
+      say: "Decision saved. The run is going on.",
+      failed: "the decision was not saved",
+    })
   }
 
-  async function reloadStory() {
-    setNote("")
-    try {
-      await readStory(id)
-      state.note("reading the story again")
-      setNote("Reading the story again.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the story was not read")
-    }
-  }
+  const reloadStory = () =>
+    act(() => readStory(id), {
+      log: "reading the story again",
+      say: "Reading the story again.",
+      failed: "the story was not read",
+    })
 
-  async function resume() {
-    setNote("")
-    try {
-      await resumeRun(id)
-      state.note("resume")
-      setNote("The run is continuing.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run did not continue")
-    }
-  }
+  const resume = () =>
+    act(() => resumeRun(id), {
+      log: "resume",
+      say: "The run is continuing.",
+      failed: "the run did not continue",
+    })
 
   async function approve() {
     if (approval === null) {
       return
     }
-    setNote("")
-    try {
-      await approveStage(id, approval.stage, approval.environment)
-      state.note(`approved ${approval.stage}`)
-      setNote("Approved. The run is continuing.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the approval was not saved")
-    }
+    await act(() => approveStage(id, approval.stage, approval.environment), {
+      log: `approved ${approval.stage}`,
+      say: "Approved. The run is continuing.",
+      failed: "the approval was not saved",
+    })
   }
 
-  async function pause() {
-    setNote("")
-    try {
-      const why = await pauseRun(id)
-      state.note("pause")
-      setNote(why === "" ? "Pause requested." : why)
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the pause was not requested")
-    }
-  }
+  const pause = () =>
+    act(() => pauseRun(id), {
+      log: "pause",
+      say: asked("Pause"),
+      failed: "the pause was not requested",
+    })
 
-  async function stop() {
-    setNote("")
-    try {
-      const why = await stopRun(id)
-      state.note("stop")
-      setNote(why === "" ? "Stop requested." : why)
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run was not stopped")
-    }
-  }
+  const stop = () =>
+    act(() => stopRun(id), {
+      log: "stop",
+      say: asked("Stop"),
+      failed: "the run was not stopped",
+    })
 
-  async function relaunch() {
-    setNote("")
-    try {
-      await relaunchRun(id)
-      state.note("relaunch")
-      setNote("The run is starting again.")
-    } catch (err: unknown) {
-      setNote(err instanceof Error ? err.message : "the run did not start")
-    }
+  const relaunch = () =>
+    act(() => relaunchRun(id), {
+      log: "relaunch",
+      say: "The run is starting again.",
+      failed: "the run did not start",
+    })
+
+  // Reading the whole patch is the costly part, and the page renders again on every transcript
+  // frame, so the change is rebuilt only when the diff, the statements or the feature change.
+  const change = useMemo(
+    () =>
+      state.span === null
+        ? null
+        : changeOf({
+            stat: state.implementation?.stat ?? "",
+            patch: state.implementation?.patch ?? "",
+            truncated: state.implementation?.truncated ?? false,
+            statements: state.span.statements,
+            cursor: state.span.cursor,
+            feature: featureState.feature,
+          }),
+    [state.implementation, state.span, featureState.feature]
+  )
+  // Before the diff is known the proof would only say "nothing yet", so the panel waits.
+  const proof =
+    change === null || state.implementation === null
+      ? null
+      : proofOf(change.report, change.files)
+  const kept = keptWork({
+    statements: state.span?.statements ?? [],
+    branch: cursor?.branch ?? "",
+    head: cursor?.gitSHA ?? "",
+    stat: state.implementation?.stat ?? "",
+    commits: state.implementation?.commits ?? 0,
+  })
+  // The engine refuses to restart a stage while the checkout is in the middle of a merge.
+  const restartBlocked =
+    conflict !== undefined || conflictKind !== null
+      ? "Unavailable while a merge conflict is open. Abort the merge first."
+      : ""
+
+  if (state.span === null) {
+    return (
+      <Shell
+        path={`~/spans/${id}`}
+        status={state.problem ?? "loading"}
+        lines={lines}
+      >
+        <Link
+          className="text-sm text-primary underline-offset-4 hover:underline"
+          to="/"
+        >
+          $ desk
+        </Link>
+        {state.problem !== null ? (
+          <PageProblem problem={state.problem} id={id} />
+        ) : (
+          <RunSkeleton />
+        )}
+      </Shell>
+    )
   }
 
   return (
-    <Shell path={`~/spans/${id}`} status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`} lines={lines}>
+    <Shell
+      path={`~/spans/${id}`}
+      status={`${cursor?.stage || "intake"} · ${verdict} · ${socket}`}
+      lines={lines}
+    >
       <header className="flex flex-col gap-3">
-        <Link className="text-sm text-primary underline-offset-4 hover:underline" to="/">
+        <Link
+          className="text-sm text-primary underline-offset-4 hover:underline"
+          to="/"
+        >
           $ desk
         </Link>
-        <h1 className="text-balance text-xl tabular-nums" title={id}>
+        <h1 className="text-xl text-balance tabular-nums" title={id}>
           <span className="text-primary">$ </span>
           {state.span?.label || id}
         </h1>
         {cursor !== undefined && branchLine(cursor) !== "" ? (
-          <p className="text-pretty text-sm text-muted-foreground">{branchLine(cursor)}</p>
+          <p className="text-sm text-pretty text-muted-foreground">
+            {branchLine(cursor)}
+          </p>
         ) : null}
-        <StageRail stage={cursor?.stage ?? ""} verdict={verdict} sealed={sealed} />
-        <p className="text-pretty">{line}</p>
-        {note !== "" ? <p className="text-pretty text-sm text-hold">{note}</p> : null}
-        {agentBlock !== null ? (
-          <section className="flex flex-col gap-1 border border-border p-3" aria-label="Agent blocked">
-            <p className="text-sm text-hold">{agentBlock.title}</p>
-            <p className="text-pretty text-sm">{agentBlock.detail}</p>
-            <p className="text-pretty text-sm text-muted-foreground">{agentBlock.hint}</p>
-          </section>
+        <Link
+          className="self-start text-sm text-primary underline-offset-4 hover:underline"
+          to={`/spans/${id}/summary`}
+        >
+          Summary to share
+        </Link>
+        <StageRail
+          stage={cursor?.stage ?? ""}
+          verdict={verdict}
+          sealed={sealed}
+          durations={stageDurations(state.span?.statements ?? [])}
+        />
+        <p className="text-pretty">{tidy(line)}</p>
+        {since !== "" && (cursor?.hold || cursor?.stop) ? (
+          <p className="text-sm text-pretty text-muted-foreground tabular-nums">
+            {since}
+          </p>
         ) : null}
-        {approval !== null ? (
-          <div className="flex flex-col gap-2">
-            <Button type="button" className="self-start" onClick={() => void approve()}>
-              {approval.label}
-            </Button>
-            <p className="text-pretty text-sm text-muted-foreground">{approval.hint}</p>
-          </div>
+        {note !== "" ? (
+          <p className="text-sm text-pretty text-hold">{note}</p>
         ) : null}
-        {failure !== null && !busy && approval === null && conflictKind === null ? <FailureCard failure={failure} /> : null}
-        {conflict !== undefined ? <ConflictPanel key={proposalKey(conflict)} id={id} conflict={conflict} /> : null}
-        {conflict === undefined && conflictKind === "choose" ? (
-          <p className="text-pretty text-sm text-muted-foreground">The options for this conflict are on their way.</p>
+        {state.error !== "" ? (
+          <p className="text-sm text-pretty text-destructive">{state.error}</p>
         ) : null}
-        {!waiting && cursor?.decision === undefined && approval === null && canAct && action !== null ? (
-          <div className="flex flex-col gap-2">
-            <Button type="button" className="self-start" onClick={() => void resume()}>
-              {action.label}
-            </Button>
-            <p className="text-pretty text-sm text-muted-foreground">{action.hint}</p>
-          </div>
-        ) : null}
-        {state.agent?.relaunch ? (
-          <Button type="button" variant="secondary" className="self-start" onClick={() => void relaunch()}>
-            Relaunch
-          </Button>
-        ) : null}
-        {state.error !== "" ? <p className="text-pretty text-sm text-destructive">{state.error}</p> : null}
+        <ConnectionBanner notice={notice} lastSeen={lastSeen} />
       </header>
-      <Tabs defaultValue="ledger">
-        <TabsList>
-          <TabsTrigger value="ledger">Ledger</TabsTrigger>
-          <TabsTrigger value="implementation">Implementation</TabsTrigger>
-          <TabsTrigger value="qa">QA</TabsTrigger>
-        </TabsList>
-        <TabsContent value="ledger" className="flex flex-col gap-6">
-          <StageAgent id={id} current={cursor?.stage ?? ""} choices={state.span?.stageAgents} />
-          <Rewind id={id} current={cursor?.stage ?? ""} />
-          {!paused && !cursor?.done && !idle ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="secondary" className="self-start" onClick={() => void pause()}>
-                  Pause after this stage
-                </Button>
-                <Button type="button" variant="secondary" className="self-start" onClick={() => void stop()}>
-                  Stop now
-                </Button>
-              </div>
-              <p className="text-pretty text-sm text-muted-foreground">
-                The stage that is running finishes. The run holds before the next one, so you can choose the agent for it.
-              </p>
-            </div>
-          ) : null}
-          <Ledger statements={state.span?.statements ?? []} />
-          {waiting ? (
-            <Waiting key={questions.join("\n")} questions={questions} note={note} onAnswer={answer} onReload={reloadStory} />
-          ) : null}
-
-          {cursor?.decision !== undefined && !waiting ? (
-            <Decision key={cursor.decision.id} request={cursor.decision} note={note} onDecide={decide} />
-          ) : null}
-
-          {cursor?.stop && !waiting ? <p className="text-pretty text-sm">This run will not continue.</p> : null}
-          {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
-          <div className="flex flex-col gap-3 border-t border-border pt-4">
-            {paused || showNote ? (
-              <form className="flex flex-col gap-3" onSubmit={(event) => void save(event)}>
-                <Label htmlFor="instruction-stage">Instruction</Label>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  {instructionTiming({ current, selected, hold: Boolean(cursor?.hold), stop: Boolean(cursor?.stop) })}
-                </p>
-                <Select
-                  value={selected}
-                  onValueChange={(value) => {
-                    setStage(value)
-                  }}
-                >
-                  <SelectTrigger id="instruction-stage" className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {stages.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Textarea
-                  aria-label="Instruction body"
-                  value={body}
-                  onChange={(event) => {
-                    setStage(selected)
-                    setBody(event.target.value)
-                  }}
-                  rows={6}
-                />
-                <div className="flex items-center gap-3">
-                  <Button type="submit" variant="secondary" className="self-start">
-                    Save instruction
+      {/*
+        One column on a narrow screen, in the order the design draws it: what needs the person, the
+        proof, what is safe, the tabs, then the controls. From lg up the first and last pairs split
+        into a main column and a side column; `contents` lets the order classes reach the grid.
+      */}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-6">
+          <div className="order-1 flex min-w-0 flex-col gap-6 lg:order-none">
+            {needs !== null ? (
+              <NeedsYou needs={needs} where={where}>
+                {agentBlock !== null ? (
+                  <AgentBlocked line={agentBlock} />
+                ) : null}
+                {approval !== null ? (
+                  <ActionWithHint
+                    label={approval.label}
+                    hint={approval.hint}
+                    onClick={() => void approve()}
+                  />
+                ) : null}
+                {showFailure ? <FailureCard failure={failure} /> : null}
+                {conflict !== undefined ? (
+                  <ConflictPanel
+                    key={proposalKey(conflict)}
+                    id={id}
+                    conflict={conflict}
+                  />
+                ) : null}
+                {conflict === undefined && conflictKind === "choose" ? (
+                  <p className="text-sm text-pretty text-muted-foreground">
+                    The options for this conflict are on their way.
+                  </p>
+                ) : null}
+                {waiting ? (
+                  <Waiting
+                    key={questions.join("\n")}
+                    questions={questions}
+                    note={note}
+                    onAnswer={answer}
+                    onReload={reloadStory}
+                  />
+                ) : null}
+                {cursor?.decision !== undefined && !waiting ? (
+                  <Decision
+                    key={cursor.decision.id}
+                    request={cursor.decision}
+                    note={note}
+                    onDecide={decide}
+                  />
+                ) : null}
+                {!waiting &&
+                cursor?.decision === undefined &&
+                approval === null &&
+                canAct &&
+                action !== null ? (
+                  <ActionWithHint
+                    label={action.label}
+                    hint={action.hint}
+                    onClick={() => void resume()}
+                  />
+                ) : null}
+                {holder !== "" ? (
+                  <Link
+                    className="self-start text-sm text-primary underline-offset-4 hover:underline"
+                    to={`/spans/${holder}`}
+                  >
+                    Open the other run
+                  </Link>
+                ) : null}
+                {state.agent?.relaunch ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="self-start"
+                    onClick={() => void relaunch()}
+                  >
+                    Relaunch
                   </Button>
-                  {note !== "" ? <p className="text-pretty text-sm">{note}</p> : null}
+                ) : null}
+                {cursor?.stop && !waiting ? (
+                  <p className="text-sm text-pretty">
+                    This run will not continue.
+                  </p>
+                ) : null}
+              </NeedsYou>
+            ) : null}
+            {done !== null ? <DoneCard done={done} /> : null}
+            {running !== null ? (
+              <RunningCard running={running} onPause={() => void pause()} />
+            ) : null}
+            {proof !== null ? <ProofSummary proof={proof} /> : null}
+            {done !== null && change !== null ? (
+              <FilesChanged files={change.files} />
+            ) : null}
+          </div>
+          <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
+            <TabsList className="h-auto w-full gap-1 rounded-2xl p-1">
+              {tabs.map((tab) => (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className={tabClass}
+                >
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+            <TabsContent value="ledger" className="flex flex-col gap-6">
+              <LedgerSummary statements={state.span?.statements ?? []} />
+              <details className="group rounded-xl border border-border">
+                <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm text-muted-foreground select-none">
+                  <span>
+                    All records · {state.span?.statements.length ?? 0}
+                  </span>
+                  <span className="ml-auto text-xs">
+                    evidence, commits and commands
+                  </span>
+                </summary>
+                <div className="px-4 pb-4">
+                  <Ledger statements={state.span?.statements ?? []} />
                 </div>
-              </form>
-            ) : (
-              <>
-                <p className="text-pretty text-sm text-muted-foreground">
-                  A stage reads a note when it starts. The stage already running does not see a note saved now.
-                </p>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="self-start"
-                  onClick={() => {
+              </details>
+              <RawOutput
+                transcript={state.transcript}
+                statements={state.span?.statements ?? []}
+              />
+              {done !== null && change !== null ? (
+                <FinishedRecord
+                  risks={change.report.risks}
+                  details={runDetails(
+                    state.span?.statements ?? [],
+                    state.span?.stageAgents
+                  )}
+                />
+              ) : null}
+            </TabsContent>
+            <TabsContent value="implementation">
+              {done !== null && change !== null && change.files.length === 0 ? (
+                <ProblemCard
+                  label="No diff to read"
+                  tone="info"
+                  title="This run finished, and its diff is gone"
+                  cause="The branch was merged without a merge commit, or deleted, and Span did not keep the patch."
+                  kept={`${done.landed}. The change itself is still in your repository.`}
+                  next="Open the change to read what shipped. Proof and test results are still in the ledger."
+                >
+                  {done.change !== null ? (
+                    <a className={buttonVariants()} href={done.change.href}>
+                      {done.change.label}
+                    </a>
+                  ) : null}
+                </ProblemCard>
+              ) : state.span !== null && change !== null ? (
+                <Implementation
+                  change={change}
+                  truncated={state.implementation?.truncated ?? false}
+                  run={{
+                    cursor: state.span.cursor,
+                    statements: state.span.statements,
+                    agents: state.span.stageAgents ?? {},
+                    feature: featureState.feature,
+                    journal: journalState,
+                  }}
+                />
+              ) : null}
+            </TabsContent>
+            <TabsContent value="qa">
+              <QACases
+                skipped={state.acceptance?.skipped ?? false}
+                lines={state.acceptance?.lines ?? []}
+                command={state.acceptance?.command ?? ""}
+                exitCode={state.acceptance?.exitCode ?? 0}
+              />
+            </TabsContent>
+          </Tabs>
+        </div>
+        <div className="contents lg:flex lg:min-w-0 lg:flex-col lg:gap-4">
+          {kept !== null ? (
+            <SafeAndKept kept={kept} className="order-2 lg:order-none" />
+          ) : null}
+          {cursor?.done ? null : (
+            <RunControls className="order-4 lg:order-none">
+              <StageAgent
+                id={id}
+                current={cursor?.stage ?? ""}
+                choices={state.span?.stageAgents}
+              />
+              {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
+                <InstructionNote
+                  open={paused || showNote}
+                  selected={selected}
+                  timing={instructionTiming({
+                    current,
+                    selected,
+                    hold: Boolean(cursor?.hold),
+                    stop: Boolean(cursor?.stop),
+                  })}
+                  body={body}
+                  note={note}
+                  onSelect={setStage}
+                  onBody={setBody}
+                  onSave={(event) => void save(event)}
+                  onSaveAndResume={
+                    canAct && !cursor?.done
+                      ? () => void saveAndResume()
+                      : undefined
+                  }
+                  onOpen={() => {
                     setStage(selected)
                     setShowNote(true)
                   }}
-                >
-                  Leave a note for a stage
-                </Button>
-              </>
-            )}
-          </div>
-          ) : null}
-        </TabsContent>
-        <TabsContent value="implementation">
-          {state.span !== null ? (
-          <Implementation
-              stat={state.implementation?.stat ?? ""}
-              patch={state.implementation?.patch ?? ""}
-              truncated={state.implementation?.truncated ?? false}
-              transcript={state.transcript}
-              run={{
-                cursor: state.span.cursor,
-                statements: state.span.statements,
-                agents: state.span.stageAgents ?? {},
-                feature: featureState.feature,
-                journal: journalState,
-              }}
-            />
-          ) : null}
-        </TabsContent>
-        <TabsContent value="qa">
-          <QACases
-            skipped={state.acceptance?.skipped ?? false}
-            lines={state.acceptance?.lines ?? []}
-            command={state.acceptance?.command ?? ""}
-            exitCode={state.acceptance?.exitCode ?? 0}
-          />
-        </TabsContent>
-      </Tabs>
+                />
+              ) : null}
+              <Rewind
+                id={id}
+                current={cursor?.stage ?? ""}
+                blocked={restartBlocked}
+              />
+              {!paused && !cursor?.done && !idle ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap gap-2">
+                    {running === null ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void pause()}
+                      >
+                        Pause after this stage
+                      </Button>
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void stop()}
+                    >
+                      Stop now
+                    </Button>
+                  </div>
+                  <p className="text-sm text-pretty text-muted-foreground">
+                    The stage that is running finishes. The run holds before the
+                    next one, so you can choose the agent for it.
+                  </p>
+                </div>
+              ) : null}
+            </RunControls>
+          )}
+        </div>
+      </div>
     </Shell>
   )
 }

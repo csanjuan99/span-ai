@@ -10,7 +10,7 @@ export function FailureCard({ failure }: { failure: Failure }) {
   const command = failure.command
   const printed = (command?.output ?? "").trim()
   return (
-    <section className="flex flex-col gap-3 border-t border-border pt-4" aria-label="Failing check">
+    <section className="flex flex-col gap-3" aria-label="Failing check">
       <div className="flex flex-wrap items-baseline gap-x-3">
         <span className="text-sm text-destructive">{failure.stage} failed</span>
         <span className="text-sm text-muted-foreground tabular-nums">{attemptLine(failure)}</span>

@@ -1,3 +1,10 @@
+/** What a check's own output said about its tests. Absent when it printed no count. */
+export interface TestCounts {
+  passed: number
+  failed: number
+  skipped: number
+}
+
 /** One sealed stage the page can read without the engine types. */
 export interface StatementCommand {
   command: string
@@ -9,6 +16,7 @@ export interface StatementCommand {
   /** Run-relative path to the full output. */
   logPath?: string
   fingerprint?: string
+  tests?: TestCounts
 }
 
 /** The control record for one stage. */
@@ -174,6 +182,13 @@ export interface SpanHead {
   repo: string
   stage: string
   verdict: string
+  /** What the run is about, from its brief. Empty when none was kept. */
+  title: string
+  branch: string
+  /** Why the run is held or stopped. */
+  reason: string
+  /** When the run last moved, RFC 3339. Empty when unknown. */
+  updatedAt: string
 }
 
 /** The agent section of the desk: what is known, what was asked, what would run. */
@@ -272,6 +287,8 @@ export interface ImplementationView {
   stat: string
   patch: string
   truncated: boolean
+  /** Commits the branch added to its base; 0 when the server did not count. */
+  commits: number
 }
 
 /** One socket frame. The span field replaces the page on reconnect. */
@@ -407,4 +424,48 @@ export interface ShapePreview {
   backlogStatuses: string[]
   summary: string
   description: string
+}
+
+/** span.yaml as the settings page reads it, with the defaults filled in. */
+export interface ProjectConfig {
+  folder: string
+  /** False when there is no span.yaml, or it does not load; `reason` says which. */
+  exists: boolean
+  reason: string
+  /** The branch new runs start from. Empty keeps the defaults: dev, or master for a hotfix. */
+  base: string
+  stages: { open: string; merge: string; promote: string; plan: string; conflict: string }
+  prove: { focused: string[]; fast: string[]; acceptance: string[] }
+  qa: string
+  repair: number
+  blockStatus: string
+  stageTimeout: string
+}
+
+/** What a save may change in span.yaml. A key that is absent is left alone; a list is one check per entry. */
+export interface ConfigEdits {
+  base?: string
+  open?: string
+  merge?: string
+  promote?: string
+  plan?: string
+  conflict?: string
+  focused?: string[]
+  fast?: string[]
+  acceptance?: string[]
+  qa?: string
+  repair?: number
+}
+
+/** One value a save would change: its key in span.yaml, and what it reads before and after. */
+export interface ConfigLine {
+  key: string
+  before: string
+  after: string
+}
+
+/** What a save changed, and the settings as they read afterwards. */
+export interface ConfigSaved {
+  lines: ConfigLine[]
+  config: ProjectConfig
 }

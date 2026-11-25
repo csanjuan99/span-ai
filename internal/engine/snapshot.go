@@ -156,6 +156,13 @@ type Head struct {
 	Repo    string `json:"repo,omitempty"`
 	Stage   string `json:"stage"`
 	Verdict string `json:"verdict"`
+	// Title is the first line of the brief without the story key: what the run is about.
+	Title string `json:"title,omitempty"`
+	// Branch is the branch the run works on; Reason is why it is held, stopped or failing.
+	Branch string `json:"branch,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// UpdatedAt is when the cursor last moved, in RFC 3339 and UTC.
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 // Heads reads the cursor of every run under root, newest id last.
@@ -173,9 +180,12 @@ func Heads(root string) []Head {
 		if err != nil {
 			continue
 		}
+		dir := filepath.Join(root, entry.Name())
 		heads = append(heads, Head{
 			ID: cur.ID, Label: Label(cur), Issue: cur.Issue,
 			Repo: RepoName(cur.Workspace), Stage: cur.Stage, Verdict: verdictOf(cur),
+			Title: titleOf(dir, cur.Issue), Branch: cur.Branch, Reason: cur.Reason,
+			UpdatedAt: movedAt(dir),
 		})
 	}
 	sort.Slice(heads, func(i, j int) bool { return heads[i].ID < heads[j].ID })
@@ -193,4 +203,28 @@ func verdictOf(cur Cursor) string {
 	default:
 		return "running"
 	}
+}
+
+// titleOf is what the run is about: the first line of its brief, without the story key a
+// Jira brief starts with. A run without a readable brief has no title.
+func titleOf(dir, issue string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "brief.md"))
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(raw), "\n")
+	line = strings.TrimSpace(line)
+	if key := strings.TrimSpace(issue); key != "" {
+		line = strings.TrimSpace(strings.TrimPrefix(line, key))
+	}
+	return line
+}
+
+// movedAt is when the run's cursor last changed. An unreadable cursor has no time.
+func movedAt(dir string) string {
+	info, err := os.Stat(filepath.Join(dir, "cursor.json"))
+	if err != nil {
+		return ""
+	}
+	return info.ModTime().UTC().Format(time.RFC3339)
 }

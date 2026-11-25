@@ -23,6 +23,17 @@ go build -o span ./cmd/span
 ./span resume <id> --workspace /path/to/project
 ```
 
+### Working on the page
+
+The binary embeds the built page, so a change to `web/` normally needs a rebuild. To see edits as you type, leave `./span serve` running and start the dev server beside it:
+
+```bash
+cd web
+npm run dev
+```
+
+Open the address Vite prints (`http://localhost:5173`). The page reloads on every save and talks to `./span serve` on `127.0.0.1:8787` through a proxy; set `SPAN_DEV_API` to point at another server. Changes to the Go code still need `go build -o span ./cmd/span` and a restart of `./span serve`.
+
 `./span quickstart` writes `span.yaml` when the project does not have one. It does not overwrite an existing file unless `--force` is set. `span.example.yaml` is a hand-written policy, not the file quickstart writes.
 
 `SPAN_TOKEN` is required when `--addr` is not a loopback address. Clients send `Authorization: Bearer <token>`.

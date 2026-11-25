@@ -170,6 +170,9 @@ func band(ctx context.Context, check Checker, dir string, excuse Excuse, name, l
 		code, err := check.Run(ctx, command, dir)
 		item := statement.Command{Command: command, ExitCode: code.ExitCode, Band: name,
 			Output: code.Text}
+		if counts, ok := CountTests(code.Text); ok {
+			item.Tests = &counts
+		}
 		if err != nil {
 			item.Error = err.Error()
 			rep.Commands = append(rep.Commands, item)

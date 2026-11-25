@@ -6,6 +6,9 @@ import {
   approveStage,
   basePlaceholder,
   branchChoice,
+  configForm,
+  projectConfig,
+  saveConfig,
   branchLine,
   chooseConflict,
   conflictOf,
@@ -430,5 +433,82 @@ describe("shape client", () => {
     await createShapeIssue("sh-1", "/w", "PRJ", "")
     const body: unknown = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body))
     expect(body).toEqual({ workspace: "/w", project: "PRJ", confirm: true })
+  })
+})
+
+describe("snapshot test counts", () => {
+  const cursorOf = { id: "r1", stage: "prove", iteration: 1, hold: true, stop: false, done: false }
+  const read = (commands: unknown[]) =>
+    snapshot({ cursor: cursorOf, statements: [{ stage: "prove", iteration: 1, verdict: "iterate", reason: "", commands }] })
+      .statements[0]?.commands ?? []
+
+  it("keeps the counts a check printed, and reads a field the engine left out as zero", () => {
+    const [counted] = read([{ command: "npm test", exitCode: 1, tests: { passed: 41, failed: 2 } }])
+    expect(counted?.tests).toEqual({ passed: 41, failed: 2, skipped: 0 })
+  })
+
+  it("leaves the counts out for a check that printed none", () => {
+    const [plain] = read([{ command: "go build ./...", exitCode: 0 }])
+    expect(plain?.tests).toBeUndefined()
+  })
+})
+
+describe("projectConfig", () => {
+  it("fills the defaults when the project has no policy", () => {
+    const config = projectConfig({})
+    expect(config.exists).toBe(false)
+    expect(config.stages.conflict).toBe("hold")
+    expect(config.stages.merge).toBe("auto")
+    expect(config.repair).toBe(3)
+    expect(config.prove.fast).toEqual([])
+  })
+
+  it("reads what the server sent and ignores what is not text", () => {
+    const config = projectConfig({
+      folder: "/work/api",
+      exists: true,
+      base: "dev",
+      stages: { merge: "hold" },
+      prove: { fast: ["go test ./...", 7] },
+      qa: "npm test",
+      repair: 5,
+    })
+    expect(config.stages.merge).toBe("hold")
+    expect(config.prove.fast).toEqual(["go test ./..."])
+    expect(config.repair).toBe(5)
+    expect(config.qa).toBe("npm test")
+  })
+})
+
+describe("configForm", () => {
+  it("posts the project and only the keys that change, a list as one line per check", () => {
+    const form = configForm("/work/api", { merge: "hold", fast: ["go vet ./...", "go test ./..."], repair: 5 })
+    expect(Object.fromEntries(form)).toEqual({
+      project: "/work/api",
+      merge: "hold",
+      fast: "go vet ./...\ngo test ./...",
+      repair: "5",
+    })
+  })
+
+  it("posts an emptied list as an empty field, so the server clears it", () => {
+    expect(configForm("/work/api", { fast: [] }).get("fast")).toBe("")
+  })
+})
+
+describe("saveConfig", () => {
+  it("reads the changed lines and the settings after the write", async () => {
+    reply(200, {
+      lines: [{ key: "stages.merge", before: "auto", after: "hold" }],
+      config: { exists: true, stages: { merge: "hold" } },
+    })
+    const saved = await saveConfig("/work/api", { merge: "hold" })
+    expect(saved.lines).toEqual([{ key: "stages.merge", before: "auto", after: "hold" }])
+    expect(saved.config.stages.merge).toBe("hold")
+  })
+
+  it("throws the server's reason when the file would refuse the value", async () => {
+    reply(400, { error: "invalid", message: 'stages.merge "maybe" is not auto or hold' })
+    await expect(saveConfig("/work/api", { merge: "maybe" })).rejects.toThrow("is not auto or hold")
   })
 })

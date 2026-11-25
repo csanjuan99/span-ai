@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 
 import { setStageAgent } from "@/lib/api"
@@ -61,7 +63,7 @@ export function StageAgent({
   }
 
   return (
-    <div className="flex flex-col gap-2 border border-border p-3">
+    <div className="flex flex-col gap-2">
       <Label htmlFor="stage-agent-stage">Agent for a stage of this run</Label>
       <p className="text-pretty text-sm text-muted-foreground">
         Only frame, build, and inspect call a model. The rest run commands. A change applies the next time that stage

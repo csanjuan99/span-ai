@@ -1,3 +1,5 @@
+"use client"
+
 import { useState } from "react"
 
 import { rewindRun } from "@/lib/api"
@@ -14,7 +16,7 @@ const restartable = stages.filter((name) => name !== "intake")
  * Restart the run at a stage, with the instruction that stage reads when it starts.
  * A new iteration keeps the earlier attempt on disk, and the repair budget starts fresh.
  */
-export function Rewind({ id, current }: { id: string; current: string }) {
+export function Rewind({ id, current, blocked = "" }: { id: string; current: string; blocked?: string }) {
   const [stage, setStage] = useState(() => (current === "" || current === "intake" ? "build" : current))
   const [note, setNote] = useState("")
   const [message, setMessage] = useState("")
@@ -34,13 +36,13 @@ export function Rewind({ id, current }: { id: string; current: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-2 border border-border p-3">
+    <div className="flex flex-col gap-2">
       <Label htmlFor="rewind-stage">Restart from a stage</Label>
       <p className="text-pretty text-sm text-muted-foreground">
         When what the branch produced is not what the handoff asked for, start again at the stage that has to change.
         The attempt so far stays on disk as its own iteration, and the instruction below is what that stage reads.
       </p>
-      <Select value={stage} onValueChange={setStage}>
+      <Select value={stage} onValueChange={setStage} disabled={blocked !== ""}>
         <SelectTrigger id="rewind-stage" className="w-40">
           <SelectValue />
         </SelectTrigger>
@@ -58,12 +60,14 @@ export function Rewind({ id, current }: { id: string; current: string }) {
         value={note}
         onChange={(event) => setNote(event.target.value)}
         rows={4}
+        disabled={blocked !== ""}
       />
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="button" variant="secondary" disabled={busy} onClick={() => void restart()}>
+        <Button type="button" variant="secondary" disabled={busy || blocked !== ""} onClick={() => void restart()}>
           Start again at {stage}
         </Button>
         {message !== "" ? <p className="text-pretty text-sm">{message}</p> : null}
+        {blocked !== "" ? <p className="text-pretty text-sm text-muted-foreground">{blocked}</p> : null}
       </div>
     </div>
   )

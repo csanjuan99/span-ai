@@ -27,6 +27,10 @@ import {
   type AgentState,
   type BranchChoice,
   type AgentStatus,
+  type ConfigEdits,
+  type ConfigLine,
+  type ConfigSaved,
+  type ProjectConfig,
   type SpanHead,
   type ShapeExample,
   type ShapeJira,
@@ -146,10 +150,14 @@ function command(value: unknown): StatementCommand {
     return { command: "", exitCode: 0 }
   }
   const error = text(value.error)
+  const tests = isRecord(value.tests)
+    ? { passed: count(value.tests.passed), failed: count(value.tests.failed), skipped: count(value.tests.skipped) }
+    : undefined
   return {
     command: text(value.command),
     exitCode: count(value.exitCode),
     ...(error === "" ? {} : { error }),
+    ...(tests === undefined ? {} : { tests }),
   }
 }
 
@@ -387,6 +395,7 @@ export function implementationView(value: unknown): ImplementationView {
     stat: text(value.stat),
     patch: text(value.patch),
     truncated: flag(value.truncated),
+    commits: count(value.commits),
   }
 }
 
@@ -444,11 +453,17 @@ async function readBody(response: Response): Promise<unknown> {
 
 /** Fetches JSON and surfaces the server message beside the action that sent it. */
 export async function getJSON(url: string): Promise<unknown> {
-  const response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  let response: Response
+  try {
+    response = await fetch(url, { headers: withAuth(new Headers({ Accept: "application/json" })) })
+  } catch (err: unknown) {
+    // The request never got an answer: the server is down or on another port.
+    throw new ApiError("unreachable", err instanceof Error ? err.message : "the server did not answer")
+  }
   refuseUnauthorized(response)
   const body = await readBody(response)
   if (!response.ok) {
-    throw new Error(messageOf(body))
+    throw new ApiError(isRecord(body) ? text(body.error) : "", messageOf(body))
   }
   return body
 }
@@ -732,6 +747,10 @@ function spanHeadOf(value: unknown): SpanHead {
     repo: text(row.repo),
     stage: text(row.stage),
     verdict: text(row.verdict),
+    title: text(row.title),
+    branch: text(row.branch),
+    reason: text(row.reason),
+    updatedAt: text(row.updatedAt),
   }
 }
 
@@ -883,4 +902,62 @@ export async function createShapeIssue(id: string, workspace: string, project: s
     request.board = Number(board.trim())
   }
   return shapeSession(await shapeRequest("POST", `/shapes/${encodeURIComponent(id)}/jira`, request))
+}
+
+/** What span.yaml means when a key is absent. The settings page marks anything else as changed. */
+export const configDefaults = {
+  stages: { open: "auto", merge: "auto", promote: "auto", plan: "auto", conflict: "hold" },
+  repair: 3,
+} as const
+
+/** Reads the `/config` reply. Anything missing takes the default span.yaml would give. */
+export function projectConfig(value: unknown): ProjectConfig {
+  const body = isRecord(value) ? value : {}
+  const stages = isRecord(body.stages) ? body.stages : {}
+  const prove = isRecord(body.prove) ? body.prove : {}
+  return {
+    folder: text(body.folder),
+    exists: flag(body.exists),
+    reason: text(body.reason),
+    base: text(body.base),
+    stages: {
+      open: text(stages.open) || configDefaults.stages.open,
+      merge: text(stages.merge) || configDefaults.stages.merge,
+      promote: text(stages.promote) || configDefaults.stages.promote,
+      plan: text(stages.plan) || configDefaults.stages.plan,
+      conflict: text(stages.conflict) || configDefaults.stages.conflict,
+    },
+    prove: { focused: stringList(prove.focused), fast: stringList(prove.fast), acceptance: stringList(prove.acceptance) },
+    qa: text(body.qa),
+    repair: typeof body.repair === "number" ? body.repair : configDefaults.repair,
+    blockStatus: text(body.blockStatus),
+    stageTimeout: text(body.stageTimeout),
+  }
+}
+
+/** The form a preview or a save posts: the project, and only the keys that change. */
+export function configForm(project: string, edits: ConfigEdits): URLSearchParams {
+  const form = new URLSearchParams({ project })
+  for (const [key, value] of Object.entries(edits)) {
+    if (value !== undefined) {
+      form.set(key, Array.isArray(value) ? value.join("\n") : String(value))
+    }
+  }
+  return form
+}
+
+function configLines(value: unknown): ConfigLine[] {
+  const body = isRecord(value) ? value : {}
+  return rows(body.lines).map((line) => ({ key: text(line.key), before: text(line.before), after: text(line.after) }))
+}
+
+/** What saving `edits` would change in span.yaml. Nothing is written. A value the file would refuse throws. */
+export async function previewConfig(project: string, edits: ConfigEdits): Promise<ConfigLine[]> {
+  return configLines(await postForm("/config/preview", configForm(project, edits)))
+}
+
+/** Writes `edits` into span.yaml and returns what changed with the settings as they now read. */
+export async function saveConfig(project: string, edits: ConfigEdits): Promise<ConfigSaved> {
+  const body = await postForm("/config", configForm(project, edits))
+  return { lines: configLines(body), config: projectConfig(isRecord(body) ? body.config : {}) }
 }

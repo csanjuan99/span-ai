@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -45,11 +51,14 @@ beforeEach(() => {
       runs: [{ id: "s", stage: "intake", repo: "" }],
       partial: false,
       notes: "",
-    }),
+    })
   )
   getJSON.mockImplementation((url: string) => {
     if (url.startsWith("/branches?path=")) {
-      return Promise.resolve({ branches: ["dev", "feat/SAL-3"], default: "dev" })
+      return Promise.resolve({
+        branches: ["dev", "feat/SAL-3"],
+        default: "dev",
+      })
     }
     if (url.startsWith("/spans")) {
       return Promise.resolve({ spans: [] })
@@ -58,7 +67,11 @@ beforeEach(() => {
       return Promise.resolve({ agents: [] })
     }
     if (url.startsWith("/jira?path=")) {
-      return Promise.resolve({ configured: true, email: "me@example.test", baseUrl: "https://salute.atlassian.net" })
+      return Promise.resolve({
+        configured: true,
+        email: "me@example.test",
+        baseUrl: "https://salute.atlassian.net",
+      })
     }
     return Promise.resolve({})
   })
@@ -69,10 +82,14 @@ describe("Desk", () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     await waitFor(() => {
-      expect(getJSON.mock.calls.some(([url]) => String(url).startsWith("/jira?path="))).toBe(true)
+      expect(
+        getJSON.mock.calls.some(([url]) =>
+          String(url).startsWith("/jira?path=")
+        )
+      ).toBe(true)
     })
     await waitFor(() => {
       expect(screen.queryByLabelText("Token")).toBeNull()
@@ -100,7 +117,7 @@ describe("Desk", () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     fireEvent.click(await screen.findByRole("button", { name: /Connect Jira/ }))
     await waitFor(() => {
@@ -125,7 +142,7 @@ describe("Desk", () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     fireEvent.click(screen.getByRole("button", { name: "Find repos" }))
     await waitFor(() => {
@@ -143,7 +160,15 @@ describe("Desk", () => {
       }
       if (url.startsWith("/jira?path=")) {
         jiraCalls += 1
-        return Promise.resolve(jiraCalls === 1 ? { configured: false } : { configured: true, email: "later@example.test", baseUrl: "https://x.test" })
+        return Promise.resolve(
+          jiraCalls === 1
+            ? { configured: false }
+            : {
+                configured: true,
+                email: "later@example.test",
+                baseUrl: "https://x.test",
+              }
+        )
       }
       if (url.startsWith("/spans")) {
         return Promise.resolve({ spans: [] })
@@ -153,7 +178,7 @@ describe("Desk", () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     await waitFor(() => {
       expect(jiraCalls).toBe(1)
@@ -171,7 +196,7 @@ describe("Desk", () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     const field = screen.getByLabelText("Base branch")
     await waitFor(() => {
@@ -180,21 +205,25 @@ describe("Desk", () => {
     await waitFor(() => {
       expect(document.querySelectorAll("#base-branches option").length).toBe(2)
     })
-    expect(getJSON.mock.calls.some(([url]) => String(url) === "/branches?path=.")).toBe(true)
+    expect(
+      getJSON.mock.calls.some(([url]) => String(url) === "/branches?path=.")
+    ).toBe(true)
     fireEvent.change(field, { target: { value: "  feat/SAL-3 " } })
     fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
     await waitFor(() => {
       expect(startRun).toHaveBeenCalled()
     })
     const form: unknown = startRun.mock.calls[0]?.[0]
-    expect(form instanceof FormData ? form.get("base") : null).toBe("feat/SAL-3")
+    expect(form instanceof FormData ? form.get("base") : null).toBe(
+      "feat/SAL-3"
+    )
   })
 
   it("posts no base when the field is left empty, so the default applies", async () => {
     render(
       <MemoryRouter>
         <Desk />
-      </MemoryRouter>,
+      </MemoryRouter>
     )
     fireEvent.click(screen.getByRole("button", { name: "Configure and run" }))
     await waitFor(() => {
@@ -202,5 +231,49 @@ describe("Desk", () => {
     })
     const form: unknown = startRun.mock.calls[0]?.[0]
     expect(form instanceof FormData ? form.has("base") : true).toBe(false)
+  })
+
+  it("opens on the runs, and the start form waits behind New run", async () => {
+    getJSON.mockImplementation((url: string) =>
+      url.startsWith("/spans")
+        ? Promise.resolve({
+            spans: [
+              {
+                id: "a",
+                verdict: "hold",
+                stage: "merge",
+                issue: "SAL-1",
+                title: "Pay",
+                reason: "conflict",
+              },
+            ],
+          })
+        : Promise.resolve({})
+    )
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    expect(
+      await screen.findByRole("region", { name: "Waiting for me" })
+    ).toBeTruthy()
+    expect(screen.queryByLabelText("Story")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "New run" }))
+    expect(await screen.findByLabelText("Story")).toBeTruthy()
+  })
+
+  it("starts from the sample brief when there are no runs", async () => {
+    render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start with the sample brief" })
+    )
+    const story = (await screen.findByLabelText("Story")) as HTMLTextAreaElement
+    expect(story.value).toContain("Add a /healthz endpoint")
+    expect(startRun).not.toHaveBeenCalled()
   })
 })

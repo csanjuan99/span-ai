@@ -689,6 +689,10 @@ A non-zero exit attributed to this change does not discard the span. It returns 
 
 A command that never started does not consume an attempt. It holds, and `./span resume` repeats the band.
 
+Once a run is done and its branch was merged with a merge commit, the page reads the change from the base as it was just before that merge, since the branch is already in the base and a plain `base...head` diff would be empty. A fast-forward leaves no merge commit, so such a run shows no diff.
+
+When a command prints a test summary Span can read, the statement keeps the counts (`tests`: passed, failed, skipped) and the run page shows them as "41 passed · 2 failed". Span reads the summary lines of `vitest`, `jest` and `pytest`, and the `--- PASS` lines of `go test -v`. Plain `go test` prints no pass lines, so it has no count; use `go test -v` to get one. A command that prints no summary, such as a build or a linter, has no count and the page says so instead of guessing.
+
 Two stops run before the cap:
 
 - The same failure twice. The fingerprint of a failure is the command plus the lines that name what broke. If it comes back unchanged on the next attempt, the build did not fix it, and another run would spend the same money for the same result. The span holds with `no progress`.
@@ -782,6 +786,29 @@ anything else is refused, so the picker never leaves a file in a home directory.
 
 `GET /agent?path=<folder>` returns the same list, and `POST /agent` with `project` and
 `agent` writes the choice.
+
+### Editing `span.yaml` from Settings
+
+The Settings page edits the base branch, the three check lists (`prove.focused`, `prove.fast`,
+`prove.acceptance`), `qa.command`, `repair.maxAttempts` and the `stages` modes (`open`, `merge`,
+`promote`, `plan`, `conflict`). A change shows under **What changes** as the old and new value
+before anything is written; **Save N changes** writes it and **Discard changes** drops it.
+
+A save rewrites only the lines of the keys that changed. Comments, key order and every other key
+stay as they were, and the new file is checked with the same rules as a run before it replaces
+the old one. A value the file would refuse (a mode that is not `auto` or `hold`, `repair` outside
+1 to 8, a base such as `HEAD`, a check with shell punctuation) is refused with the reason and
+nothing is written. A section written inline (`stages: {open: auto}`) is refused too: write it as
+a block first. A folder without `span.yaml` gets one only when it is a git repository or already
+has `.span/`, as with the agent picker.
+
+`POST /config/preview` returns `{"lines": [{"key", "before", "after"}]}` and writes nothing;
+`POST /config` writes and returns the same lines plus the settings as they now read. Both take
+`project` and any of `base`, `open`, `merge`, `promote`, `plan`, `conflict`, `focused`, `fast`,
+`acceptance` (one check per line), `qa` and `repair`. A field that is absent is left alone; an
+empty `focused`, `fast` or `acceptance` empties the list, and an empty `base` or `qa` removes
+the key. Any other field is refused. Not editable here: `manifest`, `promote.environments`,
+`commit`, `limits`, `jira`.
 
 ### A folder of several repositories
 

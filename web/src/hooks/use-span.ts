@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { acceptanceView, agentStatus, getJSON, implementationView, liveFrame, snapshot, socketProtocol, UnauthorizedError } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
+import { problemOf, type Problem } from "@/lib/problem"
 import { coveredByReplay, frameGate, reconnectDelay } from "@/lib/reconnect"
 import { agentReviewMs, type TimelineAction, type TimelineFrame } from "@/lib/timeline"
 import type { AgentStatus, AcceptanceView, ImplementationView, LiveFrame, Snapshot, Statement } from "@/lib/types"
@@ -19,6 +20,8 @@ export interface SpanState {
   note: (text: string) => void
   error: string
   connected: boolean
+  /** Why the first read of the run failed, when the whole page has to say so. */
+  problem: Problem | null
 }
 
 function upsert(statements: Statement[], next: Statement): Statement[] {
@@ -191,8 +194,10 @@ export function useSpan(id: string): SpanState {
   const [tracked, setTracked] = useState(id)
   const [error, setError] = useState("")
   const [connected, setConnected] = useState(false)
+  const [problem, setProblem] = useState<Problem | null>(null)
   if (tracked !== id) {
     setTracked(id)
+    setProblem(null)
     setFrames([])
     setActions([])
     setTranscript([])
@@ -265,13 +270,19 @@ export function useSpan(id: string): SpanState {
             return
           }
           const loaded = snapshot(body)
+          setProblem(null)
           setSpan(loaded)
           loadDiff(loaded.cursor.gitSHA)
         })
         .catch((err: unknown) => {
-          if (!closed) {
-            note(`the run could not be reloaded: ${reasonText(err, "unknown error")}`)
+          if (closed) {
+            return
           }
+          const page = problemOf(err)
+          if (page !== null) {
+            setProblem(page)
+          }
+          note(`the run could not be reloaded: ${reasonText(err, "unknown error")}`)
         })
     }
     const apply = (frame: LiveFrame) => {
@@ -412,5 +423,5 @@ export function useSpan(id: string): SpanState {
     }
   }, [id, note])
 
-  return { span, acceptance, implementation, transcript, frames, actions, agent, agentAt, note, error, connected }
+  return { span, acceptance, implementation, transcript, frames, actions, agent, agentAt, note, error, connected, problem }
 }

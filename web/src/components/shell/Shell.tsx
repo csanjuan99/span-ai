@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 
+import { ThemeToggle } from "@/components/theme-toggle/ThemeToggle"
 import { Timeline } from "@/components/timeline/Timeline"
 import type { TimelineLine } from "@/lib/timeline"
 
@@ -17,14 +18,15 @@ export function Shell({
 }) {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 py-2 text-sm">
-        <span className="shrink-0 text-primary">span</span>
-        <span className="min-w-0 truncate text-muted-foreground tabular-nums">{path}</span>
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-2 text-sm">
+        <span className="shrink-0 font-semibold text-primary">span</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground tabular-nums">{path}</span>
+        <ThemeToggle />
       </div>
       <main className="flex min-h-0 w-full flex-1 flex-col gap-6 overflow-y-auto px-4 py-6">{children}</main>
-      <footer className="shrink-0">
+      <footer className="shrink-0 bg-surface-code">
         <Timeline lines={lines} />
-        <div className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-muted-foreground">
+        <div className="flex items-center justify-between border-t border-border px-4 py-2 font-mono text-xs text-muted-foreground">
           <span className="tabular-nums">{status}</span>
           <span>span serve</span>
         </div>
