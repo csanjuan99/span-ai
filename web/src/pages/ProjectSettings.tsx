@@ -7,6 +7,7 @@ import { AgentPicker } from "@/components/agent-picker/AgentPicker"
 import { AgentsFields } from "@/components/settings-edit/AgentsFields"
 import { AppearanceFields } from "@/components/settings-edit/AppearanceFields"
 import { ApprovalsFields } from "@/components/settings-edit/ApprovalsFields"
+import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
 import { ChecksFields } from "@/components/settings-edit/ChecksFields"
 import { JiraSection } from "@/components/settings-edit/JiraSection"
 import { SettingsNav } from "@/components/settings-edit/SettingsNav"
@@ -139,15 +140,24 @@ export function ProjectSettings() {
         </p>
       </header>
       <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)_340px]">
+        {count > 0 ? (
+          <p
+            role="status"
+            className="flex items-center gap-2 rounded-[14px] border border-border bg-card p-3 text-[13px] lg:hidden"
+          >
+            <ChangedBadge>{count} unsaved</ChangedBadge>
+            Review under “What changes” at the end.
+          </p>
+        ) : null}
         <SettingsNav current={current} onPick={setCurrent} />
         <div className="flex min-w-0 flex-col gap-6">
-          {note !== "" ? (
-            <p className="text-sm text-pretty text-destructive">{note}</p>
-          ) : null}
-          {config !== null && config.reason !== "" ? (
-            <p className="text-sm text-pretty text-hold">{config.reason}</p>
-          ) : null}
           <Section name="Project" hint="Where Span works.">
+            {note !== "" ? (
+              <p className="text-sm text-pretty text-destructive">{note}</p>
+            ) : null}
+            {config !== null && config.reason !== "" ? (
+              <p className="text-sm text-pretty text-hold">{config.reason}</p>
+            ) : null}
             <FieldRow
               label="Project folder"
               fallback="the folder Span was started in"
@@ -202,7 +212,7 @@ export function ProjectSettings() {
           </Section>
           <Section
             name="Notifications"
-            hint="When Span tells you a run needs you, failed or finished. Saved in this browser."
+            hint="Choose what gets your attention and how. Saved in this browser."
           >
             <NotificationPrefs />
           </Section>

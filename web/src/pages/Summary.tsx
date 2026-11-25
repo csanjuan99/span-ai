@@ -41,7 +41,7 @@ export function Summary() {
   })
   return (
     <Shell path={`~/spans/${id}/summary`} status="summary" lines={[]}>
-      <div className="mx-auto grid w-full max-w-[1440px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_440px]">
+      <div className="mx-auto grid w-full max-w-[1440px] grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_440px]">
         <div className="flex min-w-0 flex-col gap-6">
           <Link
             className="text-sm text-primary underline-offset-4 hover:underline"

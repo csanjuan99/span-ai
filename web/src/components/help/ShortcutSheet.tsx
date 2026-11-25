@@ -1,7 +1,9 @@
 "use client"
 
-import { KeyCaps } from "@/components/help/KeyCaps"
+import { KeyboardIcon } from "lucide-react"
 import { useSyncExternalStore } from "react"
+
+import { KeyCaps } from "@/components/help/KeyCaps"
 
 import {
   getRunContext,
@@ -37,45 +39,49 @@ export function ShortcutSheet({
         ]
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-background/80 p-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-foreground/40 p-4 pt-[12vh] dark:bg-black/65"
       onClick={onClose}
     >
       <section
         role="dialog"
         aria-modal="true"
         aria-label="Keyboard shortcuts"
-        className="flex max-h-[76vh] w-full max-w-lg flex-col gap-4 overflow-auto rounded-2xl border border-border bg-card p-5 shadow-md"
+        className="flex max-h-[76vh] w-full max-w-[640px] flex-col overflow-auto rounded-[20px] border border-border bg-card shadow-md"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+          <KeyboardIcon aria-hidden="true" className="size-4" />
           <h2 className="text-lg font-semibold">Keyboard shortcuts</h2>
           <button
             type="button"
+            aria-label="Close"
             onClick={onClose}
-            className="ml-auto rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+            className="-my-3 ml-auto flex min-h-11 min-w-11 items-center justify-center"
           >
-            Close
+            <KeyCaps keys={["esc"]} />
           </button>
         </div>
-        {groups.map((group) => (
-          <div key={group.group} className="flex flex-col gap-2">
-            <h3 className="text-xs tracking-wide text-muted-foreground uppercase">
-              {group.group}
-            </h3>
-            <ul className="flex flex-col divide-y divide-border">
-              {group.items.map((item) => (
-                <li
-                  key={item.label}
-                  className="flex items-center justify-between gap-3 py-2 text-sm"
-                >
-                  {item.label}
-                  <KeyCaps keys={item.keys} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-        <p className="text-xs text-muted-foreground">
+        <div className="grid gap-x-8 gap-y-4 px-5 py-4 sm:grid-cols-2">
+          {groups.map((group) => (
+            <div key={group.group} className="flex flex-col">
+              <h3 className="mb-1 text-xs font-medium tracking-[0.02em] text-muted-foreground">
+                {group.group}
+              </h3>
+              <ul className="flex flex-col divide-y divide-border">
+                {group.items.map((item) => (
+                  <li
+                    key={item.label}
+                    className="flex items-center justify-between gap-3 py-2 text-[13px] leading-5"
+                  >
+                    {item.label}
+                    <KeyCaps keys={item.keys} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <p className="px-5 pb-4 text-xs text-muted-foreground">
           Shortcuts never run while you type in a field.
         </p>
       </section>

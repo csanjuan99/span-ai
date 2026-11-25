@@ -1,3 +1,4 @@
+import { CircleCheckIcon, ClockIcon, GitMergeIcon } from "lucide-react"
 import type { ReactNode } from "react"
 
 import { Pill } from "@/components/onboarding/Pill"
@@ -91,6 +92,9 @@ export function SummaryHead({
           </span>
         ) : null}
         <Pill tone={done ? "pass" : "hold"}>
+          {done ? (
+            <CircleCheckIcon aria-hidden="true" className="size-3.5" />
+          ) : null}
           {done ? "Done" : "In progress"}
         </Pill>
       </div>
@@ -99,7 +103,8 @@ export function SummaryHead({
       </h1>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
         {summary.sha !== "" ? (
-          <span>
+          <span className="flex items-center gap-1.5">
+            <GitMergeIcon aria-hidden="true" className="size-3.5" />
             {summary.outcome.toLowerCase().includes("merged")
               ? "merged as"
               : "ended on"}{" "}
@@ -118,7 +123,10 @@ export function SummaryHead({
           </span>
         ) : null}
         {day !== "" || took !== "" ? (
-          <span>{[day, took].filter((part) => part !== "").join(", ")}</span>
+          <span className="flex items-center gap-1.5">
+            <ClockIcon aria-hidden="true" className="size-3.5" />
+            {[day, took].filter((part) => part !== "").join(", ")}
+          </span>
         ) : null}
       </div>
     </div>

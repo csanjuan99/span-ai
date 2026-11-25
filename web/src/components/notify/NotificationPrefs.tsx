@@ -119,12 +119,6 @@ export function NotificationPrefs() {
 
   return (
     <section className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-base font-semibold">Notifications</h2>
-        <p className="text-sm text-muted-foreground">
-          Choose what gets your attention and how.
-        </p>
-      </div>
       <div className="flex flex-wrap items-center gap-3 rounded-[14px] border border-border bg-muted p-3">
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-medium">{copy.title}</p>
@@ -145,10 +139,10 @@ export function NotificationPrefs() {
       </div>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs text-muted-foreground">
-            <th className="py-2 font-medium">Event</th>
+          <tr className="text-left text-xs font-medium tracking-[0.02em] text-muted-foreground">
+            <th className="px-2 py-3 font-medium">Event</th>
             {columns.map((column) => (
-              <th key={column.channel} className="py-2 font-medium">
+              <th key={column.channel} className="px-2 py-3 font-medium">
                 {column.label}
               </th>
             ))}
@@ -157,14 +151,16 @@ export function NotificationPrefs() {
         <tbody>
           {notifyKinds.map((kind) => (
             <tr key={kind} className="border-t border-border">
-              <td className="py-2">
-                <div className="font-medium">{kindCopy[kind].label}</div>
+              <td className="px-2 py-3 align-top">
+                <div className="text-[13px] leading-5 font-medium">
+                  {kindCopy[kind].label}
+                </div>
                 <div className="text-xs text-muted-foreground">
                   {kindCopy[kind].hint}
                 </div>
               </td>
               {columns.map((column) => (
-                <td key={column.channel} className="py-2">
+                <td key={column.channel} className="px-2 py-3 align-top">
                   <Checkbox
                     aria-label={`${kindCopy[kind].label}: ${column.label.toLowerCase()}`}
                     checked={prefs.events[kind][column.channel]}

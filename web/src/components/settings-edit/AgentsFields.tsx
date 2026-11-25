@@ -24,10 +24,13 @@ export function AgentsFields({
   props: EditProps
   agents: AgentState[]
 }) {
-  const projectAgent =
-    props.config.agent === "auto" || props.config.agent === "any"
-      ? "the first ready CLI"
-      : props.config.agent
+  const named =
+    props.config.agent !== "auto" &&
+    props.config.agent !== "any" &&
+    props.config.agent !== ""
+  const projectLabel = named
+    ? `Project agent (${props.config.agent})`
+    : "Project agent"
   return (
     <>
       {agentStages.map((stage) => {
@@ -40,7 +43,7 @@ export function AgentsFields({
             label={`${stage} agent`}
             value={value}
             options={[
-              { value: "", label: `Project agent (${projectAgent})` },
+              { value: "", label: projectLabel },
               ...agents
                 .filter((row) => row.ready || row.id === value)
                 .map((row) => ({

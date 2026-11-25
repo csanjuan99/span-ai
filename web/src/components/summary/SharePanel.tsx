@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckIcon, CopyIcon, Share2Icon } from "lucide-react"
+import { CheckIcon, CopyIcon, UploadIcon } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -50,7 +50,7 @@ export function SharePanel({ summary }: { summary: Summary }) {
       className="flex flex-col gap-3 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:p-5 lg:sticky lg:top-4"
     >
       <div className="flex items-center gap-2">
-        <Share2Icon aria-hidden="true" className="size-4" />
+        <UploadIcon aria-hidden="true" className="size-4" />
         <h2 className="text-lg font-semibold">Share this summary</h2>
       </div>
       <p className="text-[13px] text-muted-foreground">
@@ -76,7 +76,7 @@ export function SharePanel({ summary }: { summary: Summary }) {
       <pre
         aria-label="Markdown preview"
         tabIndex={0}
-        className="max-h-80 overflow-auto rounded-[10px] border border-border bg-surface-code p-3 font-mono text-xs whitespace-pre-wrap"
+        className="max-h-80 overflow-auto rounded-[10px] border border-border bg-surface-code p-3 font-mono text-xs leading-5 whitespace-pre"
       >
         {text}
       </pre>

@@ -86,7 +86,7 @@ export function CommandsField({
     >
       <Textarea
         aria-label={label}
-        className="rounded-[10px] border-input bg-surface-code px-2.5 py-2 font-mono text-xs"
+        className="rounded-[10px] border-input bg-surface-code px-2.5 py-2 font-mono text-xs md:text-xs"
         disabled={props.disabled}
         placeholder="One command per line"
         rows={2}

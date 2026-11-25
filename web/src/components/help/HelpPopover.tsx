@@ -1,6 +1,6 @@
 "use client"
 
-import { CircleHelpIcon } from "lucide-react"
+import { CircleHelpIcon, InfoIcon } from "lucide-react"
 import { useId, useState } from "react"
 
 /**
@@ -31,7 +31,7 @@ export function HelpPopover({
             setOpen(false)
           }
         }}
-        className="inline-grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+        className="inline-grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none pointer-coarse:size-11"
       >
         <CircleHelpIcon aria-hidden="true" className="size-4" />
       </button>
@@ -40,14 +40,17 @@ export function HelpPopover({
           id={id}
           role="dialog"
           aria-label={`What is “${title}”?`}
-          className="absolute top-full left-0 z-40 mt-2 flex w-72 flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-md"
+          className="absolute top-full left-0 z-40 mt-2 flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2 rounded-[14px] border border-border bg-card p-4 shadow-md"
         >
-          <span className="text-sm font-semibold">What is “{title}”?</span>
-          <p className="text-sm text-pretty">{body}</p>
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <InfoIcon aria-hidden="true" className="size-4 text-primary" />
+            What is “{title}”?
+          </span>
+          <p className="text-[13px] leading-5 text-pretty">{body}</p>
           {points.length > 0 ? (
-            <ul className="flex flex-col gap-1 text-sm">
+            <ul className="flex flex-col gap-2 text-[13px] leading-5">
               {points.map((point) => (
-                <li key={point.text} className="flex gap-2">
+                <li key={point.text} className="flex gap-3">
                   <span
                     aria-hidden="true"
                     className={
@@ -66,7 +69,7 @@ export function HelpPopover({
           <button
             type="button"
             onClick={() => setOpen(false)}
-            className="self-start rounded-md border border-border px-2 py-1 text-sm hover:bg-muted"
+            className="mt-1 min-h-11 self-start rounded-[10px] border border-input px-3 text-[13px] font-medium hover:bg-muted sm:min-h-8"
           >
             Got it
           </button>

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 
 import { ChangedBadge } from "./ChangedBadge"
 import { FieldRow } from "./FieldRow"
+import { SelectField } from "./SelectField"
 
 const themes = [
   { value: "system", label: "System" },
@@ -58,20 +59,19 @@ export function AppearanceFields() {
         changed={motion !== "system"}
         unsaved={false}
       >
-        <select
-          aria-label="Motion"
-          className="h-8 w-full rounded-[10px] border border-input bg-card px-2.5 text-[13px] sm:max-w-72"
+        <SelectField
+          label="Motion"
           value={motion}
-          onChange={(event) => {
-            const next: MotionPref =
-              event.target.value === "reduced" ? "reduced" : "system"
+          options={[
+            { value: "system", label: "Follow system" },
+            { value: "reduced", label: "Reduce motion" },
+          ]}
+          onChange={(value) => {
+            const next: MotionPref = value === "reduced" ? "reduced" : "system"
             setMotion(next)
             setStored(saveMotion(next))
           }}
-        >
-          <option value="system">Follow system</option>
-          <option value="reduced">Reduce motion</option>
-        </select>
+        />
         <p className="text-xs text-muted-foreground">
           Reduced motion turns off the start-up animation, the skeleton shimmer
           and every other animation.

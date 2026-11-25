@@ -1,12 +1,13 @@
 "use client"
 
 import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
+import {
+  SelectField,
+  type SelectOption,
+} from "@/components/settings-edit/SelectField"
 
 /** One option of a stage's select. */
-export interface StageOption {
-  value: string
-  label: string
-}
+export type StageOption = SelectOption
 
 /**
  * One stage and the choice made for it: its name, a select, and whether the choice moved
@@ -42,19 +43,14 @@ export function StageRow({
           <span className="text-xs text-muted-foreground">{hint}</span>
         ) : null}
       </span>
-      <select
-        aria-label={label}
-        className="h-8 w-full rounded-[10px] border border-input bg-card px-2.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 sm:max-w-72"
-        disabled={disabled}
+      <SelectField
+        mono
+        label={label}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        options={options}
+        disabled={disabled}
+        onChange={onChange}
+      />
       <span className="col-start-2 sm:col-start-3">
         {changed ? (
           <ChangedBadge>Changed</ChangedBadge>
