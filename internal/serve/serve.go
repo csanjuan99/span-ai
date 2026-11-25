@@ -81,6 +81,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	starts := newRecent()
 	mux := http.NewServeMux()
 	shapeRoutes(mux, newShapeConfig(opts))
+	startRoutes(mux, root, launch, starts)
 	mux.HandleFunc("GET /spans", func(w http.ResponseWriter, r *http.Request) {
 		if !wantsJSON(r) {
 			servePage(pages, w, r)
@@ -96,41 +97,15 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, engine.CollectMetrics(root))
 	})
 	mux.HandleFunc("POST /quickstart", func(w http.ResponseWriter, r *http.Request) {
-		req, err := storyRequest(r)
-		if err != nil {
-			writeErr(w, err)
+		out, ok := launchOutcome(w, r, launch, starts, writeErr)
+		if !ok {
 			return
 		}
-		if launch != nil {
-			start := func() (Outcome, error) { return launch(context.Background(), req) }
-			out, err := dedupe(r, req, starts, start)
-			if err != nil {
-				writeErr(w, err)
-				return
-			}
-			if out.ID != "" {
-				body := map[string]any{"id": out.ID, "stage": out.Stage}
-				if len(out.Runs) > 0 {
-					body["runs"] = out.Runs
-				}
-				if strings.TrimSpace(out.Text) != "" {
-					body["notes"] = out.Text
-				}
-				if out.Partial {
-					body["partial"] = true
-				}
-				writeJSON(w, http.StatusAccepted, body)
-				return
-			}
-			writeText(w, out.Text)
+		if out.ID != "" {
+			writeJSON(w, http.StatusAccepted, launchBody(out))
 			return
 		}
-		text, err := configureOnly(r.Context(), req)
-		if err != nil {
-			writeErr(w, err)
-			return
-		}
-		writeText(w, text)
+		writeText(w, out.Text)
 	})
 	mux.HandleFunc("GET /repos", func(w http.ResponseWriter, r *http.Request) {
 		set, err := scope.Discover(r.URL.Query().Get("path"))

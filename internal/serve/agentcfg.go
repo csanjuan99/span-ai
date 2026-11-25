@@ -2,64 +2,17 @@ package serve
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"span/internal/agent"
-	"span/internal/policy"
+	"span/internal/start"
 )
 
-// agentPick is the agent section of the page: every CLI Span knows, which one the
-// project asked for, and which one would actually run today.
-type agentPick struct {
-	Agents   []agent.State `json:"agents"`
-	Selected string        `json:"selected"`
-	Chosen   string        `json:"chosen"`
-	Exists   bool          `json:"exists"`
-	Reason   string        `json:"reason,omitempty"`
-	// Models is the model chosen for each CLI id. A CLI without an entry keeps the model
-	// Gentle AI configured for it.
-	Models map[string]string `json:"models"`
-}
+// agentPick is the agent section of the page.
+type agentPick = start.AgentChoice
 
-// agentView reads the project policy and resolves what would run. Reading the
-// answer is not the same as the request: a project can ask for a CLI that is not
-// ready, and the page has to be able to say so.
-func agentView(project string) agentPick {
-	home := agent.Home()
-	view := agentPick{Agents: agent.Report(home), Selected: "any", Chosen: firstReady(home), Models: map[string]string{}}
-	file, err := policy.Load(filepath.Join(project, policy.Name))
-	if errors.Is(err, os.ErrNotExist) {
-		view.Reason = "There is no span.yaml, so runs use the defaults. Choosing an agent creates one."
-		return view
-	}
-	if err != nil {
-		view.Reason = "span.yaml does not load: " + err.Error()
-		return view
-	}
-	view.Exists = true
-	for id, model := range file.Models {
-		view.Models[id] = model
-	}
-	view.Selected = file.Agent
-	if agent.Auto(file.Agent) {
-		return view
-	}
-	if spec, ok := agent.Find(file.Agent); ok {
-		view.Chosen = spec.ID
-	}
-	view.Reason = agent.Explain(file.Agent, home)
-	return view
-}
-
-func firstReady(home string) string {
-	if ready := agent.Available(home); len(ready) > 0 {
-		return ready[0].ID
-	}
-	return ""
-}
+// agentView is what GET /agent returns for the project.
+func agentView(project string) agentPick { return start.ResolveAgent(project) }
 
 // modelView is the answer to GET /agent/models: what the desk can offer for one CLI.
 type modelView struct {

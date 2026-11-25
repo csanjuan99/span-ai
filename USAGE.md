@@ -383,6 +383,25 @@ The desk fills the field's suggestions from `GET /branches?path=<folder>`: the l
 an empty field means (`base:` in `span.yaml`, else `dev`). The placeholder shows `master`
 when the kind is `hotfix`.
 
+## Start a run (desk)
+
+The desk runs `GET /start/precheck` before it shows the start form. The first blocking refusal is
+returned as JSON with `ok: false`, `code` (6, 8, or 14–18; see the canvas notes), and `message`.
+When nothing blocks, the body is `{ "ok": true }`.
+
+- `GET /health` answers whether the server is reachable and authorized (`token` query or `Authorization: Bearer`).
+- `GET /start/precheck?path=<folder>&story=...&issue=...&kind=...&base=...&repo=...` runs the same checks as a start.
+- `GET /start/what-will-happen?path=&kind=&base=` summarizes policy, agent, and stages for the launch.
+- `GET /start/sealed?path=` lists shape sessions with `status=sealed` for picking a sealed story.
+- `GET /start/run-key?path=&shape=` returns the Jira key or the next preview span id for the run label.
+- `POST /spans` starts one run per named repository (same fields as `POST /quickstart`) and returns `results` per repo plus refusals when a repo cannot start.
+
+From a shell, `./span start precheck|what-will-happen|sealed|run-key|health` mirrors those routes. Add
+`--json` for machine-readable output. Remote checks use `SPAN_TOKEN` and `--serve http://127.0.0.1:8787`
+when the verbs call `health` against a running server.
+
+`POST /quickstart` remains for the older desk path; new UI prefers precheck and `POST /spans`.
+
 ## First-run checks
 
 The welcome page (`/welcome`) checks your setup against the running server instead of guessing.
