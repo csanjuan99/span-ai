@@ -98,4 +98,33 @@ describe("QaTab", () => {
     expect(screen.queryByText("Pass")).toBeNull()
     expect(screen.getByText("Held")).toBeTruthy()
   })
+
+  it("offers the failing cases and the full log from the Next panel", async () => {
+    reply({
+      "/qa/cases": { known: true, cases: [] },
+      "/qa": {
+        ...failing,
+        command: "go test ./...",
+        exitCode: 1,
+        counts: { passed: 41, failed: 2, skipped: 0, seconds: 6.4 },
+        kept: "The log and the counts.",
+      },
+    })
+    render(<QaTab id="r1" />)
+    expect(await screen.findByText("Next")).toBeTruthy()
+    expect(screen.getByText("exit 1")).toBeTruthy()
+    expect(
+      screen.getByText("The 2 failing cases with their output.")
+    ).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Open full log" })).toBeTruthy()
+    fireEvent.click(
+      screen.getByRole("button", { name: "See the 2 failing cases" })
+    )
+    expect(
+      await screen
+        .findByText("The check printed no cases.", {}, { timeout: 200 })
+        .catch(() => null)
+    ).toBeNull()
+    expect(screen.queryByText("Next")).toBeNull()
+  })
 })
