@@ -28,6 +28,7 @@ import { useFeature } from "@/hooks/use-feature"
 import { InstructionNote } from "@/components/instruction-note/InstructionNote"
 import { RawOutput } from "@/components/raw-output/RawOutput"
 import { Ledger } from "@/components/ledger/Ledger"
+import { LedgerSummary } from "@/components/ledger/LedgerSummary"
 import { NeedsYou } from "@/components/needs-you/NeedsYou"
 import { ProofSummary } from "@/components/proof-summary/ProofSummary"
 import { QACases } from "@/components/qa-cases/QACases"
@@ -49,6 +50,15 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 /** Three readings of one run. The socket wakes the page. The statements stay the record. */
+const tabs = [
+  { value: "ledger", label: "Ledger" },
+  { value: "implementation", label: "Implementation" },
+  { value: "qa", label: "QA" },
+] as const
+
+const tabClass =
+  "h-9 rounded-[10px] text-[13px] data-active:bg-card data-active:font-semibold data-active:text-primary dark:data-active:border-transparent dark:data-active:bg-card dark:data-active:text-primary"
+
 export function SpanPage() {
   const params = useParams()
   const id = params.id ?? ""
@@ -363,13 +373,24 @@ export function SpanPage() {
             {done !== null && change !== null ? <FilesChanged files={change.files} /> : null}
           </div>
           <Tabs defaultValue="ledger" className="order-3 min-w-0 lg:order-none">
-            <TabsList>
-              <TabsTrigger value="ledger">Ledger</TabsTrigger>
-              <TabsTrigger value="implementation">Implementation</TabsTrigger>
-              <TabsTrigger value="qa">QA</TabsTrigger>
+            <TabsList className="h-auto w-full gap-1 rounded-2xl p-1">
+              {tabs.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value} className={tabClass}>
+                  {tab.label}
+                </TabsTrigger>
+              ))}
             </TabsList>
             <TabsContent value="ledger" className="flex flex-col gap-6">
-              <Ledger statements={state.span?.statements ?? []} />
+              <LedgerSummary statements={state.span?.statements ?? []} />
+              <details className="group rounded-xl border border-border">
+                <summary className="flex min-h-11 cursor-pointer items-center gap-2 px-4 text-sm text-muted-foreground select-none">
+                  <span>All records · {state.span?.statements.length ?? 0}</span>
+                  <span className="ml-auto text-xs">evidence, commits and commands</span>
+                </summary>
+                <div className="px-4 pb-4">
+                  <Ledger statements={state.span?.statements ?? []} />
+                </div>
+              </details>
               <RawOutput transcript={state.transcript} statements={state.span?.statements ?? []} />
               {done !== null && change !== null ? (
                 <FinishedRecord
