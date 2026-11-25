@@ -219,12 +219,15 @@ type before struct {
 	examples  map[string]bool
 	splitKept bool
 	sealed    bool
+	children  int
+	jira      bool
 }
 
 func beforeOf(snap Snapshot) before {
 	b := before{
 		questions: map[string]Question{}, proposals: map[string]Proposal{},
 		rules: map[string]bool{}, examples: map[string]bool{}, splitKept: snap.SplitKept, sealed: snap.Status == StatusSealed,
+		children: len(snap.Children), jira: snap.Jira != nil,
 	}
 	for _, q := range snap.Map.Questions {
 		b.questions[q.ID] = q
@@ -280,6 +283,13 @@ func changes(prev, next Snapshot, agent string) []Event {
 			Undo: []Op{{Op: opSetSplitKept, Flag: false}},
 		})
 	}
+	if len(next.Children) > was.children {
+		out = append(out, Event{
+			Actor: personActor, Kind: KindSplitAccept, Ref: "Split",
+			Summary: "Split into " + plural(len(next.Children), "story", "stories"),
+			Locked:  "the smaller stories already exist as their own sessions; archive or delete them there",
+		})
+	}
 	out = append(out, proposalChanges(was, next)...)
 	out = append(out, agentChanges(was, next, agent)...)
 	if next.Status == StatusSealed && !was.sealed {
@@ -290,6 +300,12 @@ func changes(prev, next Snapshot, agent string) []Event {
 		out = append(out, Event{
 			Actor: personActor, Kind: KindSeal, Ref: "digest " + digest, Summary: "Sealed the story",
 			Locked: "a sealed story cannot change",
+		})
+	}
+	if next.Jira != nil && !was.jira {
+		out = append(out, Event{
+			Actor: personActor, Kind: KindJira, Ref: next.Jira.Key, Summary: "Created " + next.Jira.Key + " in Jira",
+			Locked: "the issue already exists in Jira; Span never deletes it, so remove it there",
 		})
 	}
 	return out
@@ -579,6 +595,8 @@ func (e Event) lockedWhy(sealed bool) string {
 		return "already undone by " + e.UndoneBy
 	case e.Kind == KindUndo:
 		return "an undo is not undone; do the step again instead"
+	case e.Kind == KindJira:
+		return e.Locked
 	case sealed:
 		return "a sealed story cannot change"
 	case e.Locked != "":

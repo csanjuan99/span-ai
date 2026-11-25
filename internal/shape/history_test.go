@@ -283,3 +283,47 @@ func TestKeepWholeCanBeUndone(t *testing.T) {
 		t.Fatal("the split can be proposed again")
 	}
 }
+
+func TestAcceptedSplitIsAStepThatSaysWhyItStays(t *testing.T) {
+	f := &fake{replies: []string{reply(t, splitTurn())}}
+	e, ws := engine(t, f)
+	s := start(t, e, ws)
+	if _, err := e.AcceptSplit(ws, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	v, err := History(ws, s.ID, HistoryFilter{Kind: "split"})
+	if err != nil || len(v.Events) != 1 {
+		t.Fatalf("%v %v", historyIDs(v), err)
+	}
+	step := v.Events[0]
+	if step.Kind != KindSplitAccept || step.Actor != personActor || step.Undoable || !strings.Contains(step.Why, "own sessions") {
+		t.Fatalf("split step %+v", step)
+	}
+	if _, err := e.AcceptSplit(ws, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	again, err := History(ws, s.ID, HistoryFilter{Kind: "split"})
+	if err != nil || len(again.Events) != 1 {
+		t.Fatalf("accepting twice adds no step: %v %v", historyIDs(again), err)
+	}
+}
+
+func TestJiraCreateIsAStepThatSaysWhyItStays(t *testing.T) {
+	f := &fake{replies: []string{reply(t, turn(nil, "# story"))}}
+	e, ws := engine(t, f)
+	s := start(t, e, ws)
+	if _, err := e.Seal(ws, s.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.SetJira(ws, s.ID, JiraRef{Key: "A-1", URL: "http://j/A-1", Status: "Backlog"}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := History(ws, s.ID, HistoryFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := eventOf(t, v, KindJira)
+	if step.Actor != personActor || step.Undoable || !strings.Contains(step.Summary, "A-1") || !strings.Contains(step.Why, "Jira") {
+		t.Fatalf("jira step %+v", step)
+	}
+}

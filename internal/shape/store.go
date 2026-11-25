@@ -139,6 +139,15 @@ func List(workspace string) ([]*Session, error) {
 
 // Save writes the session atomically: a temporary file in the same folder, then a rename.
 func Save(s *Session) error {
+	if err := persist(s); err != nil {
+		return err
+	}
+	return recordRevision(s)
+}
+
+// persist writes the session without making a revision, for a step that saves partway and
+// whose last Save makes the one revision the history shows.
+func persist(s *Session) error {
 	path, err := sessionPath(s.Workspace, s.ID)
 	if err != nil {
 		return err
@@ -148,10 +157,7 @@ func Save(s *Session) error {
 	if err != nil {
 		return fmt.Errorf("encode session: %w", err)
 	}
-	if err := writeAtomic(path, append(raw, '\n')); err != nil {
-		return err
-	}
-	return recordRevision(s)
+	return writeAtomic(path, append(raw, '\n'))
 }
 
 // writeAtomic keeps session files readable by the group, as they always were.

@@ -40,6 +40,10 @@ type Snapshot struct {
 	Proposals []Proposal `json:"proposals"`
 	Story     string     `json:"story"`
 	Digest    string     `json:"digest"`
+	// Children are the sessions an accepted split made.
+	Children []string `json:"children,omitempty"`
+	// Jira is the issue created for the sealed story.
+	Jira *JiraRef `json:"jira,omitempty"`
 }
 
 // Revision is one saved state of a session, with what made it.
@@ -75,7 +79,7 @@ func (r Revision) info(current bool) RevisionInfo {
 func snapshotOf(s *Session) Snapshot {
 	snap := Snapshot{
 		Idea: s.Idea, Status: s.Status, Map: s.Map, Split: s.Split, SplitKept: s.SplitKept,
-		Proposals: s.Proposals, Story: s.Story, Digest: s.Digest,
+		Proposals: s.Proposals, Story: s.Story, Digest: s.Digest, Children: s.Children, Jira: s.Jira,
 	}
 	// Nil and empty slices mean the same thing; one spelling keeps digests stable.
 	if snap.Map.Rules == nil {
@@ -245,6 +249,12 @@ func describeChange(prev *Snapshot, next Snapshot, s *Session, first bool) (labe
 	}
 	if next.Status == StatusSealed && prev.Status != StatusSealed {
 		return "Sealed", ActorPerson
+	}
+	if len(next.Children) > len(prev.Children) {
+		return "Split accepted", ActorPerson
+	}
+	if next.Jira != nil && prev.Jira == nil {
+		return "Created in Jira", ActorPerson
 	}
 	if label := questionChange(prev.Map.Questions, next.Map.Questions); label != "" {
 		return label, ActorPerson

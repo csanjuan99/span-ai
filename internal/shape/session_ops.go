@@ -165,9 +165,14 @@ func (e *Engine) AcceptSplit(workspace, id string) (*Session, error) {
 			return nil, err
 		}
 		s.Children = append(s.Children, child.ID)
-		if err := Save(s); err != nil {
+		// Each child is listed as soon as it exists, so a stop halfway leaves none orphaned;
+		// only the last save makes the revision, so the history shows one accepted split.
+		if err := persist(s); err != nil {
 			return nil, err
 		}
+	}
+	if err := Save(s); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
