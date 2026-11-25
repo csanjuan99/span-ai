@@ -4,7 +4,9 @@ import { SettingsIcon } from "lucide-react"
 
 import { ChangedBadge } from "@/components/settings-edit/ChangedBadge"
 import { Button } from "@/components/ui/button"
+import { Consequences } from "@/components/status-block/Consequences"
 import type { ConfigEffect, ConfigLine } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 function DiffRow({
   number,
@@ -17,11 +19,10 @@ function DiffRow({
 }) {
   return (
     <div
-      className={
-        sign === "-"
-          ? "grid grid-cols-[36px_16px_minmax(0,1fr)] bg-diff-del pr-3.5 whitespace-pre"
-          : "grid grid-cols-[36px_16px_minmax(0,1fr)] bg-diff-add pr-3.5 whitespace-pre"
-      }
+      className={cn(
+        "grid grid-cols-[36px_16px_minmax(0,1fr)] pr-3.5 whitespace-pre",
+        sign === "-" ? "bg-diff-del" : "bg-diff-add"
+      )}
     >
       <span className="pr-2 text-right text-muted-foreground tabular-nums">
         {number}
@@ -97,30 +98,21 @@ export function WhatChanges({
           is written.
         </p>
       )}
-      <div className="rounded-[10px] bg-muted px-3.5 py-3">
-        <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
-          <SettingsIcon className="size-4" aria-hidden="true" />
-          If you save
-        </div>
-        {[
-          ...effects,
-          { label: "Writes to", text: `${folder}/span.yaml` },
+      <Consequences
+        title="If you save"
+        icon={SettingsIcon}
+        rows={[
+          ...effects.map((effect) => ({
+            label: effect.label,
+            body: effect.text,
+          })),
+          { label: "Writes to", body: `${folder}/span.yaml` },
           {
             label: "Not touched",
-            text: "Your comments, the order of keys, sealed stages and past proof.",
+            body: "Your comments, the order of keys, sealed stages and past proof.",
           },
-        ].map((row) => (
-          <div
-            key={`${row.label}-${row.text}`}
-            className="grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2"
-          >
-            <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-              {row.label}
-            </div>
-            <div className="text-[13px] break-words">{row.text}</div>
-          </div>
-        ))}
-      </div>
+        ]}
+      />
       <Button
         className="h-10 w-full"
         disabled={saving || error !== "" || lines.length === 0}
@@ -138,6 +130,10 @@ export function WhatChanges({
       >
         Discard changes
       </Button>
+      <p className="text-xs text-pretty text-muted-foreground">
+        Save token, Test and Close session act at once. They are not in this
+        list.
+      </p>
     </section>
   )
 }

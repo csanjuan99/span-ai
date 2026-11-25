@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input"
 import { getJSON, projectConfig, saveConfig } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import type { AgentChoice, ProjectConfig } from "@/lib/types"
+import { designInput } from "@/lib/field-class"
 
 const noAgents: AgentChoice = {
   agents: [],
@@ -152,12 +153,6 @@ export function ProjectSettings() {
         ) : null}
         <SettingsNav current={current} onPick={setCurrent} />
         <div className="flex min-w-0 flex-col gap-6">
-          <Section
-            name="Connection"
-            hint="The Span server this page talks to, and its access token."
-          >
-            <ConnectionSection />
-          </Section>
           <Section name="Project" hint="Where Span works.">
             {note !== "" ? (
               <p className="text-sm text-pretty text-destructive">{note}</p>
@@ -173,7 +168,7 @@ export function ProjectSettings() {
             >
               <Input
                 aria-label="Project folder"
-                className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                className={designInput}
                 value={folder}
                 onChange={(event) => changeFolder(event.target.value)}
               />
@@ -185,6 +180,12 @@ export function ProjectSettings() {
               fallback="dev (master for a hotfix)"
               placeholder="dev"
             />
+          </Section>
+          <Section
+            name="Connection"
+            hint="Which Span server this page talks to."
+          >
+            <ConnectionSection />
           </Section>
           <Section
             name="Agents"

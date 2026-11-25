@@ -2,6 +2,9 @@
 export const designField =
   "rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
 
+/** {@link designField} for an input that sizes itself from its padding, as the settings and setup rows do. */
+export const designInput = `h-auto ${designField}`
+
 /** The design's disabled primary button: sunken fill, muted text and the quiet border, not a faded accent. */
 export const quietDisabled =
   "disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"

@@ -1,5 +1,6 @@
 "use client"
 
+import { CheckIcon, LockIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import {
@@ -9,7 +10,11 @@ import {
   type JiraSession,
 } from "@/lib/jira-session"
 
+import { Pill } from "@/components/onboarding/Pill"
+import { ActionPanel } from "@/components/shaping/session-ui"
 import { Button } from "@/components/ui/button"
+import { touchButton } from "@/lib/button-class"
+import { cn } from "@/lib/utils"
 import { postForm } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 
@@ -26,6 +31,7 @@ export function JiraSection({
   const [session, setSession] = useState(noSession)
   const [failed, setFailed] = useState(false)
   const [note, setNote] = useState("")
+  const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -56,23 +62,70 @@ export function JiraSection({
       setNote("Session closed for this folder.")
     } catch (err: unknown) {
       setNote(reasonText(err, "the session was not closed"))
+    } finally {
+      setConfirming(false)
     }
   }
 
   return (
     <>
       <JiraAccount session={session} failed={failed} />
-      {session.configured ? (
+      {session.configured && !confirming ? (
         <Button
           type="button"
-          variant="secondary"
-          className="min-h-11 self-start"
-          onClick={() => void closeSession()}
+          variant="outline"
+          className={cn("self-start", touchButton)}
+          onClick={() => setConfirming(true)}
         >
+          <LockIcon aria-hidden="true" />
           Close session
         </Button>
       ) : null}
-      {note !== "" ? <p className="text-sm text-pretty">{note}</p> : null}
+      {session.configured && confirming ? (
+        <ActionPanel
+          title={`Close the Jira session for ${folder}?`}
+          icon={LockIcon}
+          rows={[
+            {
+              label: "Closes",
+              body: "Span forgets the token and the site for this folder. Look ups ask you to connect again.",
+            },
+            {
+              label: "Stays",
+              body: "Nothing is deleted from Jira. Stories, comments and statuses stay as they are. Runs, branches and the stories copied into runs stay too.",
+            },
+            {
+              label: "Next",
+              body: "Reconnect any time from the start of a run, or here.",
+            },
+          ]}
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              className={cn(touchButton, "border-fail text-fail")}
+              onClick={() => void closeSession()}
+            >
+              <LockIcon aria-hidden="true" />
+              Close session
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className={touchButton}
+              onClick={() => setConfirming(false)}
+            >
+              Keep connected
+            </Button>
+          </div>
+        </ActionPanel>
+      ) : null}
+      {note !== "" ? (
+        <p role="status" className="text-sm text-pretty">
+          {note}
+        </p>
+      ) : null}
       <TextField
         props={props}
         name="doneStatus"
@@ -108,15 +161,19 @@ function JiraAccount({
     )
   }
   return (
-    <div className="grid grid-cols-[16px_minmax(0,1fr)] gap-2 pb-2 text-sm">
-      <span aria-hidden="true" className="font-mono font-semibold text-pass">
-        +
+    <div className="flex flex-col gap-1 pb-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span>{session.email}</span>
+        <Pill tone="pass">
+          <CheckIcon className="size-3.5" aria-hidden="true" />
+          Connected
+        </Pill>
+      </div>
+      <span className="font-mono text-xs text-muted-foreground">
+        {session.baseUrl}
       </span>
-      <span>
-        <b className="text-pass">Connected.</b> {session.email}{" "}
-        <span className="font-mono text-xs text-muted-foreground">
-          {session.baseUrl}
-        </span>
+      <span className="text-xs text-muted-foreground">
+        The session belongs to this folder.
       </span>
     </div>
   )

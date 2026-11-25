@@ -43,7 +43,7 @@ export function SelectField({
       <select
         aria-label={label}
         className={cn(
-          "h-8 max-sm:h-11 max-w-full appearance-none rounded-[10px] border border-input bg-card py-0 pr-8 pl-2.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
+          "h-8 max-w-full appearance-none rounded-[10px] border border-input bg-card py-0 pr-8 pl-2.5 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 max-sm:h-11",
           mono && "font-mono text-xs",
           className
         )}

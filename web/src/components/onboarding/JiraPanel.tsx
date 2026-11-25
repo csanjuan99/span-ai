@@ -12,9 +12,7 @@ import { checkJiraAccount, saveJiraAccount } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
 import type { JiraSession } from "@/lib/jira-session"
 import type { JiraCheck } from "@/lib/types"
-
-const field =
-  "h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+import { designInput } from "@/lib/field-class"
 
 /** The optional Jira account: the site, the email and a token, tested before it is saved. */
 export function JiraPanel({
@@ -71,7 +69,7 @@ export function JiraPanel({
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-medium">Jira site</span>
         <Input
-          className={field}
+          className={designInput}
           placeholder="https://acme.atlassian.net"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
@@ -80,7 +78,7 @@ export function JiraPanel({
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-medium">Email</span>
         <Input
-          className={field}
+          className={designInput}
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -89,7 +87,7 @@ export function JiraPanel({
       <label className="flex flex-col gap-1.5">
         <span className="text-xs font-medium">API token</span>
         <Input
-          className={field}
+          className={designInput}
           type="password"
           autoComplete="off"
           placeholder={

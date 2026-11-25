@@ -12,6 +12,8 @@ import {
   type DraftKey,
 } from "./draft"
 import { FieldRow } from "./FieldRow"
+import { designInput } from "@/lib/field-class"
+import { cn } from "@/lib/utils"
 
 /** What every editable section is given: the saved settings, what was typed, and how to type. */
 export interface EditProps {
@@ -56,7 +58,7 @@ export function TextField({
     >
       <Input
         aria-label={label}
-        className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 font-mono text-sm shadow-sm dark:bg-card"
+        className={cn(designInput, "font-mono")}
         disabled={props.disabled}
         placeholder={placeholder}
         value={state.value}

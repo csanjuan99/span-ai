@@ -43,7 +43,7 @@ export function AppearanceFields() {
                 aria-pressed={theme.theme === item.value}
                 onClick={() => theme.setTheme(item.value)}
                 className={cn(
-                  "h-9 rounded-[10px] px-4 text-[13px] font-medium text-muted-foreground",
+                  "h-11 rounded-[10px] px-4 text-[13px] font-medium text-muted-foreground md:h-9",
                   "aria-pressed:bg-card aria-pressed:font-semibold aria-pressed:text-primary aria-pressed:shadow-sm"
                 )}
               >

@@ -5,6 +5,7 @@ import { useState } from "react"
 
 import { sampleBrief } from "@/components/desk/EmptyDesk"
 import { DryLook } from "@/components/onboarding/DryLook"
+import { Consequences } from "@/components/status-block/Consequences"
 import { Panel } from "@/components/onboarding/Frame"
 import { Pill } from "@/components/onboarding/Pill"
 import { Button } from "@/components/ui/button"
@@ -12,9 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { saveAgent, startRun } from "@/lib/api"
 import { reasonText } from "@/lib/guards"
-
-const row =
-  "grid grid-cols-[64px_1fr] gap-2.5 border-t border-border py-2 first:border-t-0"
+import { designField, designInput } from "@/lib/field-class"
 
 /** Step 3: a sample brief, a look at what each stage does, and the Start button that starts it. */
 export function FirstRunStep({
@@ -81,7 +80,7 @@ export function FirstRunStep({
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium">Title</span>
                 <Input
-                  className="h-auto rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                  className={designInput}
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                 />
@@ -91,7 +90,7 @@ export function FirstRunStep({
                 <Textarea
                   rows={4}
                   aria-label="Brief"
-                  className="rounded-[10px] border-input bg-card px-3 py-2.5 text-sm shadow-sm dark:bg-card"
+                  className={designField}
                   value={brief}
                   onChange={(event) => setBrief(event.target.value)}
                 />
@@ -104,46 +103,37 @@ export function FirstRunStep({
             </Panel>
           </div>
           <section className="order-3 flex flex-col gap-4 rounded-[14px] border border-border bg-card p-4 shadow-sm sm:px-5">
-            <div className="rounded-[10px] bg-muted px-3.5 py-3">
-              <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
-                <PlayIcon aria-hidden="true" className="size-4 text-primary" />
-                When you press Start
-              </div>
-              <div className={row}>
-                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-                  Changes
-                </div>
-                <div className="text-[13px]">
-                  Creates a branch for the run. No file changes until build.
-                  {agent !== ""
-                    ? ` Saves ${agent} as the project's agent in span.yaml.`
-                    : ""}
-                </div>
-              </div>
-              <div className={row}>
-                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-                  Where
-                </div>
-                <div className="font-mono text-xs break-all">{folder}</div>
-              </div>
-              <div className={row}>
-                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-                  Kept
-                </div>
-                <div className="text-[13px]">
-                  Everything you have now. Nothing is overwritten.
-                </div>
-              </div>
-              <div className={row}>
-                <div className="pt-0.5 text-xs font-medium text-muted-foreground">
-                  Next
-                </div>
-                <div className="text-[13px]">
-                  Intake reads the brief. If something is unclear, the run holds
-                  and asks you.
-                </div>
-              </div>
-            </div>
+            <Consequences
+              title="When you press Start"
+              icon={PlayIcon}
+              iconClassName="text-primary"
+              rows={[
+                {
+                  label: "Changes",
+                  body: `Creates a branch for the run. No file changes until build.${
+                    agent !== ""
+                      ? ` Saves ${agent} as the project's agent in span.yaml.`
+                      : ""
+                  }`,
+                },
+                {
+                  label: "Where",
+                  body: (
+                    <span className="font-mono text-xs break-all">
+                      {folder}
+                    </span>
+                  ),
+                },
+                {
+                  label: "Kept",
+                  body: "Everything you have now. Nothing is overwritten.",
+                },
+                {
+                  label: "Next",
+                  body: "Intake reads the brief. If something is unclear, the run holds and asks you.",
+                },
+              ]}
+            />
             {note !== "" ? (
               <p role="alert" className="text-sm text-pretty text-destructive">
                 {note}
