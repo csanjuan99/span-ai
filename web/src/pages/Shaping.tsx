@@ -102,7 +102,7 @@ export function Shaping() {
     body = (
       <>
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl leading-8 font-semibold tracking-tight">
+          <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em]">
             Shape a story
           </h1>
           <p className={noteText}>

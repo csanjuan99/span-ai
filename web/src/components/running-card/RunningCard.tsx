@@ -6,7 +6,9 @@ import { Consequences } from "@/components/status-block/Consequences"
 import { Lede } from "@/components/status-block/Lede"
 import { StatusBlock } from "@/components/status-block/StatusBlock"
 import { Button } from "@/components/ui/button"
+import { quietButton, wideButton } from "@/lib/button-class"
 import type { Running } from "@/lib/running"
+import { cn } from "@/lib/utils"
 
 /** Shown while the run goes on by itself: nothing is asked, and the one thing to do is pause. */
 export function RunningCard({
@@ -53,7 +55,7 @@ export function RunningCard({
               <Button
                 type="button"
                 variant="outline"
-                className="h-10 w-full"
+                className={cn(wideButton, quietButton)}
                 onClick={onPause}
               >
                 <PauseIcon aria-hidden="true" />

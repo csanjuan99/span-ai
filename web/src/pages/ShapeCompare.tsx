@@ -38,10 +38,12 @@ export function ShapeCompare() {
   const ids = (params.get("ids") ?? "").split(",").filter((id) => id !== "")
   const navigate = useNavigate()
   const [catalog, setCatalog] = useState<ShapeSession[]>([])
-  const [result, setResult] = useState<Comparison | null>(null)
+  const [loaded, setLoaded] = useState<Comparison | null>(null)
   const [picks, setPicks] = useState<Record<string, string>>({})
   const { note, setNote, busy, run } = useNotedAction()
   const key = ids.join(",")
+  const few = ids.length < 2
+  const result = few ? null : loaded
 
   useEffect(() => {
     let live = true
@@ -62,13 +64,12 @@ export function ShapeCompare() {
   }, [workspace, setNote])
 
   useEffect(() => {
-    if (ids.length < 2) {
-      setResult(null)
+    if (few) {
       return
     }
     let live = true
     void compareShapes(workspace, key.split(","))
-      .then((loaded) => live && setResult(loaded))
+      .then((body) => live && setLoaded(body))
       .catch(
         (err: unknown) =>
           live && setNote(reasonText(err, "the sessions could not be compared"))
@@ -76,7 +77,7 @@ export function ShapeCompare() {
     return () => {
       live = false
     }
-  }, [workspace, key, setNote])
+  }, [workspace, key, few, setNote])
 
   const sessions = result?.sessions ?? []
   const target =
@@ -143,13 +144,21 @@ export function ShapeCompare() {
 
   function separate(a: string, b: string) {
     void run(
-      async () => setResult(await keepSeparate(workspace, [a, b])),
+      async () => setLoaded(await keepSeparate(workspace, [a, b])),
       "could not keep them separate"
     )
   }
 
   return (
     <Shell path="~/span/shaping/compare" status="compare">
+      <header className="flex flex-col gap-1">
+        <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em]">
+          Compare sessions
+        </h1>
+        <p className="text-[13px] leading-5 text-muted-foreground">
+          Find overlaps and conflicts before they become two stories.
+        </p>
+      </header>
       <nav
         aria-label="Breadcrumb"
         className="flex items-center gap-2 text-[13px] text-muted-foreground"
@@ -162,7 +171,7 @@ export function ShapeCompare() {
         </Link>
         <span aria-hidden="true">/</span>
         <b aria-current="page" className="font-medium text-foreground">
-          Compare sessions
+          Compare
         </b>
       </nav>
       {note !== "" ? (

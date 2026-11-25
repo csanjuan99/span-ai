@@ -164,6 +164,7 @@ function open() {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   for (const mock of Object.values(mocks)) {
     mock.mockReset()
   }
@@ -236,6 +237,19 @@ describe("questions", () => {
     click("Change Q1")
     expect(
       screen.getByRole("button", { name: "Use the assumption for Q1" })
+    ).toBeTruthy()
+  })
+
+  it("keeps staged choices when the page is reloaded", async () => {
+    open()
+    await screen.findByText("2 questions block the story")
+    click("Use the assumption for Q1")
+    cleanup()
+    open()
+    await screen.findByText("2 questions block the story")
+    expect(screen.getByRole("button", { name: "Change Q1" })).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Use the assumption for Q2" })
     ).toBeTruthy()
   })
 
@@ -407,6 +421,17 @@ describe("split", () => {
     )
     await screen.findByText("The agent suggests splitting this story")
   }
+
+  it("reopens on the split step once the map was confirmed", async () => {
+    mocks.getShape.mockResolvedValue(split())
+    await toSplit()
+    cleanup()
+    open()
+    expect(
+      await screen.findByText("The agent suggests splitting this story")
+    ).toBeTruthy()
+    expect(screen.queryByText("Looks right: continue")).toBeNull()
+  })
 
   it("splits into linked sessions and lists them", async () => {
     mocks.getShape.mockResolvedValue(split())

@@ -125,7 +125,7 @@ export function ShapeBoard() {
   return (
     <Shell path="~/span/shaping/board" status="board">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-semibold tracking-[-0.01em]">
           Sessions board
         </h1>
         <p className={hintText}>

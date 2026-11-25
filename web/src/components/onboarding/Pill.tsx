@@ -9,7 +9,7 @@ const tones: Record<PillTone, string> = {
   pass: "bg-pass-soft text-pass",
   hold: "bg-hold-soft text-hold",
   fail: "bg-fail-soft text-fail",
-  mut: "bg-muted text-muted-foreground",
+  mut: "border border-border bg-muted text-muted-foreground",
   acc: "bg-accent text-primary",
 }
 
@@ -29,8 +29,8 @@ export function Pill({
   return (
     <span
       className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full text-xs font-medium whitespace-nowrap",
-        size === "sm" ? "h-5 px-2" : "h-6 px-2.5 tracking-wide",
+        "inline-flex w-fit items-center gap-1.5 rounded-full text-xs font-medium tracking-[0.02em] whitespace-nowrap",
+        size === "sm" ? "h-5 px-2" : "h-6 px-2.5",
         tones[tone],
         className
       )}

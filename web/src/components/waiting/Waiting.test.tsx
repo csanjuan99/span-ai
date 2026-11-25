@@ -49,13 +49,18 @@ describe("Waiting", () => {
     const send = screen.getByRole("button", {
       name: "Answer and continue",
     }) as HTMLButtonElement
-    expect(screen.getAllByText("Required")).toHaveLength(2)
-    expect(screen.getByText("0 of 2 answered")).toBeTruthy()
+    expect(screen.getAllByText("Needs an answer")).toHaveLength(2)
+    expect(
+      screen.getByText("Answer question 1 to continue. 0 of 2 answered.")
+    ).toBeTruthy()
     expect(send.disabled).toBe(true)
     fireEvent.change(screen.getByLabelText("One?"), {
       target: { value: "yes" },
     })
-    expect(screen.getByText("1 of 2 answered")).toBeTruthy()
+    expect(screen.getAllByText("Answered")).toHaveLength(1)
+    expect(
+      screen.getByText("Answer question 2 to continue. 1 of 2 answered.")
+    ).toBeTruthy()
     expect(send.disabled).toBe(true)
     fireEvent.change(screen.getByLabelText("Two?"), { target: { value: "  " } })
     expect(send.disabled).toBe(true)

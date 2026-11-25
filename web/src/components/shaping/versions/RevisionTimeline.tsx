@@ -6,7 +6,7 @@ import { PillToggle } from "@/components/qa/PillToggle"
 import { Panel, Pill } from "@/components/shaping/session-ui"
 import { clockTime } from "@/lib/clock"
 import { type Revision } from "@/lib/shape-versions"
-import { cardBody, countText } from "@/components/shaping/styles"
+import { cardBody, countText, headingText } from "@/components/shaping/styles"
 
 /** The revisions of a session, each with a Before and an After pick. Every answer, split and accept is one. */
 export function RevisionTimeline({
@@ -23,7 +23,7 @@ export function RevisionTimeline({
   return (
     <Panel aria-label="Revisions" className={cardBody}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-semibold">Revisions</h2>
+        <h2 className={headingText}>Revisions</h2>
         <span className="text-xs text-muted-foreground">
           Pick one as Before and one as After. Every answer, split and accept is
           a revision.

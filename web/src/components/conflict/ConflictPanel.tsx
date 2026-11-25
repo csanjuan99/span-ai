@@ -1,7 +1,7 @@
 "use client"
 
-import { GitMerge } from "lucide-react"
-import { useState } from "react"
+import { GitMerge, MessageSquare } from "lucide-react"
+import { useState, type ReactNode } from "react"
 
 import { abortConflict, chooseConflict, hintConflict } from "@/lib/api"
 import {
@@ -16,11 +16,12 @@ import type { Conflict } from "@/lib/types"
 import { AbortMerge } from "@/components/conflict/AbortMerge"
 import { ConflictGroupSection } from "@/components/conflict/ConflictGroupSection"
 import { Button } from "@/components/ui/button"
-import { wideButton } from "@/lib/button-class"
+import { quietButton, wideButton } from "@/lib/button-class"
 import { Consequences } from "@/components/status-block/Consequences"
 import { whereKeptRows } from "@/components/status-block/whereKept"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 
 /** An action the page sent and the server has not answered on the socket yet. */
 type PendingKind = "apply" | "hint" | "abort"
@@ -109,23 +110,27 @@ export function ConflictPanel({
   const abort = () =>
     void send("abort", () => abortConflict(id), "the merge was not aborted")
 
+  const heading = (
+    <div className="flex flex-col gap-2">
+      <h2 id="conflict-title" className="text-lg font-semibold text-balance">
+        Merging {conflict.base} into this branch hits a conflict in {files}{" "}
+        {files === 1 ? "file" : "files"}
+      </h2>
+      <p className="text-sm text-pretty text-muted-foreground">
+        <span className="font-mono text-foreground">{conflict.base}</span> into
+        this branch: {files} {files === 1 ? "file" : "files"},{" "}
+        {conflict.groups.length}{" "}
+        {conflict.groups.length === 1 ? "group" : "groups"}.
+        {view === "choosing"
+          ? " Choose how each group resolves. The result is shown under each choice."
+          : ""}
+      </p>
+    </div>
+  )
+
   return (
     <section aria-labelledby="conflict-title" className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <h2 id="conflict-title" className="text-lg font-semibold text-balance">
-          Merging {conflict.base} into this branch hits a conflict in {files}{" "}
-          {files === 1 ? "file" : "files"}
-        </h2>
-        <p className="text-sm text-pretty text-muted-foreground">
-          <span className="font-mono text-foreground">{conflict.base}</span>{" "}
-          into this branch: {files} {files === 1 ? "file" : "files"},{" "}
-          {conflict.groups.length}{" "}
-          {conflict.groups.length === 1 ? "group" : "groups"}.
-          {view === "choosing"
-            ? " Choose how each group resolves. The result is shown under each choice."
-            : ""}
-        </p>
-      </div>
+      {view === "choosing" ? null : heading}
       {conflict.note !== "" ? (
         <p className="text-sm text-pretty">{conflict.note}</p>
       ) : null}
@@ -135,6 +140,7 @@ export function ConflictPanel({
           choices={choices}
           where={where}
           kept={kept}
+          heading={heading}
           onChoose={(group, option) =>
             setChoices({ ...choices, [group]: option })
           }
@@ -191,6 +197,7 @@ function Choosing({
   choices,
   where,
   kept,
+  heading,
   onChoose,
   onApply,
   onHint,
@@ -200,6 +207,8 @@ function Choosing({
   choices: ConflictChoices
   where?: string
   kept?: string
+  /** The title and intro of the panel: they sit above the groups, left of the box that says what applying does. */
+  heading: ReactNode
   onChoose: (group: string, option: string) => void
   onApply: () => void
   onHint: (text: string) => void
@@ -210,6 +219,7 @@ function Choosing({
   return (
     <div className="flex flex-col gap-6 lg:grid lg:grid-cols-[minmax(0,1fr)_300px]">
       <div className="flex min-w-0 flex-col gap-4">
+        {heading}
         {conflict.groups.map((group, at) => (
           <ConflictGroupSection
             key={group.id}
@@ -240,6 +250,7 @@ function Choosing({
           disabled={!canApply(conflict, choices)}
           onClick={onApply}
         >
+          <GitMerge aria-hidden="true" />
           Apply resolution
         </Button>
         <p
@@ -268,10 +279,11 @@ function Hint({ onHint }: { onHint: (text: string) => void }) {
       <Button
         type="button"
         variant="outline"
-        className={wideButton}
+        className={cn(wideButton, quietButton)}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
+        <MessageSquare aria-hidden="true" />
         Leave a hint for the agent
       </Button>
       <p className="text-xs text-muted-foreground">

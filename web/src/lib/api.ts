@@ -558,7 +558,7 @@ async function readBody(response: Response): Promise<unknown> {
     if (err instanceof Error) {
       throw err
     }
-    throw new Error("the response was not JSON")
+    throw new Error("the response was not JSON", { cause: err })
   }
 }
 

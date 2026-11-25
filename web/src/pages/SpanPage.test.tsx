@@ -346,6 +346,11 @@ describe("the card while the run goes on by itself", () => {
         ?.textContent
     ).toBe("Pause after this stage")
     expect(screen.getByRole("button", { name: "Stop now" })).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Ends the run. Sealed stages and the branch stay as they are."
+      )
+    ).toBeTruthy()
   })
 
   it("is not drawn when the run waits on a person", () => {
@@ -831,7 +836,9 @@ describe("the run's actions in the command palette", () => {
       },
     }
     page()
-    expect(screen.getByRole("heading", { name: "claude-code is out of quota" })).toBeTruthy()
+    expect(
+      screen.getByRole("heading", { name: "claude-code is out of quota" })
+    ).toBeTruthy()
     expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Relaunch" })).toBeTruthy()
     expect(
@@ -842,7 +849,9 @@ describe("the run's actions in the command palette", () => {
     expect(
       screen.getByText("Build runs with the agent you choose in Run controls.")
     ).toBeTruthy()
-    expect(screen.getAllByRole("button", { name: /Restart from a stage/ }).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByRole("button", { name: /Restart from a stage/ }).length
+    ).toBeGreaterThan(0)
   })
 
   it("offers only the reading actions once the run is done", () => {

@@ -3,7 +3,9 @@
 import { AlertDialog } from "radix-ui"
 
 import { Button } from "@/components/ui/button"
-import { wideButton } from "@/lib/button-class"
+import { CircleX } from "lucide-react"
+
+import { dangerButton, wideButton } from "@/lib/button-class"
 import { cn } from "@/lib/utils"
 
 /**
@@ -24,11 +26,9 @@ export function AbortMerge({
           <Button
             type="button"
             variant="outline"
-            className={cn(
-              wideButton,
-              "border-fail text-fail hover:bg-fail-soft hover:text-fail"
-            )}
+            className={cn(wideButton, dangerButton)}
           >
+            <CircleX aria-hidden="true" />
             Abort merge
           </Button>
         </AlertDialog.Trigger>

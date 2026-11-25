@@ -2,7 +2,15 @@
 
 import { useMemo, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router"
-import { MessageSquare, RotateCcw, Undo2 } from "lucide-react"
+import {
+  Check,
+  MessageSquare,
+  OctagonX,
+  Play,
+  RotateCw,
+  RotateCcw,
+  Undo2,
+} from "lucide-react"
 
 import {
   answerRun,
@@ -84,7 +92,7 @@ import { Decision } from "@/components/decision/Decision"
 import { Waiting } from "@/components/waiting/Waiting"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { wideButton } from "@/lib/button-class"
+import { dangerButton, quietButton, wideButton } from "@/lib/button-class"
 import { cn } from "@/lib/utils"
 
 /** Three readings of one run. The socket wakes the page. The statements stay the record. */
@@ -556,7 +564,8 @@ export function SpanPage() {
             ? [{ label: "Next", body: `The run moves to ${next}.` }]
             : []
   // A decision or a conflict draws its own right column, so the band gets none beside it.
-  const ownsAside = cursor?.decision !== undefined || conflict !== undefined
+  const ownsAside =
+    waiting || cursor?.decision !== undefined || conflict !== undefined
   const aside =
     primary === null || state.span === null || ownsAside ? undefined : (
       <>
@@ -583,6 +592,10 @@ export function SpanPage() {
           ]}
         />
         <Button type="button" className={wideButton} onClick={primary.run}>
+          {needs?.kind === "approval" ? <Check aria-hidden="true" /> : null}
+          {needs?.kind === "agent-blocked" || needs?.kind === "busy" ? (
+            <Play aria-hidden="true" />
+          ) : null}
           {primary.label}
         </Button>
         {holder !== "" ? (
@@ -598,26 +611,32 @@ export function SpanPage() {
             </p>
           </div>
         ) : null}
-        {state.agent?.relaunch ? (
-          <Button
-            type="button"
-            variant="outline"
-            className={wideButton}
-            onClick={() => void relaunch()}
-          >
-            Relaunch
-          </Button>
-        ) : null}
         {!cursor?.stop && !waiting && cursor?.decision === undefined ? (
           <div className="flex flex-col gap-3 pt-1">
             <span className="text-xs font-medium tracking-wide text-muted-foreground">
               Other ways out
             </span>
+            {state.agent?.relaunch ? (
+              <div className="flex flex-col gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={cn(wideButton, quietButton)}
+                  onClick={() => void relaunch()}
+                >
+                  <RotateCw aria-hidden="true" />
+                  Relaunch
+                </Button>
+                <p className="text-xs text-pretty text-muted-foreground">
+                  Starts the run process again.
+                </p>
+              </div>
+            ) : null}
             <div className="flex flex-col gap-1.5">
               <Button
                 type="button"
                 variant="outline"
-                className={wideButton}
+                className={cn(wideButton, quietButton)}
                 onClick={openNote}
               >
                 <MessageSquare aria-hidden="true" />
@@ -636,10 +655,7 @@ export function SpanPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className={cn(
-                    wideButton,
-                    "border-fail text-fail hover:bg-fail/10 hover:text-fail dark:border-fail dark:hover:bg-fail/10"
-                  )}
+                  className={cn(wideButton, dangerButton)}
                   onClick={() => setRestartAt(restartStage(current))}
                 >
                   <Undo2 aria-hidden="true" />
@@ -777,7 +793,7 @@ export function SpanPage() {
                           {passedChecks.length} of {earlierChecks.length}
                         </span>
                       </div>
-                      <ul className="flex flex-col gap-1">
+                      <ul className="flex flex-col gap-1 rounded-[10px] border border-border bg-surface-code p-3">
                         {passedChecks.map((command) => (
                           <li
                             key={command.command}
@@ -786,7 +802,7 @@ export function SpanPage() {
                             <span className="min-w-0 truncate">
                               $ {command.command}
                             </span>
-                            <span className="shrink-0 text-muted-foreground">
+                            <span className="shrink-0 text-pass">
                               exit {command.exitCode}
                             </span>
                           </li>
@@ -816,6 +832,8 @@ export function SpanPage() {
                       key={questions.join("\n")}
                       questions={questions}
                       note={note}
+                      where={whereLine}
+                      kept={keptText}
                       onAnswer={answer}
                       onReload={reloadStory}
                     />
@@ -890,15 +908,6 @@ export function SpanPage() {
                   transcript={state.transcript}
                   statements={state.span?.statements ?? []}
                 />
-                {done !== null && change !== null ? (
-                  <FinishedRecord
-                    risks={change.report.risks}
-                    details={runDetails(
-                      state.span?.statements ?? [],
-                      state.span?.stageAgents
-                    )}
-                  />
-                ) : null}
               </TabsContent>
               <TabsContent value="implementation">
                 {done !== null &&
@@ -948,6 +957,17 @@ export function SpanPage() {
             {kept !== null ? (
               <SafeAndKept kept={kept} className="order-2 lg:order-none" />
             ) : null}
+            {done !== null && change !== null ? (
+              <div className="order-3 flex flex-col gap-4 lg:order-none">
+                <FinishedRecord
+                  risks={change.report.risks}
+                  details={runDetails(
+                    state.span?.statements ?? [],
+                    state.span?.stageAgents
+                  )}
+                />
+              </div>
+            ) : null}
             {cursor?.done ? null : (
               <RunControls className="order-4 lg:order-none">
                 <StageAgent
@@ -955,7 +975,7 @@ export function SpanPage() {
                   current={cursor?.stage ?? ""}
                   choices={state.span?.stageAgents}
                 />
-                {!waiting && !cursor?.stop && cursor?.decision === undefined ? (
+                {!cursor?.stop && cursor?.decision === undefined ? (
                   <InstructionNote
                     open={showNote}
                     selected={selected}
@@ -987,28 +1007,29 @@ export function SpanPage() {
                   requested={restartAt}
                 />
                 {!paused && !cursor?.done && !idle ? (
-                  <div className="flex flex-col gap-2">
-                    <div className="flex flex-wrap gap-2">
-                      {running === null ? (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          onClick={() => void pause()}
-                        >
-                          Pause after this stage
-                        </Button>
-                      ) : null}
+                  <div className="flex flex-col gap-2 border-t border-border p-4">
+                    {running === null ? (
                       <Button
                         type="button"
-                        variant="secondary"
-                        onClick={() => void stop()}
+                        variant="outline"
+                        className={cn(wideButton, quietButton)}
+                        onClick={() => void pause()}
                       >
-                        Stop now
+                        Pause after this stage
                       </Button>
-                    </div>
-                    <p className="text-sm text-pretty text-muted-foreground">
-                      The stage that is running finishes. The run holds before
-                      the next one, so you can choose the agent for it.
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className={cn(wideButton, dangerButton)}
+                      onClick={() => void stop()}
+                    >
+                      <OctagonX aria-hidden="true" />
+                      Stop now
+                    </Button>
+                    <p className="text-[13px] text-pretty text-muted-foreground">
+                      Ends the run. Sealed stages and the branch stay as they
+                      are.
                     </p>
                   </div>
                 ) : null}

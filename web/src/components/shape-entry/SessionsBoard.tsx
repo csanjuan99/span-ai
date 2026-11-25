@@ -104,7 +104,7 @@ export function SessionsBoard({
   return (
     <div className="flex flex-col gap-4 md:gap-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl leading-8 font-semibold tracking-tight">
+        <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em]">
           Sessions
         </h1>
         <p className={noteText}>

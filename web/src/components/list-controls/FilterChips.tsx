@@ -27,7 +27,7 @@ export function FilterChips<Key extends string>({
           type="button"
           aria-pressed={value === chip.key}
           onClick={() => onChange(chip.key)}
-          className="inline-flex h-11 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-[13px] aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-primary md:h-8"
+          className="inline-flex h-11 items-center gap-1.5 rounded-full border border-input bg-card px-3 text-sm aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:font-semibold aria-pressed:text-primary md:h-8"
         >
           {chip.label}
           {chip.count === undefined ? null : (

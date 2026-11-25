@@ -95,7 +95,7 @@ export function ShapeTransfer() {
             {sealed ? <Pill tone="mut">Read-only</Pill> : null}
           </div>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight">
+        <h1 className="text-2xl font-semibold tracking-[-0.01em]">
           {id === "" ? "Import a story" : "Import, export and share"}
         </h1>
       </header>

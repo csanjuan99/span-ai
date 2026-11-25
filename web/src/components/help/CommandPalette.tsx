@@ -23,17 +23,11 @@ const commands = paletteCommands()
 
 /** The icon slot of a palette line: the command's icon, or an empty cell that keeps the columns. */
 function CommandIcon({ id }: { id: string }) {
-  const Icon = commandIcon(id)
-  return Icon === undefined ? (
-    <span aria-hidden="true" />
-  ) : (
-    <Icon
-      aria-hidden="true"
-      className={cn(
-        "size-4 text-muted-foreground",
-        isDanger(id) && "text-destructive"
-      )}
-    />
+  return (
+    commandIcon(
+      id,
+      cn("size-4 text-muted-foreground", isDanger(id) && "text-destructive")
+    ) ?? <span aria-hidden="true" />
   )
 }
 

@@ -5,7 +5,12 @@ import { IdChip } from "@/components/list-controls/IdChip"
 import { StatePill } from "@/components/shape-entry/StatePill"
 import { Panel } from "@/components/shaping/session-ui"
 import { SelectField } from "@/components/settings-edit/SelectField"
-import { cardBody, hintText, titleText } from "@/components/shaping/styles"
+import {
+  cardBody,
+  headingText,
+  hintText,
+  titleText,
+} from "@/components/shaping/styles"
 import { sessionRef, sessionTitle } from "@/lib/shape-sessions"
 import type { ShapeSession } from "@/lib/types"
 
@@ -73,11 +78,12 @@ export function SessionPicker({
   return (
     <Panel aria-label="Sessions to compare" className={cardBody}>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-base font-semibold">Sessions to compare</h2>
+        <h2 className={headingText}>Sessions to compare</h2>
         <p className={hintText}>{repoLine(anchor)}</p>
         <span className="ml-auto">
           <SelectField
             label="Add session"
+            wrapperClassName="max-w-48"
             value=""
             disabled={addable.length === 0}
             onChange={(id) => toggle(id, true)}
@@ -110,7 +116,7 @@ export function SessionPicker({
                   ariaLabel={`Compare ${sessionRef(session)}`}
                   onChange={(next) => toggle(session.id, next)}
                   label={
-                    <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="flex min-w-0 flex-col items-start gap-0.5">
                       <span className={titleText}>{sessionTitle(session)}</span>
                       <IdChip>{sessionRef(session)}</IdChip>
                     </span>

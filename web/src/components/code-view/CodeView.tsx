@@ -1,3 +1,5 @@
+import { TerminalIcon } from "lucide-react"
+
 import { DisclosureChevron } from "@/components/code-view/DisclosureChevron"
 
 /** A closed entry that opens onto numbered lines on the code surface. */
@@ -13,16 +15,20 @@ export function CodeView({
   empty: string
 }) {
   return (
-    <details className="group overflow-hidden rounded-lg border border-border">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+    <details className="group border-t border-border">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 text-[13px] hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
         <DisclosureChevron />
-        <span className="font-medium">{title}</span>
+        <span>{title}</span>
         <span className="text-xs text-muted-foreground tabular-nums">
           {caption}
         </span>
+        <TerminalIcon
+          aria-hidden="true"
+          className="ml-auto size-4 text-muted-foreground"
+        />
       </summary>
       {lines.length === 0 ? (
-        <p className="border-t border-border p-3 text-sm text-muted-foreground">
+        <p className="border-t border-border py-3 text-sm text-muted-foreground">
           {empty}
         </p>
       ) : (

@@ -5,7 +5,7 @@ import {
   type RevisionDiff,
   type StoryLine,
 } from "@/lib/shape-versions"
-import { cardBody, countText } from "@/components/shaping/styles"
+import { cardBody, countText, headingText } from "@/components/shaping/styles"
 
 function rowOf(line: StoryLine, at: "old" | "new") {
   const sign =
@@ -33,7 +33,7 @@ export function StoryDiff({
   return (
     <Panel aria-label="Story text diff" className={cardBody}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h2 className="text-base font-semibold">Story text</h2>
+        <h2 className={headingText}>Story text</h2>
         <span className={countText}>
           +{diff.storyAdded} −{diff.storyRemoved} lines · {diff.from.id} to{" "}
           {diff.to.id}

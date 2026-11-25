@@ -161,11 +161,24 @@ export function splitPath(path: string): { dir: string; name: string } {
     : { dir: path.slice(0, at + 1), name: path.slice(at + 1) }
 }
 
+/**
+ * The path a stat row names after a rename: git writes `dir/{old.go => new.go}` or `old => new`
+ * where the patch says only `dir/new.go`.
+ */
+export function statPath(path: string): string {
+  const braces = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(path)
+  if (braces !== null) {
+    return `${braces[1]}${braces[3]}${braces[4]}`.replace("//", "/")
+  }
+  const plain = / => (.*)$/.exec(path)
+  return plain === null ? path : (plain[1] ?? path)
+}
+
 /** Files the stat lists that the patch did not reach, because the patch was cut. */
 function missingFromPatch(stat: string, shown: DiffFile[]): DiffFile[] {
   const known = new Set(shown.map((file) => file.path))
   return parseStat(stat)
-    .filter((row) => !known.has(row.path))
+    .filter((row) => !known.has(statPath(row.path)))
     .map((row) => ({
       path: row.path,
       oldPath: row.path,

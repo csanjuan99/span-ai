@@ -1,11 +1,21 @@
 import { Link } from "react-router"
-import { ClockIcon, FolderIcon, UserIcon } from "lucide-react"
+import {
+  ClockIcon,
+  DownloadIcon,
+  FileDiffIcon,
+  FolderIcon,
+  HistoryIcon,
+  LockIcon,
+  UserIcon,
+} from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { IdChip } from "@/components/list-controls/IdChip"
 import { Pill, type Tone } from "@/components/shaping/session-ui"
 import { whenLabel } from "@/lib/clock"
 import type { ShapeSession } from "@/lib/types"
 import { wrapRowWide } from "@/components/shaping/styles"
+import { touchButtonSm } from "@/lib/button-class"
 
 const badge: Record<ShapeSession["status"], { tone: Tone; label: string }> = {
   interviewing: { tone: "acc", label: "Interviewing" },
@@ -30,9 +40,9 @@ export function agentLabel(session: ShapeSession): string {
 
 /** What the session is about, how it stands and where it runs. */
 const sessionLinks = [
-  { to: "history", label: "History" },
-  { to: "versions", label: "Compare" },
-  { to: "transfer", label: "Export" },
+  { to: "history", label: "History", icon: HistoryIcon },
+  { to: "versions", label: "Compare", icon: FileDiffIcon },
+  { to: "transfer", label: "Export", icon: DownloadIcon },
 ]
 
 export function SessionHeader({ session }: { session: ShapeSession }) {
@@ -51,21 +61,36 @@ export function SessionHeader({ session }: { session: ShapeSession }) {
             ? session.ref
             : session.id}
         </IdChip>
-        <Pill tone={state.tone}>{state.label}</Pill>
-        {sealed ? <Pill tone="mut">Read-only</Pill> : null}
-        <span className="ml-auto flex flex-wrap gap-2">
+        <Pill tone={state.tone}>
+          {sealed ? <LockIcon aria-hidden="true" className="size-3" /> : null}
+          {state.label}
+        </Pill>
+        {sealed ? (
+          <Pill tone="mut">
+            <LockIcon aria-hidden="true" className="size-3" />
+            Read-only
+          </Pill>
+        ) : null}
+        <span className="ml-auto flex flex-wrap gap-1">
           {sessionLinks.map((link) => (
-            <Link
+            <Button
               key={link.to}
-              className="inline-flex h-11 items-center rounded-lg border border-input bg-card px-3 text-[13px] font-medium sm:h-8"
-              to={`/shaping/${encodeURIComponent(session.id)}/${link.to}?workspace=${encodeURIComponent(session.workspace)}`}
+              asChild
+              variant="ghost"
+              size="sm"
+              className={touchButtonSm}
             >
-              {link.label}
-            </Link>
+              <Link
+                to={`/shaping/${encodeURIComponent(session.id)}/${link.to}?workspace=${encodeURIComponent(session.workspace)}`}
+              >
+                <link.icon aria-hidden="true" className="size-4" />
+                {link.label}
+              </Link>
+            </Button>
           ))}
         </span>
       </div>
-      <h1 className="text-2xl leading-8 font-semibold tracking-tight text-balance whitespace-pre-line">
+      <h1 className="text-2xl leading-8 font-semibold tracking-[-0.01em] text-balance whitespace-pre-line">
         {title}
       </h1>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px] leading-5 text-muted-foreground">

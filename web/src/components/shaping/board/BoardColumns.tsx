@@ -12,7 +12,7 @@ import { Pill, type Tone } from "@/components/shaping/session-ui"
 import { Checkbox } from "@/components/ui/checkbox"
 import { dayLabel } from "@/lib/clock"
 import type { BoardCard, BoardColumn } from "@/lib/shape-flows"
-import { countText } from "@/components/shaping/styles"
+import { countText, headingText } from "@/components/shaping/styles"
 
 /** What a card says about where its session stands. */
 function badge(card: BoardCard): { tone: Tone; label: string } | null {
@@ -127,7 +127,7 @@ function StatusColumn({
       className="flex min-w-0 flex-col gap-2"
     >
       <div className="flex items-center gap-2">
-        <h2 className="text-base font-semibold">{column.name}</h2>
+        <h2 className={headingText}>{column.name}</h2>
         <span className={countText}>{column.count}</span>
       </div>
       {column.cards.map((card) => (

@@ -12,17 +12,19 @@ export function RawOutput({
 }) {
   const commands = commandLog(statements)
   return (
-    <section aria-label="Raw output" className="flex flex-col gap-2">
-      <h2 className="text-sm text-muted-foreground">Raw output · collapsed</h2>
+    <section aria-label="Raw output" className="flex flex-col">
+      <h2 className="pt-2 text-xs font-medium tracking-[0.02em] text-muted-foreground">
+        Raw output · collapsed
+      </h2>
       <CodeView
         title="Agent transcript"
-        caption={`${transcript.length} ${transcript.length === 1 ? "line" : "lines"}`}
+        caption={`${transcript.length} ${transcript.length === 1 ? "line" : "lines"} · opens in code view`}
         lines={transcript}
         empty="The agent has not written yet."
       />
       <CodeView
         title="Command log"
-        caption={`${commands.length} ${commands.length === 1 ? "command" : "commands"}`}
+        caption={`${commands.length} ${commands.length === 1 ? "command" : "commands"} · opens in code view`}
         lines={commands}
         empty="No command has run yet."
       />
