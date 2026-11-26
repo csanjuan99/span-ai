@@ -3,7 +3,8 @@
 import { RefreshCwIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { VerdictPill } from "@/components/qa/Pill"
+import { Switch } from "@/components/list-controls/Switch"
+import { CaseTable } from "@/components/qa/CaseTable"
 import { PillToggle } from "@/components/qa/PillToggle"
 import { Panel } from "@/components/shaping/session-ui"
 import { Consequences } from "@/components/status-block/Consequences"
@@ -11,7 +12,6 @@ import { Button } from "@/components/ui/button"
 import { touchButton } from "@/lib/button-class"
 import { reasonText } from "@/lib/guards"
 import {
-  caseTime,
   groupByFile,
   readQaCases,
   rerunQa,
@@ -28,13 +28,20 @@ const filters = [
   { value: "new", label: "New" },
 ]
 
-function caseVerdict(result: QaCase["result"]) {
-  return result === "pass" ? "pass" : result === "fail" ? "fail" : "held"
+/** The count a filter chip carries; null for the filters the server does not total. */
+function counted(filter: string, view: QaCasesView): number | null {
+  const counts: Record<string, number> = {
+    "": view.total,
+    failed: view.failed,
+    new: view.added,
+  }
+  return counts[filter] ?? null
 }
 
-/** The cases of the proof grouped by file, failures first, each one opening to its own output. */
+/** The cases of the proof, failures first, grouped by file unless the person turns that off. */
 export function Cases({ id, version }: { id: string; version: number }) {
   const [status, setStatus] = useState("")
+  const [grouped, setGrouped] = useState(true)
   const [view, setView] = useState<QaCasesView | null>(null)
   const [problem, setProblem] = useState("")
   const [open, setOpen] = useState("")
@@ -43,7 +50,7 @@ export function Cases({ id, version }: { id: string; version: number }) {
 
   useEffect(() => {
     let live = true
-    readQaCases(id, status)
+    readQaCases(id, status, grouped)
       .then((body) => {
         if (live) {
           setView(body)
@@ -58,7 +65,7 @@ export function Cases({ id, version }: { id: string; version: number }) {
     return () => {
       live = false
     }
-  }, [id, status, tick, version])
+  }, [id, status, grouped, tick, version])
 
   async function rerun(names: string[]) {
     setBusy(true)
@@ -81,6 +88,15 @@ export function Cases({ id, version }: { id: string; version: number }) {
   const failing = (view?.cases ?? [])
     .filter((item) => item.result === "fail")
     .map((item) => item.name)
+  const table = (cases: QaCase[]) => (
+    <CaseTable
+      cases={cases}
+      open={open}
+      onToggle={(name) => setOpen(open === name ? "" : name)}
+      busy={busy}
+      onRerun={(name) => void rerun([name])}
+    />
+  )
   return (
     <section aria-label="Cases" className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -91,8 +107,17 @@ export function Cases({ id, version }: { id: string; version: number }) {
             onClick={() => setStatus(item.value)}
           >
             {item.label}
+            {view !== null && counted(item.value, view) !== null ? (
+              <span className="ml-1 font-mono tabular-nums">
+                {counted(item.value, view)}
+              </span>
+            ) : null}
           </PillToggle>
         ))}
+        <span className="ml-auto flex min-h-11 items-center gap-2 text-sm md:min-h-0">
+          <Switch label="Group by file" on={grouped} onChange={setGrouped} />
+          <span aria-hidden="true">Group by file</span>
+        </span>
       </div>
       <div
         className={cn(
@@ -112,77 +137,34 @@ export function Cases({ id, version }: { id: string; version: number }) {
               No case matches this filter.
             </p>
           ) : null}
-          {groupByFile(view?.cases ?? []).map((group) => (
-            <div
-              key={group.path}
-              className="overflow-hidden rounded-[14px] border border-border bg-card"
-            >
-              <div className="flex flex-wrap items-center gap-2 bg-muted px-4 py-2 text-sm">
-                <span className="font-mono">
-                  {group.path === "" ? "Not placed in a file" : group.path}
-                </span>
-                <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                  {group.passed} passed · {group.failed} failed
-                </span>
-              </div>
-              {group.cases.map((item) => (
-                <div key={item.name} className="border-t border-border">
-                  <button
-                    type="button"
-                    aria-expanded={open === item.name}
-                    onClick={() => setOpen(open === item.name ? "" : item.name)}
-                    className="grid min-h-11 w-full grid-cols-[72px_minmax(0,1fr)_56px] items-center gap-3 px-4 py-2 text-left text-sm"
-                  >
-                    <VerdictPill verdict={caseVerdict(item.result)}>
-                      {item.result}
-                    </VerdictPill>
-                    <span className="min-w-0 truncate font-mono text-[13px]">
-                      {item.name}
-                      {item.isNew ? (
-                        <span className="ml-2 rounded-md border border-dashed border-border px-1.5 text-[11px] text-muted-foreground">
-                          new
-                        </span>
-                      ) : null}
-                    </span>
-                    <span className="text-right text-muted-foreground tabular-nums">
-                      {caseTime(item.elapsedMs)}
-                    </span>
-                  </button>
-                  {open === item.name ? (
-                    <div className="flex flex-col gap-2 bg-muted px-4 py-3 text-sm">
-                      {item.message !== "" ? (
-                        <p className="text-pretty">{item.message}</p>
-                      ) : null}
-                      {item.line > 0 ? (
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {item.path}:{item.line}
-                        </p>
-                      ) : null}
-                      {item.output.length > 0 ? (
-                        <pre className="overflow-x-auto rounded-[10px] border border-border bg-surface-code py-2 font-mono text-xs leading-5">
-                          {item.output.map((line, index) => (
-                            <div key={index} className="px-3.5 whitespace-pre">
-                              {line}
-                            </div>
-                          ))}
-                        </pre>
-                      ) : null}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="self-start"
-                        disabled={busy}
-                        onClick={() => void rerun([item.name])}
-                      >
-                        Rerun this case
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+          {view !== null ? (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <h2 className="text-base font-semibold">Acceptance cases</h2>
+              <p className="text-xs text-muted-foreground">
+                {grouped
+                  ? "Failures first within each file."
+                  : "Failures first."}{" "}
+                {view.total} cases, {view.passed} passed, {view.failed} failed.
+              </p>
             </div>
-          ))}
+          ) : null}
+          {grouped
+            ? groupByFile(view?.cases ?? []).map((group) => (
+                <div key={group.path} className="flex min-w-0 flex-col gap-1.5">
+                  <div className="flex flex-wrap items-baseline gap-2 text-sm">
+                    <span className="font-mono font-semibold">
+                      {group.path === "" ? "Not placed in a file" : group.path}
+                    </span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {group.passed} passed · {group.failed} failed
+                    </span>
+                  </div>
+                  {table(group.cases)}
+                </div>
+              ))
+            : view !== null && view.cases.length > 0
+              ? table(view.cases)
+              : null}
         </div>
         {failing.length > 0 ? (
           <Panel className="flex flex-col gap-3 p-4 lg:sticky lg:top-4">

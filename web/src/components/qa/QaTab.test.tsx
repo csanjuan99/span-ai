@@ -217,4 +217,73 @@ describe("QaTab", () => {
       screen.getByText("The first result stays in the history.")
     ).toBeTruthy()
   })
+
+  const twoCases = {
+    known: true,
+    total: 43,
+    passed: 41,
+    failed: 2,
+    new: 8,
+    cases: [
+      {
+        name: "TestRetryBackoff",
+        result: "fail",
+        elapsedMs: 20,
+        path: "webhook/retry_test.go",
+        file: "retry_test.go",
+        line: 58,
+        output: ["delay 2s, want 4s"],
+        new: true,
+      },
+      {
+        name: "TestSendOK",
+        result: "pass",
+        elapsedMs: 10,
+        path: "webhook/client_test.go",
+        file: "client_test.go",
+        line: 21,
+      },
+    ],
+  }
+
+  async function openCases() {
+    reply({ "/qa/cases": twoCases, "/qa": failing })
+    render(<QaTab id="r1" />)
+    fireEvent.click(await screen.findByRole("button", { name: "Cases" }))
+    await screen.findByText("TestRetryBackoff")
+  }
+
+  it("lists the cases in a table with where each one is and shows a failure's output", async () => {
+    await openCases()
+    for (const column of ["Result", "Case", "File:line", "Time", "New"]) {
+      expect(screen.getAllByRole("columnheader", { name: column }).length).toBe(
+        2
+      )
+    }
+    expect(screen.getByText("retry_test.go:58")).toBeTruthy()
+    expect(screen.getByText("delay 2s, want 4s")).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Failures first within each file. 43 cases, 41 passed, 2 failed."
+      )
+    ).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Rerun this case" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Open this case" }))
+    expect(screen.getByRole("button", { name: "Rerun this case" })).toBeTruthy()
+  })
+
+  it("lists every case in one table when grouping by file is switched off", async () => {
+    await openCases()
+    const group = screen.getByRole("switch", { name: "Group by file" })
+    expect(group.getAttribute("aria-checked")).toBe("true")
+    expect(screen.getByText("webhook/client_test.go")).toBeTruthy()
+    fireEvent.click(group)
+    await waitFor(() => expect(screen.getAllByRole("table").length).toBe(1))
+    expect(screen.queryByText("webhook/client_test.go")).toBeNull()
+    const asked = vi.mocked(fetch).mock.calls.map(([url]) => String(url))
+    expect(asked.at(-1)).not.toContain("group=file")
+    expect(
+      screen.getByText("Failures first. 43 cases, 41 passed, 2 failed.")
+    ).toBeTruthy()
+  })
 })

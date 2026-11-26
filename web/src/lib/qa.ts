@@ -335,9 +335,10 @@ export async function readQa(id: string): Promise<QaView> {
 /** Reads the cases of a run; `status` is "", "failed", "passed" or "new". */
 export async function readQaCases(
   id: string,
-  status: string
+  status: string,
+  grouped = true
 ): Promise<QaCasesView> {
-  const query = new URLSearchParams({ group: "file" })
+  const query = new URLSearchParams(grouped ? { group: "file" } : {})
   if (status !== "") {
     query.set("status", status)
   }
