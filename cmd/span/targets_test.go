@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -18,9 +17,7 @@ import (
 func repoDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
+	gitOut(t, dir, "init", "-q")
 	return dir
 }
 
@@ -40,7 +37,7 @@ func TestFilesWithoutAStoryAreRefusedBeforeAnythingStarts(t *testing.T) {
 func TestEachTargetGetsItsOwnPathStoryAndTheFolderItWasLaunchedFrom(t *testing.T) {
 	folder := t.TempDir()
 	repo := repoDir(t)
-	got, err := targetRequest(
+	got, err := setup.ForTarget(
 		setup.Request{Workspace: folder, Story: "all", Issue: "X-1", Base: "dev"},
 		launch.Target{Name: "api", Path: repo, Story: "its story", Issue: "X-2"},
 	)

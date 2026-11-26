@@ -20,12 +20,10 @@ import (
 	"time"
 
 	"span/internal/agent"
-	"span/internal/branch"
 	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/handoff"
 	"span/internal/jira"
-	"span/internal/launch"
 	"span/internal/live"
 	"span/internal/overlay"
 	"span/internal/policy"
@@ -159,7 +157,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		}
 		account, err := jira.Load(project)
 		if err != nil {
-			log.Printf("jira account %s: %v", project, err)
+			// The account was written but cannot be read back, so it is not configured.
+			writeErr(w, err)
+			return
 		}
 		writeJSON(w, http.StatusOK, jira.View(account, true))
 	})
@@ -171,12 +171,11 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, jira.Logout(r.PostForm.Get("project")))
 	})
 	mux.HandleFunc("GET /jira/issues/{key}", func(w http.ResponseWriter, r *http.Request) {
-		account, err := jira.Load(r.URL.Query().Get("path"))
-		if err != nil {
-			writeErr(w, err)
+		client, ok := jiraClient(w, r)
+		if !ok {
 			return
 		}
-		story, err := (jira.Client{Account: account}).Issue(r.Context(), r.PathValue("key"))
+		story, err := client.Issue(r.Context(), r.PathValue("key"))
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -184,12 +183,11 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, story)
 	})
 	mux.HandleFunc("GET /jira/search", func(w http.ResponseWriter, r *http.Request) {
-		account, err := jira.Load(r.URL.Query().Get("path"))
-		if err != nil {
-			writeErr(w, err)
+		client, ok := jiraClient(w, r)
+		if !ok {
 			return
 		}
-		stories, err := (jira.Client{Account: account}).Search(r.Context(), r.URL.Query().Get("jql"))
+		stories, err := client.Search(r.Context(), r.URL.Query().Get("jql"))
 		if err != nil {
 			writeErr(w, err)
 			return
@@ -274,8 +272,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, err)
 			return
 		}
-		if !safe(id) {
-			writeErr(w, errors.New("invalid span id"))
+		if !validID(w, id) {
 			return
 		}
 		if err := engine.SetStageAgent(filepath.Join(root, id), r.PostForm.Get("stage"), r.PostForm.Get("agent"), agent.Home()); err != nil {
@@ -291,8 +288,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	})
 	mux.HandleFunc("POST /spans/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if !safe(id) {
-			writeErr(w, errors.New("invalid span id"))
+		if !validID(w, id) {
 			return
 		}
 		// A click here is always valid: the answer says whether there was anything to stop.
@@ -314,8 +310,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	})
 	mux.HandleFunc("POST /spans/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if !safe(id) {
-			writeErr(w, errors.New("invalid span id"))
+		if !validID(w, id) {
 			return
 		}
 		// A run flying in this process holds no file lock between stages, so the hub is asked too.
@@ -505,14 +500,31 @@ func Listen(addr, root, token string, launch Launch, wake Wake, hub *live.Hub, p
 	return http.ListenAndServe(addr, handler)
 }
 
-func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request, reload, resume bool) {
+// canWake answers 404 when this server cannot wake runs or the id cannot name one.
+func canWake(w http.ResponseWriter, r *http.Request, wake Wake, id string) bool {
 	if wake == nil || !safe(id) {
 		http.NotFound(w, r)
-		return
+		return false
+	}
+	return true
+}
+
+// wakeableRun loads the run a wake route acts on, answering 404 when there is none.
+func wakeableRun(w http.ResponseWriter, r *http.Request, wake Wake, root, id string) (engine.Snapshot, bool) {
+	if !canWake(w, r, wake, id) {
+		return engine.Snapshot{}, false
 	}
 	snap, err := engine.Load(root, id)
 	if err != nil {
 		http.NotFound(w, r)
+		return engine.Snapshot{}, false
+	}
+	return snap, true
+}
+
+func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request, reload, resume bool) {
+	snap, ok := wakeableRun(w, r, wake, root, id)
+	if !ok {
 		return
 	}
 	signal := Signal{Reload: reload, Resume: resume}
@@ -557,7 +569,7 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 		writeBusy(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+	writeAccepted(w, id, snap.Cursor.Stage)
 }
 
 // writeConflict answers a request the run's state cannot take, with the reason.
@@ -568,13 +580,8 @@ func writeConflict(w http.ResponseWriter, message string) {
 // decideRun answers the decision a run is waiting on. An answer that names no option of
 // that decision is refused before anything is woken.
 func decideRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Request) {
-	if wake == nil || !safe(id) {
-		http.NotFound(w, r)
-		return
-	}
-	snap, err := engine.Load(root, id)
-	if err != nil {
-		http.NotFound(w, r)
+	snap, ok := wakeableRun(w, r, wake, root, id)
+	if !ok {
 		return
 	}
 	req := snap.Cursor.Decision
@@ -600,22 +607,20 @@ func decideRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Reques
 		writeBusy(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+	writeAccepted(w, id, snap.Cursor.Stage)
 }
 
 // approveStage releases a stage whose mode is hold and resumes the run. The approval is
 // recorded before the wake, so the stage that runs finds it.
 func approveStage(wake Wake, root, id string, w http.ResponseWriter, r *http.Request) {
-	if wake == nil || !safe(id) {
-		http.NotFound(w, r)
+	if !canWake(w, r, wake, id) {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
 		writeErr(w, err)
 		return
 	}
-	if _, err := engine.Load(root, id); err != nil {
-		http.NotFound(w, r)
+	if _, ok := wakeableRun(w, r, wake, root, id); !ok {
 		return
 	}
 	if err := engine.Approve(root, id, r.PostForm.Get("stage"), r.PostForm.Get("environment")); err != nil {
@@ -626,17 +631,12 @@ func approveStage(wake Wake, root, id string, w http.ResponseWriter, r *http.Req
 		writeBusy(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": r.PostForm.Get("stage")})
+	writeAccepted(w, id, r.PostForm.Get("stage"))
 }
 
 func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, r *http.Request) {
-	if wake == nil || !safe(id) {
-		http.NotFound(w, r)
-		return
-	}
-	snap, err := engine.Load(root, id)
-	if err != nil {
-		http.NotFound(w, r)
+	snap, ok := wakeableRun(w, r, wake, root, id)
+	if !ok {
 		return
 	}
 	if snap.Cursor.Stop || snap.Cursor.Done {
@@ -661,7 +661,23 @@ func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, 
 		writeBusy(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": snap.Cursor.Stage})
+	writeAccepted(w, id, snap.Cursor.Stage)
+}
+
+// jiraClient is the client for the account saved in the folder the request names; it answers
+// the error itself when there is none.
+func jiraClient(w http.ResponseWriter, r *http.Request) (jira.Client, bool) {
+	account, err := jira.Load(r.URL.Query().Get("path"))
+	if err != nil {
+		writeErr(w, err)
+		return jira.Client{}, false
+	}
+	return jira.Client{Account: account}, true
+}
+
+// writeAccepted answers that a run was woken, with the stage it goes on from.
+func writeAccepted(w http.ResponseWriter, id, stage string) {
+	writeJSON(w, http.StatusAccepted, map[string]string{"id": id, "stage": stage})
 }
 
 func writeBusy(w http.ResponseWriter, err error) {
@@ -883,39 +899,35 @@ func storyRequest(r *http.Request) (setup.Request, error) {
 	}, nil
 }
 
+// validID refuses an id that cannot name a run, with the answer the run routes give.
+func validID(w http.ResponseWriter, id string) bool {
+	if !safe(id) {
+		writeErr(w, errors.New("invalid span id"))
+		return false
+	}
+	return true
+}
+
 func safe(name string) bool {
 	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\`)
 }
 
 func configureOnly(ctx context.Context, req setup.Request) (string, error) {
-	targets, err := launch.Resolve(ctx, launch.Request{
-		Path: req.Workspace, Names: req.Repos, Issue: req.Issue, Story: req.Story,
-	}, nil)
+	targets, err := setup.Targets(ctx, req)
 	if err != nil {
 		return "", err
 	}
 	var b strings.Builder
 	for _, target := range targets {
-		project, err := policy.ProjectBase(target.Path)
+		one, err := setup.ForTarget(req, target)
 		if err != nil {
 			return "", err
 		}
-		kind, base, err := branch.Choose(target.Story, req.Kind, req.Base, project)
+		res, err := setup.Configure(one)
 		if err != nil {
 			return "", err
 		}
-		res, err := setup.Configure(setup.Request{
-			Workspace: target.Path,
-			Story:     target.Story,
-			Kind:      kind,
-			Issue:     target.Issue,
-			Base:      base,
-			Force:     req.Force,
-		})
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(fmt.Sprintf("repo %s\npolicy %s\nbranch %s\nbase %s\n", target.Name, res.PolicyPath, res.Branch, res.Base))
+		b.WriteString(setup.Summary(target.Name, res))
 	}
 	return b.String(), nil
 }

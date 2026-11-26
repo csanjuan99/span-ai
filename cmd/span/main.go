@@ -186,7 +186,7 @@ func resume(args []string) int {
 	// found nothing, so an isolated run resumed in the project instead of its own worktree.
 	root := *spans
 	if root == "" {
-		root = filepath.Join(*workspace, ".span", "runs")
+		root = defaultSpans(*workspace)
 	}
 	if snap, err := engine.Load(root, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
 		project, folder = snap.Cursor.Project, snap.Cursor.Folder
@@ -398,9 +398,7 @@ var errFilesNeedStory = errors.New("invalid: files need a story")
 // resolveTargets turns a launch request into the repositories it runs in, and refuses attached
 // files when a target has no story to hang them on. Both launch paths share it.
 func resolveTargets(ctx context.Context, req setup.Request) ([]launch.Target, error) {
-	targets, err := launch.Resolve(ctx, launch.Request{
-		Path: req.Workspace, Names: req.Repos, Issue: req.Issue, Story: req.Story,
-	}, nil)
+	targets, err := setup.Targets(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -412,17 +410,6 @@ func resolveTargets(ctx context.Context, req setup.Request) ([]launch.Target, er
 		}
 	}
 	return targets, nil
-}
-
-// targetRequest is the request for one repository of a launch: its path, the folder the
-// launch started from, its own story and issue, and its base.
-func targetRequest(req setup.Request, target launch.Target) (setup.Request, error) {
-	one := req
-	one.Workspace = target.Path
-	one.Folder = launchFolder(req.Workspace, target.Path)
-	one.Story = target.Story
-	one.Issue = target.Issue
-	return withBase(one)
 }
 
 // reportRun logs how a run's worker ended. A run that was stopped ends on a cancelled
@@ -442,7 +429,7 @@ func runQuickstart(ctx context.Context, req setup.Request) (string, int) {
 	var b strings.Builder
 	code := 0
 	for _, target := range targets {
-		one, err := targetRequest(req, target)
+		one, err := setup.ForTarget(req, target)
 		if err != nil {
 			fmt.Fprintf(&b, "repo %s\n%s\n", target.Name, err)
 			code = 1
@@ -466,10 +453,18 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 	var runs []serve.RunRef
 	var failures []error
 	var failed []serve.RepoFailure
+	// Keep going after a failure: one busy checkout or broken span.yaml must not stop the other
+	// repos, and the runs that did start must be reported, not dropped.
+	fail := func(name string, err error) {
+		failures = append(failures, fmt.Errorf("repo %s: %w", name, err))
+		failed = append(failed, serve.RepoFailure{Repo: name, Reason: err.Error()})
+		fmt.Fprintf(&text, "repo %s did not start: %v\n", name, err)
+	}
 	for _, target := range targets {
-		one, err := targetRequest(req, target)
+		one, err := setup.ForTarget(req, target)
 		if err != nil {
-			return serve.Outcome{}, fmt.Errorf("repo %s: %w", target.Name, err)
+			fail(target.Name, err)
+			continue
 		}
 		if strings.TrimSpace(one.Story) == "" {
 			res, claim, err := claimAndConfigure(one, "configuring")
@@ -477,16 +472,12 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 				return serve.Outcome{}, err
 			}
 			claim.Release()
-			fmt.Fprintf(&text, "repo %s\npolicy %s\nbranch %s\nbase %s\nconfiguration ready\n", target.Name, res.PolicyPath, res.Branch, res.Base)
+			text.WriteString(setup.Summary(target.Name, res) + "configuration ready\n")
 			continue
 		}
 		gotID, gotStage, err := beginOne(one, spans, hub)
 		if err != nil {
-			// Keep going: one busy checkout must not stop the other repos, and the runs that
-			// did start must be reported, not dropped.
-			failures = append(failures, fmt.Errorf("repo %s: %w", target.Name, err))
-			failed = append(failed, serve.RepoFailure{Repo: target.Name, Reason: err.Error()})
-			fmt.Fprintf(&text, "repo %s did not start: %v\n", target.Name, err)
+			fail(target.Name, err)
 			continue
 		}
 		runs = append(runs, serve.RunRef{ID: gotID, Stage: gotStage, Repo: target.Name})
@@ -630,11 +621,8 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
-	fmt.Fprintf(&b, "%s %s %s\n%s\n", result.ID, result.Stage, result.Verdict, result.Reason)
-	if result.Verdict == "advance" {
-		return b.String(), 0
-	}
-	return b.String(), 1
+	line, exit := resultReport(result)
+	return b.String() + line, exit
 }
 
 // repeated is a flag that can be given more than once.
@@ -875,10 +863,10 @@ func options(workspace, spans, policyPath, project, folder string, explicit bool
 		return engine.Options{}, err
 	}
 	if spans == "" {
-		spans = filepath.Join(workspace, ".span", "runs")
+		spans = defaultSpans(workspace)
 	}
 	if policyPath == "" {
-		policyPath = filepath.Join(workspace, "span.yaml")
+		policyPath = policyIn(workspace)
 	}
 	load := setup.LoadOrDefault
 	if explicit {
@@ -895,10 +883,12 @@ func options(workspace, spans, policyPath, project, folder string, explicit bool
 	fresh := func() policy.File {
 		now, err := load(policyPath, workspace)
 		if err != nil {
+			log.Printf("policy %s ignored, the run keeps the one it started with: %v", policyPath, err)
 			return file
 		}
 		merged, err := inheritFolderChecked(now, folder)
 		if err != nil {
+			log.Printf("folder policy %s ignored, the run keeps the one it started with: %v", policyIn(folder), err)
 			return file
 		}
 		return merged
@@ -922,11 +912,15 @@ func options(workspace, spans, policyPath, project, folder string, explicit bool
 	if project == "" {
 		project = workspace
 	}
-	if account, err := jira.Load(project); err == nil {
+	account, err := jira.Load(project)
+	var jiraErr *jira.Error
+	switch {
+	case err == nil:
+		// Load only returns an account that has a token.
 		opt.Issues = jira.Client{Account: account}
-		if account.Token != "" {
-			opt.Secrets = append(opt.Secrets, account.Token)
-		}
+		opt.Secrets = append(opt.Secrets, account.Token)
+	case !errors.As(err, &jiraErr) || jiraErr.Code != "not_configured":
+		log.Printf("jira is off for this run: %v", err)
 	}
 	if serveToken := os.Getenv("SPAN_TOKEN"); serveToken != "" {
 		opt.Secrets = append(opt.Secrets, serveToken)
@@ -958,11 +952,19 @@ func printResult(result engine.Result, err error) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	fmt.Printf("%s %s %s\n%s\n", result.ID, result.Stage, result.Verdict, result.Reason)
+	line, code := resultReport(result)
+	fmt.Print(line)
+	return code
+}
+
+// resultReport is what a finished drive of a run prints, and the exit code it ends with:
+// 0 only when the stage advanced.
+func resultReport(result engine.Result) (string, int) {
+	line := fmt.Sprintf("%s %s %s\n%s\n", result.ID, result.Stage, result.Verdict, result.Reason)
 	if result.Verdict == "advance" {
-		return 0
+		return line, 0
 	}
-	return 1
+	return line, 1
 }
 
 // usageText is the top-level help. Every verb main accepts is named here.
@@ -985,7 +987,7 @@ const usageText = `./span repos [--path .]
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
 ./span resume <id> [--workspace .]
-./span serve [--addr 127.0.0.1:8787] [--spans .span/runs]`
+./span serve [--addr 127.0.0.1:8787] [--spans .span/runs] [--max-parallel N]`
 
 func usage() {
 	fmt.Fprintln(os.Stderr, usageText)
@@ -1015,12 +1017,12 @@ func prepare(workspace, spans, policyPath, name, base string, isolate bool) (pre
 	}
 	out := prepared{Workspace: project, Project: project}
 	if spans == "" {
-		out.Spans = filepath.Join(project, ".span", "runs")
+		out.Spans = defaultSpans(project)
 	} else {
 		out.Spans = spans
 	}
 	if policyPath == "" {
-		out.Policy = filepath.Join(project, "span.yaml")
+		out.Policy = policyIn(project)
 	} else {
 		out.Policy, out.Explicit = policyPath, true
 	}
@@ -1052,7 +1054,7 @@ func runBase(explicit, project, name string) (string, error) {
 	if kind != branch.Hotfix {
 		kind = branch.Feat
 	}
-	chosen, err := projectBase(project)
+	chosen, err := setup.ProjectBase(project)
 	if err != nil {
 		return "", err
 	}
@@ -1061,31 +1063,6 @@ func runBase(explicit, project, name string) (string, error) {
 		return base, err
 	}
 	return branch.DefaultBase(kind), nil
-}
-
-// withBase settles a launch's kind and base before its branch is derived (branch.Choose):
-// the base the run names wins; otherwise span.yaml's base applies to feat and fix only,
-// and the kind is fixed so that base cannot make the story a hotfix. Still empty, the
-// kind's default applies when the branch is derived.
-func withBase(req setup.Request) (setup.Request, error) {
-	chosen, err := projectBase(req.Workspace)
-	if err != nil {
-		return req, err
-	}
-	kind, base, err := branch.Choose(req.Story, req.Kind, req.Base, chosen)
-	if err != nil {
-		return req, err
-	}
-	req.Kind, req.Base = kind, base
-	return req, nil
-}
-
-// projectBase is the base: line of span.yaml in project, or "" when there is none.
-func projectBase(project string) (string, error) {
-	if project == "" {
-		return "", nil
-	}
-	return policy.ProjectBase(project)
 }
 
 // accountFlags registers the Jira account flags that configure and check share.

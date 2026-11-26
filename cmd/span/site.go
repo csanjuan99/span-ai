@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,12 +93,12 @@ func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 	}
 	// span.yaml is optional: without one the run uses the quickstart defaults, so a busy
 	// checkout that was never configured still gets a worktree, and nothing is written here.
-	policyPath := filepath.Join(project, "span.yaml")
+	policyPath := policyIn(project)
 	plan, err := branch.Derive(req.Story, req.Issue, req.Kind, req.Base)
 	if err != nil {
 		return site{}, err
 	}
-	if taken, _ := branchTaken(project, spans, plan.Name, busy); taken {
+	if branchTaken(project, spans, plan.Name, busy) {
 		return site{}, fmt.Errorf("%w; branch %s already belongs to another run", busy, plan.Name)
 	}
 	code, err := prepare(project, spans, "", plan.Name, plan.Base, true)
@@ -113,28 +114,32 @@ func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 // a launch that is about to create it, a run that owns it, or a branch git already has.
 // The first run in a checkout creates its branch later, at checkout, so git alone cannot
 // see it; two runs of one story would then fight over that name.
-func branchTaken(project, spans, name string, busy error) (bool, error) {
+func branchTaken(project, spans, name string, busy error) bool {
 	var held *runlock.BusyError
 	if errors.As(busy, &held) && strings.Contains(held.Holder, name) {
 		// Launching now: its run has no id yet, so only the label it holds names its branch.
-		return true, nil
+		return true
 	}
 	root := spans
 	if root == "" {
-		root = filepath.Join(project, ".span", "runs")
+		root = defaultSpans(project)
 	}
-	entries, _ := os.ReadDir(root)
+	entries, err := os.ReadDir(root)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// The runs cannot be listed, so only git can still say the branch is taken.
+		log.Printf("read runs %s: %v", root, err)
+	}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		snap, err := engine.Load(root, entry.Name())
 		if err == nil && snap.Cursor.Branch == name {
-			return true, nil
+			return true
 		}
 	}
-	_, err := adapt.Git{Dir: project}.Git(context.Background(), project, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
-	return err == nil, nil
+	_, err = adapt.Git{Dir: project}.Git(context.Background(), project, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
+	return err == nil
 }
 
 // inheritFolder fills the agent and models a repository's policy leaves unset from the
@@ -143,6 +148,7 @@ func branchTaken(project, spans, name string, busy error) (bool, error) {
 func inheritFolder(file policy.File, folder string) policy.File {
 	merged, err := inheritFolderChecked(file, folder)
 	if err != nil {
+		log.Printf("folder policy %s ignored: %v", policyIn(folder), err)
 		return file
 	}
 	return merged
@@ -155,7 +161,7 @@ func inheritFolderChecked(file policy.File, folder string) (policy.File, error) 
 	if folder == "" {
 		return file, nil
 	}
-	parent, err := policy.Load(filepath.Join(folder, policy.Name))
+	parent, err := policy.Load(policyIn(folder))
 	if errors.Is(err, os.ErrNotExist) {
 		return file, nil
 	}
@@ -165,28 +171,23 @@ func inheritFolderChecked(file policy.File, folder string) (policy.File, error) 
 	return file.Inherit(parent), nil
 }
 
-// launchFolder is the folder to remember for a run in target: the folder the launch started
-// from when target is a repository inside it, and "" when the run starts in the repository
-// itself (a single repository, or the repository chosen directly).
-func launchFolder(folder, target string) string {
-	from, err := filepath.Abs(folder)
-	if err != nil {
-		return ""
-	}
-	to, err := filepath.Abs(target)
-	if err != nil || filepath.Clean(from) == filepath.Clean(to) {
-		return ""
-	}
-	return from
-}
-
 // projectPolicy is the policy of the project a run belongs to. span.yaml is not tracked, so
 // a run's own worktree does not have it; "" means the default next to the tree.
 func projectPolicy(project string) string {
 	if project == "" {
 		return ""
 	}
-	return filepath.Join(project, "span.yaml")
+	return policyIn(project)
+}
+
+// policyIn is where the span.yaml of a folder is.
+func policyIn(folder string) string {
+	return filepath.Join(folder, policy.Name)
+}
+
+// defaultSpans is the state directory of a project that names none.
+func defaultSpans(project string) string {
+	return filepath.Join(project, ".span", "runs")
 }
 
 // resolvePolicy picks the policy file for a run that is woken again. The project's file
@@ -195,11 +196,11 @@ func projectPolicy(project string) string {
 // the checkout; span.yaml is optional, so a missing one gives the run the quickstart defaults.
 func resolvePolicy(spans, workspace, project string) string {
 	if project != "" {
-		return filepath.Join(project, "span.yaml")
+		return policyIn(project)
 	}
-	candidates := []string{filepath.Join(workspace, "span.yaml")}
+	candidates := []string{policyIn(workspace)}
 	if spans != "" {
-		candidates = append(candidates, filepath.Join(filepath.Dir(filepath.Dir(spans)), "span.yaml"))
+		candidates = append(candidates, policyIn(filepath.Dir(filepath.Dir(spans))))
 	}
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
@@ -219,9 +220,15 @@ func (s site) discard() {
 	}
 	ctx := context.Background()
 	git := adapt.Git{Dir: s.Code.Project}
-	_ = worktree.Remove(ctx, git, s.Code.Project, s.Code.Workspace)
-	_ = worktree.Prune(ctx, git, s.Code.Project)
+	if err := worktree.Remove(ctx, git, s.Code.Project, s.Code.Workspace); err != nil {
+		log.Printf("discard worktree %s: %v", s.Code.Workspace, err)
+	}
+	if err := worktree.Prune(ctx, git, s.Code.Project); err != nil {
+		log.Printf("prune worktrees of %s: %v", s.Code.Project, err)
+	}
 	if s.Result.Branch != "" {
-		_, _ = git.Git(ctx, s.Code.Project, "branch", "-d", s.Result.Branch)
+		if _, err := git.Git(ctx, s.Code.Project, "branch", "-d", s.Result.Branch); err != nil {
+			log.Printf("delete branch %s: %v", s.Result.Branch, err)
+		}
 	}
 }

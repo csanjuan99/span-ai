@@ -4,18 +4,25 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"span/internal/setup"
 )
 
-func writePolicy(t *testing.T, dir string) string {
+// writeBody puts body in the span.yaml of dir.
+func writeBody(t *testing.T, dir, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(dir, "span.yaml")
-	if err := os.WriteFile(path, []byte("feature: x\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
+}
+
+func writePolicy(t *testing.T, dir string) string {
+	t.Helper()
+	writeBody(t, dir, "feature: x\n")
+	return filepath.Join(dir, "span.yaml")
 }
 
 func TestAResumedRunReadsThePolicyOfItsProject(t *testing.T) {
@@ -98,7 +105,11 @@ func TestAnExplicitPolicyThatIsMissingStillFails(t *testing.T) {
 	if !code.Explicit {
 		t.Fatal("prepare forgot that --policy was given")
 	}
-	if code, _ := prepare(tree, "", "", "", "", false); code.Explicit {
+	implicit, err := prepare(tree, "", "", "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if implicit.Explicit {
 		t.Fatal("the default policy path counted as explicit")
 	}
 }
@@ -112,14 +123,8 @@ func TestAFolderPolicyFillsInWhatARepositoryLeavesUnset(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	write := func(dir, body string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(folder, "agent: pi\nrules: harness\nmodels:\n  pi: ollama/m\n")
-	write(repo, "agent: any\nrules: harness\n")
+	writeBody(t, folder, "agent: pi\nrules: harness\nmodels:\n  pi: ollama/m\n")
+	writeBody(t, repo, "agent: any\nrules: harness\n")
 
 	one, err := options(repo, "", filepath.Join(repo, "span.yaml"), repo, folder, false)
 	if err != nil {
@@ -140,7 +145,7 @@ func TestAFolderPolicyFillsInWhatARepositoryLeavesUnset(t *testing.T) {
 		t.Fatalf("a run started in the repository took the folder's policy: %q %v", direct.Policy.Agent, direct.Policy.Models)
 	}
 
-	write(repo, "agent: claude\nrules: harness\n")
+	writeBody(t, repo, "agent: claude\nrules: harness\n")
 	own, err := options(repo, "", filepath.Join(repo, "span.yaml"), repo, folder, false)
 	if err != nil {
 		t.Fatal(err)
@@ -156,9 +161,7 @@ func TestAFolderWithoutAPolicyLeavesTheRepositoryAsItIs(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "span.yaml"), []byte("agent: any\nrules: harness\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, repo, "agent: any\nrules: harness\n")
 	got, err := options(repo, "", filepath.Join(repo, "span.yaml"), repo, folder, false)
 	if err != nil {
 		t.Fatal(err)
@@ -170,10 +173,10 @@ func TestAFolderWithoutAPolicyLeavesTheRepositoryAsItIs(t *testing.T) {
 
 func TestLaunchFolderIsRememberedOnlyForARepositoryInsideIt(t *testing.T) {
 	folder := t.TempDir()
-	if got := launchFolder(folder, folder); got != "" {
+	if got := setup.LaunchFolder(folder, folder); got != "" {
 		t.Fatalf("a launch in the repository itself remembered %q", got)
 	}
-	if got := launchFolder(folder, filepath.Join(folder, "api")); got != folder {
+	if got := setup.LaunchFolder(folder, filepath.Join(folder, "api")); got != folder {
 		t.Fatalf("a repository inside the folder remembered %q, want %q", got, folder)
 	}
 }
@@ -186,14 +189,8 @@ func TestAModelPickedAfterLaunchIsTheOneTheNextStageUses(t *testing.T) {
 	if err := os.MkdirAll(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	write := func(dir, body string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(folder, "agent: pi\nrules: harness\n")
-	write(repo, "agent: any\nrules: harness\n")
+	writeBody(t, folder, "agent: pi\nrules: harness\n")
+	writeBody(t, repo, "agent: any\nrules: harness\n")
 	opt, err := options(repo, "", filepath.Join(repo, "span.yaml"), repo, folder, false)
 	if err != nil {
 		t.Fatal(err)
@@ -202,7 +199,7 @@ func TestAModelPickedAfterLaunchIsTheOneTheNextStageUses(t *testing.T) {
 		t.Fatalf("no model was chosen yet, got %q", got)
 	}
 
-	write(folder, "agent: pi\nrules: harness\nmodels:\n  pi: ollama/m\n")
+	writeBody(t, folder, "agent: pi\nrules: harness\nmodels:\n  pi: ollama/m\n")
 	if got := opt.Agents.(interface{ Model(string) string }).Model("pi"); got != "ollama/m" {
 		t.Fatalf("the model chosen after launch was not used: %q", got)
 	}
@@ -211,7 +208,7 @@ func TestAModelPickedAfterLaunchIsTheOneTheNextStageUses(t *testing.T) {
 	}
 
 	// A file that cannot be read at that moment leaves the run on what it started with.
-	write(folder, "agent: [unterminated\n")
+	writeBody(t, folder, "agent: [unterminated\n")
 	if opt.Fresh().Agent != "pi" {
 		t.Fatalf("an unreadable span.yaml replaced the policy: %q", opt.Fresh().Agent)
 	}

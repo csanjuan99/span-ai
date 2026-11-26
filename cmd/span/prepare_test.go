@@ -49,9 +49,7 @@ func TestPrepareStartsTheWorktreeFromTheChosenBase(t *testing.T) {
 
 func TestPrepareWithoutABaseUsesThePolicyBase(t *testing.T) {
 	dir, want := repoWithFeature(t)
-	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\nbase: feat/SAL-3\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, dir, "feature: app\nbase: feat/SAL-3\n")
 	code, err := prepare(dir, "", "", "feat/SAL-4-cards", "", true)
 	if err != nil {
 		t.Fatal(err)
@@ -83,9 +81,7 @@ func TestPrepareRefusesABaseThatIsNowhere(t *testing.T) {
 
 func TestALaunchTakesThePolicyBaseForFeatAndFixOnly(t *testing.T) {
 	dir, _ := repoWithFeature(t)
-	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\nbase: feat/SAL-3\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, dir, "feature: app\nbase: feat/SAL-3\n")
 	cases := []struct {
 		name               string
 		req                setup.Request
@@ -97,7 +93,7 @@ func TestALaunchTakesThePolicyBaseForFeatAndFixOnly(t *testing.T) {
 	}
 	for _, tc := range cases {
 		tc.req.Workspace = dir
-		got, err := withBase(tc.req)
+		got, err := setup.WithBase(tc.req)
 		if err != nil || got.Kind != tc.wantKind || got.Base != tc.wantBase {
 			t.Errorf("%s: kind %q base %q, %v", tc.name, got.Kind, got.Base, err)
 		}
@@ -106,10 +102,8 @@ func TestALaunchTakesThePolicyBaseForFeatAndFixOnly(t *testing.T) {
 
 func TestAProjectMasterBaseNeverMakesAStoryAHotfix(t *testing.T) {
 	dir := gitRepo(t)
-	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\nbase: master\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := withBase(setup.Request{Workspace: dir, Story: "Add cards"})
+	writeBody(t, dir, "feature: app\nbase: master\n")
+	got, err := setup.WithBase(setup.Request{Workspace: dir, Story: "Add cards"})
 	if err != nil || got.Kind != "feat" || got.Base != "master" {
 		t.Fatalf("kind %q base %q, %v", got.Kind, got.Base, err)
 	}
@@ -123,9 +117,7 @@ func TestRunBaseDefaultsByKind(t *testing.T) {
 			t.Errorf("runBase(%q) = %q, %v; want %q", name, got, err, want)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\nbase: release/2.1\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, dir, "feature: app\nbase: release/2.1\n")
 	for name, want := range map[string]string{"": "release/2.1", "feat/x": "release/2.1", "hotfix/x": "master"} {
 		got, err := runBase("", dir, name)
 		if err != nil || got != want {
@@ -146,9 +138,7 @@ func cloneWithOrigin(t *testing.T) string {
 	gitOut(t, seed, "clone", "-q", "--bare", seed, origin)
 	clone := filepath.Join(t.TempDir(), "clone")
 	gitOut(t, t.TempDir(), "clone", "-q", "-b", "dev", origin, clone)
-	if err := os.WriteFile(filepath.Join(clone, "span.yaml"), []byte("feature: app\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, clone, "feature: app\n")
 	return clone
 }
 
@@ -199,9 +189,7 @@ func TestQuickstartRefusesAnInjectedBase(t *testing.T) {
 func runRepo(t *testing.T) (string, string) {
 	t.Helper()
 	dir := gitRepo(t)
-	if err := os.WriteFile(filepath.Join(dir, "span.yaml"), []byte("feature: app\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBody(t, dir, "feature: app\n")
 	brief := filepath.Join(t.TempDir(), "b.md")
 	if err := os.WriteFile(brief, []byte("Refund the double charge\n"), 0o644); err != nil {
 		t.Fatal(err)
