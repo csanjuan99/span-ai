@@ -94,6 +94,18 @@ function show() {
   )
 }
 
+/** The /agent reply, which differs between tests only in the CLIs and the one chosen. */
+function agentAnswer(list: unknown[], chosen: string) {
+  return {
+    agents: list,
+    selected: "any",
+    chosen,
+    exists: true,
+    reason: "",
+    models: {},
+  }
+}
+
 function answer(overrides: Record<string, unknown> = {}) {
   getJSON.mockImplementation((url: string) => {
     if (url in overrides) {
@@ -103,14 +115,7 @@ function answer(overrides: Record<string, unknown> = {}) {
       return Promise.resolve(repo)
     }
     if (url.startsWith("/agent?")) {
-      return Promise.resolve({
-        agents,
-        selected: "any",
-        chosen: "claude",
-        exists: true,
-        reason: "",
-        models: {},
-      })
+      return Promise.resolve(agentAnswer(agents, "claude"))
     }
     if (url.startsWith("/jira")) {
       return Promise.resolve({ configured: false })
@@ -134,6 +139,14 @@ beforeEach(() => {
 })
 
 describe("Onboarding", () => {
+  // The document never scrolls and this page has no shell, so it has to scroll itself.
+  it("scrolls inside the page, which has no shell around it", () => {
+    show()
+    const page = screen.getByRole("main").parentElement
+    expect(page?.className).toContain("h-dvh")
+    expect(page?.className).toContain("overflow-y-auto")
+  })
+
   it("opens on the welcome step with the ten stages and moves to connect", () => {
     show()
     expect(
@@ -211,14 +224,7 @@ describe("Onboarding", () => {
   it("blocks Continue when no agent is ready", async () => {
     saveOnboarding({ step: 2, folder: "/work/api" })
     answer({
-      "/agent?path=%2Fwork%2Fapi": {
-        agents: agents.slice(1),
-        selected: "any",
-        chosen: "",
-        exists: true,
-        reason: "",
-        models: {},
-      },
+      "/agent?path=%2Fwork%2Fapi": agentAnswer(agents.slice(1), ""),
     })
     show()
     await screen.findByText(/Codex does not have Gentle AI installed/)
@@ -230,14 +236,10 @@ describe("Onboarding", () => {
   it("remembers the agent that was picked", async () => {
     saveOnboarding({ step: 2, folder: "/work/api" })
     answer({
-      "/agent?path=%2Fwork%2Fapi": {
-        agents: [agents[0], { ...agents[1], ready: true }],
-        selected: "any",
-        chosen: "claude",
-        exists: true,
-        reason: "",
-        models: {},
-      },
+      "/agent?path=%2Fwork%2Fapi": agentAnswer(
+        [agents[0], { ...agents[1], ready: true }],
+        "claude"
+      ),
     })
     show()
     fireEvent.click(await screen.findByRole("radio", { name: /Codex/ }))
