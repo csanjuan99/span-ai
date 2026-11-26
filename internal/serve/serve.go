@@ -47,6 +47,8 @@ type Outcome struct {
 	Runs []RunRef
 	// Partial means some repos started and some did not; Text says which.
 	Partial bool
+	// Failed names each repository that did not start in a partial launch.
+	Failed []RepoFailure
 }
 
 // RunRef is one run a submission started.
@@ -54,6 +56,12 @@ type RunRef struct {
 	ID    string `json:"id"`
 	Stage string `json:"stage"`
 	Repo  string `json:"repo,omitempty"`
+}
+
+// RepoFailure is a repository that did not start while others did.
+type RepoFailure struct {
+	Repo   string `json:"repo"`
+	Reason string `json:"reason"`
 }
 
 // Launch configures a project and, when the request includes a story, starts a run.
@@ -436,39 +444,18 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 		writeJSON(w, http.StatusOK, view)
 	})
 	mux.HandleFunc("POST /spans/{id}/instructions", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		stage := r.PostForm.Get("stage")
-		if !safe(id) || !safe(stage) {
-			http.Error(w, "bad path", http.StatusBadRequest)
-			return
-		}
-		if err := saveInstruction(root, id, stage, []byte(r.PostForm.Get("body"))); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		http.Redirect(w, r, "/spans/"+id, http.StatusSeeOther)
+		keepInstruction(w, r, root, r.PostForm.Get("stage"), func() ([]byte, error) {
+			return []byte(r.PostForm.Get("body")), nil
+		})
 	})
 	mux.HandleFunc("POST /spans/{id}/instructions/{stage}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		stage := r.PathValue("stage")
-		if !safe(id) || !safe(stage) {
-			http.Error(w, "bad path", http.StatusBadRequest)
-			return
-		}
-		raw, err := instructionBody(r)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if err := saveInstruction(root, id, stage, raw); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		http.Redirect(w, r, "/spans/"+id, http.StatusSeeOther)
+		keepInstruction(w, r, root, r.PathValue("stage"), func() ([]byte, error) {
+			return instructionBody(r)
+		})
 	})
 	mux.HandleFunc("GET /{path...}", func(w http.ResponseWriter, r *http.Request) {
 		servePage(pages, w, r)
@@ -477,6 +464,26 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	// to 127.0.0.1. Refuse the ones the browser marks as cross-site; clients that send no
 	// Origin or Sec-Fetch-Site (curl, the CLI) pass.
 	return protect(token, http.NewCrossOriginProtection().Handler(journalled(root, mux)))
+}
+
+// keepInstruction saves the note of a stage, read only once the run and stage names are
+// known to be safe, and sends the browser back to the run.
+func keepInstruction(w http.ResponseWriter, r *http.Request, root, stage string, read func() ([]byte, error)) {
+	id := r.PathValue("id")
+	if !safe(id) || !safe(stage) {
+		http.Error(w, "bad path", http.StatusBadRequest)
+		return
+	}
+	raw, err := read()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := saveInstruction(root, id, stage, raw); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/spans/"+id, http.StatusSeeOther)
 }
 
 // Listen checks the address policy and serves.

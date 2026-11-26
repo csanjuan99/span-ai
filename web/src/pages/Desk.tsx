@@ -18,7 +18,6 @@ import { useLocation, useNavigate } from "react-router"
 
 import {
   agentList,
-  branchChoice,
   getJSON,
   getPrecheck,
   getShape,
@@ -28,6 +27,8 @@ import {
   UnauthorizedError,
   type Started,
 } from "@/lib/api"
+import { readBranchChoice } from "@/lib/branches"
+import { retryForm, withRetried, withSkipped } from "@/lib/started"
 import {
   agentReviewMs,
   deskAgentLine,
@@ -129,6 +130,8 @@ export function Desk() {
   const [runNote, setRunNote] = useState("")
   const [refusal, setRefusal] = useState<StartRefusal | null>(null)
   const [started, setStarted] = useState<Started | null>(null)
+  // What Start sent, so a repository that failed can be retried with the same story.
+  const [sent, setSent] = useState<FormData | null>(null)
   const [pending, setPending] = useState<StartPending | null>(null)
   // One run per checked repository, and at least the folder itself.
   const runCount = Math.max(repos.filter((repo) => repo.checked).length, 1)
@@ -228,11 +231,7 @@ export function Desk() {
       return
     }
     try {
-      setBranches(
-        branchChoice(
-          await getJSON(`/branches?path=${encodeURIComponent(project)}`)
-        )
-      )
+      setBranches(await readBranchChoice(project))
     } catch (err: unknown) {
       setBranches(noBranches)
       setListNote(reasonText(err, "the branches could not be read"))
@@ -404,6 +403,7 @@ export function Desk() {
       note(reasonText(err, "the precheck could not run"))
     }
     try {
+      setSent(data)
       const result = await startRun(data)
       if (typeof result === "string") {
         setRunNote(result)
@@ -429,6 +429,20 @@ export function Desk() {
       setRunNote(message)
       note(message)
     }
+  }
+
+  async function retryRepo(repo: string, from: string) {
+    if (sent === null) {
+      return
+    }
+    const result = await startRun(retryForm(sent, repo, from))
+    if (typeof result === "string") {
+      throw new Error(result)
+    }
+    setStarted((current) =>
+      current === null ? null : withRetried(current, repo, result)
+    )
+    note(`${repo} started`)
   }
 
   const showStart = starting || (listOk && spans.length === 0)
@@ -466,6 +480,15 @@ export function Desk() {
           pending={pending}
           started={started}
           onOpenRun={(id) => void navigate(`/spans/${id}`)}
+          retry={{
+            workspace,
+            tried: String(sent?.get("base") ?? ""),
+            onRetry: retryRepo,
+            onSkip: (repo) =>
+              setStarted((current) =>
+                current === null ? null : withSkipped(current, repo)
+              ),
+          }}
           onBack={() => {
             setStarted(null)
             setStarting(false)

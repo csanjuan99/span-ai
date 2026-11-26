@@ -465,6 +465,7 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 	var text strings.Builder
 	var runs []serve.RunRef
 	var failures []error
+	var failed []serve.RepoFailure
 	for _, target := range targets {
 		one, err := targetRequest(req, target)
 		if err != nil {
@@ -484,6 +485,7 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 			// Keep going: one busy checkout must not stop the other repos, and the runs that
 			// did start must be reported, not dropped.
 			failures = append(failures, fmt.Errorf("repo %s: %w", target.Name, err))
+			failed = append(failed, serve.RepoFailure{Repo: target.Name, Reason: err.Error()})
 			fmt.Fprintf(&text, "repo %s did not start: %v\n", target.Name, err)
 			continue
 		}
@@ -492,11 +494,21 @@ func beginRuns(ctx context.Context, req setup.Request, spans string, hub *live.H
 	if len(runs) == 0 && len(failures) > 0 {
 		return serve.Outcome{}, errors.Join(failures...)
 	}
-	out := serve.Outcome{Text: text.String(), Runs: runs, Partial: len(failures) > 0}
+	out := serve.Outcome{Text: text.String(), Runs: runs, Partial: len(failures) > 0, Failed: failed}
 	if len(runs) > 0 {
 		out.ID, out.Stage = runs[0].ID, runs[0].Stage
 	}
 	return out, nil
+}
+
+// fromRequest copies what the person asked for, and the branches configured for it, into
+// the run's options.
+func fromRequest(opt *engine.Options, req setup.Request, res setup.Result) {
+	opt.Brief = req.Story
+	opt.Issue = req.Issue
+	opt.Branch = res.Branch
+	opt.Base = res.Base
+	opt.Files = req.Files
 }
 
 // claimAndConfigure takes the checkout and then writes the project's configuration into
@@ -553,11 +565,7 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	if err != nil {
 		return "", "", err
 	}
-	opt.Brief = req.Story
-	opt.Issue = req.Issue
-	opt.Branch = res.Branch
-	opt.Base = res.Base
-	opt.Files = req.Files
+	fromRequest(&opt, req, res)
 	opt.Watch = hub
 	opt.HeldWorkspace = claim
 	id, err := engine.Open(opt)
@@ -614,11 +622,7 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
-	opt.Brief = req.Story
-	opt.Issue = req.Issue
-	opt.Branch = res.Branch
-	opt.Base = res.Base
-	opt.Files = req.Files
+	fromRequest(&opt, req, res)
 	if !isolated {
 		opt.HeldWorkspace = claim
 	}
@@ -724,11 +728,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		return 0
 	case "configure":
 		var site, email, token string
-		call, code := jiraVerb("jira configure", args[1:], errw, 0, jiraUsage, func(fs *flag.FlagSet) {
-			fs.StringVar(&site, "url", "", "jira site, such as https://example.atlassian.net")
-			fs.StringVar(&email, "email", "", "atlassian account email; empty uses a bearer token")
-			fs.StringVar(&token, "token", "", "api token")
-		})
+		call, code := jiraVerb("jira configure", args[1:], errw, 0, jiraUsage, accountFlags(&site, &email, &token, "api token"))
 		if code != 0 {
 			return code
 		}
@@ -748,11 +748,7 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		return 0
 	case "check":
 		var site, email, token string
-		call, code := jiraVerb("jira check", args[1:], errw, 0, jiraUsage, func(fs *flag.FlagSet) {
-			fs.StringVar(&site, "url", "", "jira site, such as https://example.atlassian.net")
-			fs.StringVar(&email, "email", "", "atlassian account email; empty uses a bearer token")
-			fs.StringVar(&token, "token", "", "api token; empty tests the one already saved")
-		})
+		call, code := jiraVerb("jira check", args[1:], errw, 0, jiraUsage, accountFlags(&site, &email, &token, "api token; empty tests the one already saved"))
 		if code != 0 {
 			return code
 		}
@@ -1090,4 +1086,13 @@ func projectBase(project string) (string, error) {
 		return "", nil
 	}
 	return policy.ProjectBase(project)
+}
+
+// accountFlags registers the Jira account flags that configure and check share.
+func accountFlags(site, email, token *string, tokenUsage string) func(*flag.FlagSet) {
+	return func(fs *flag.FlagSet) {
+		fs.StringVar(site, "url", "", "jira site, such as https://example.atlassian.net")
+		fs.StringVar(email, "email", "", "atlassian account email; empty uses a bearer token")
+		fs.StringVar(token, "token", "", tokenUsage)
+	}
 }

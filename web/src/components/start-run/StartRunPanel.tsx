@@ -9,7 +9,10 @@ import {
   StartingProgress,
   type StartPending,
 } from "@/components/start-run/StartingProgress"
-import { StartingResults } from "@/components/start-run/StartingResults"
+import {
+  StartingResults,
+  type RetryActions,
+} from "@/components/start-run/StartingResults"
 import type { StartRefusal } from "@/components/start-run/types"
 import type { Started } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -28,8 +31,10 @@ export function StartRunPanel({
   started,
   onOpenRun,
   onBack,
+  retry,
   form,
 }: {
+  retry: RetryActions
   visible: boolean
   refusal: StartRefusal | null
   onDismissRefusal: () => void
@@ -58,7 +63,12 @@ export function StartRunPanel({
         <StartingProgress pending={pending} />
       ) : null}
       {visible && started !== null ? (
-        <StartingResults result={started} onOpen={onOpenRun} onBack={onBack} />
+        <StartingResults
+          result={started}
+          onOpen={onOpenRun}
+          onBack={onBack}
+          retry={retry}
+        />
       ) : null}
       <StartForm {...form} />
     </div>

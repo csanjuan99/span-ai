@@ -4,16 +4,28 @@ import { ArrowLeftIcon, ArrowRightIcon, CheckIcon } from "lucide-react"
 
 import { KeptNext } from "@/components/problem/KeptNext"
 import { Pill, Panel } from "@/components/shaping/session-ui"
+import { FailedRepo } from "@/components/start-run/FailedRepo"
 import { Button } from "@/components/ui/button"
 import type { Started } from "@/lib/api"
 import { touchButton } from "@/lib/button-class"
+
+/** What the results need to start a failed repository again. */
+export interface RetryActions {
+  workspace: string
+  /** The base that was asked for; empty when Span chose it. */
+  tried: string
+  onRetry: (repo: string, base: string) => Promise<void>
+  onSkip: (repo: string) => void
+}
 
 /** N3: one result per repository after Start, with a way into each run. */
 export function StartingResults({
   result,
   onOpen,
   onBack,
+  retry,
 }: {
+  retry: RetryActions
   result: Started
   onOpen: (id: string) => void
   onBack: () => void
@@ -71,8 +83,16 @@ export function StartingResults({
               </Button>
             </li>
           ))}
+          {result.failed.map((item) => (
+            <FailedRepo
+              key={item.repo}
+              repo={item.repo}
+              reason={item.reason}
+              {...retry}
+            />
+          ))}
         </ul>
-        {result.notes.trim() !== "" ? (
+        {result.failed.length === 0 && result.notes.trim() !== "" ? (
           <p className="border-t border-border bg-fail-soft px-4 py-3 text-sm text-pretty whitespace-pre-line text-fail">
             {result.notes.trim()}
           </p>
@@ -87,7 +107,7 @@ export function StartingResults({
         }
         next={
           result.partial
-            ? "Start the others later from the desk."
+            ? "Retry or skip the ones that did not start, or start them later from the desk."
             : "Open a run. Intake asks you only if the story is unclear."
         }
       />

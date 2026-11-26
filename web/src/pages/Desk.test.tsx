@@ -51,6 +51,7 @@ const oneRunStarted = {
   runs: [{ id: "s", stage: "intake", repo: "" }],
   partial: false,
   notes: "",
+  failed: [],
 }
 
 beforeEach(() => {
@@ -429,5 +430,63 @@ describe("Desk", () => {
     await waitFor(() => {
       expect(screen.queryByText("Starting intake")).toBeNull()
     })
+  })
+
+  async function startPartly() {
+    startRun.mockImplementationOnce(() =>
+      Promise.resolve({
+        id: "a",
+        stage: "intake",
+        runs: [{ id: "a", stage: "intake", repo: "api" }],
+        partial: true,
+        notes: "",
+        failed: [{ repo: "notifier", reason: "branch main does not exist" }],
+      })
+    )
+    getJSON.mockImplementation((url: string) => {
+      if (url.startsWith("/branches?path=.%2Fnotifier")) {
+        return Promise.resolve({ branches: ["master"], default: "dev" })
+      }
+      if (url.startsWith("/spans")) {
+        return Promise.resolve({ spans: [] })
+      }
+      return Promise.resolve({ agents: [] })
+    })
+    renderDesk()
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start with the sample brief" })
+    )
+    await screen.findByText("branch main does not exist")
+  }
+
+  it("retries one repository that did not start, from the branch it does have", async () => {
+    await startPartly()
+    startRun.mockImplementationOnce(() =>
+      Promise.resolve({
+        id: "b",
+        stage: "intake",
+        runs: [{ id: "b", stage: "intake", repo: "notifier" }],
+        partial: false,
+        notes: "",
+        failed: [],
+      })
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry with base master" })
+    )
+    expect(await screen.findByText("All started")).toBeTruthy()
+    expect(screen.getByText("2 runs started")).toBeTruthy()
+    const sent = startRun.mock.calls[1]?.[0] as FormData
+    expect(sent.getAll("repo")).toEqual(["notifier"])
+    expect(sent.get("base")).toBe("master")
+    expect(sent.get("story")).toContain("Add a /healthz endpoint")
+    expect(screen.queryByText("branch main does not exist")).toBeNull()
+  })
+
+  it("skips a repository that did not start", async () => {
+    await startPartly()
+    fireEvent.click(screen.getByRole("button", { name: "Skip this one" }))
+    expect(screen.queryByText("branch main does not exist")).toBeNull()
+    expect(startRun).toHaveBeenCalledTimes(1)
   })
 })

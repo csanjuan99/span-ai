@@ -121,18 +121,26 @@ func launchBody(out Outcome) map[string]any {
 	if out.Partial {
 		body["partial"] = true
 	}
+	if len(out.Failed) > 0 {
+		body["failed"] = out.Failed
+	}
 	return body
 }
 
 func mapBegin(out Outcome) map[string]any {
-	results := make([]start.RepoResult, 0, len(out.Runs))
+	results := make([]start.RepoResult, 0, len(out.Runs)+len(out.Failed))
 	for _, run := range out.Runs {
 		results = append(results, start.RepoResult{
 			Repo: run.Repo, OK: true, ID: run.ID, Stage: run.Stage,
 		})
 	}
+	for _, failed := range out.Failed {
+		results = append(results, start.RepoResult{
+			Repo: failed.Repo, Refusal: &start.Refusal{Code: "not_started", Message: failed.Reason},
+		})
+	}
 	body := launchBody(out)
-	body["ok"] = len(results) > 0
+	body["ok"] = len(out.Runs) > 0
 	body["results"] = results
 	return body
 }

@@ -396,6 +396,12 @@ When nothing blocks, the body is `{ "ok": true }`.
 - `GET /start/run-key?path=&shape=` returns the Jira key or the next preview span id for the run label.
 - `POST /spans` starts one run per named repository (same fields as `POST /quickstart`) and returns `results` per repo plus refusals when a repo cannot start.
 
+When some repositories start and others do not, the answer (of `POST /spans` and `POST /quickstart`) says
+`partial: true` and names each one in `failed: [{repo, reason}]`; `POST /spans` also lists it in `results`
+with `ok: false`. The page offers **Retry with base <branch>** per failed repository, which is the same call
+with that one `repo` and `base`. From a shell:
+`./span quickstart --workspace /path/to/folder --repo notifier --base master --story "..."`.
+
 From a shell, `./span start precheck|branches|what-will-happen|sealed|run-key|health` mirrors those routes (`branches` is `GET /branches`: the branch names the base field suggests, with `--json` `{branches, default}`). Add
 `--json` for machine-readable output. `health` is the one verb that talks to a running server:
 `./span start health --url http://host:8787` sends `SPAN_TOKEN` (from the environment) as the bearer

@@ -73,6 +73,8 @@ export interface Started {
   /** Some repos started and some did not; `notes` says which. */
   partial: boolean
   notes: string
+  /** The repositories that did not start, each with why. */
+  failed: { repo: string; reason: string }[]
 }
 
 export function count(value: unknown): number {
@@ -660,6 +662,10 @@ export async function startRun(form: FormData): Promise<Started | string> {
       runs,
       partial: body.partial === true,
       notes: text(body.notes),
+      failed: rows(body.failed).map((row) => ({
+        repo: text(row.repo),
+        reason: text(row.reason),
+      })),
     }
   }
   if (!response.ok) {
