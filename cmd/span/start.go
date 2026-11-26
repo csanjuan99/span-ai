@@ -13,7 +13,7 @@ import (
 	"span/internal/start"
 )
 
-const startUsage = `usage: ./span start precheck [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--json]
+const startUsage = `usage: ./span start precheck [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--in-place] [--json]
        ./span start branches [--workspace .] [--json]
        ./span start what-will-happen [--project .] [--kind ...] [--base ...]
        ./span start sealed [--workspace .]
@@ -39,6 +39,7 @@ func startMain(args []string, out, errw io.Writer) int {
 	shapeID := fs.String("shape", "", "sealed shape session id")
 	serveURL := fs.String("url", "http://127.0.0.1:8787", "span serve base URL")
 	asJSON := fs.Bool("json", false, "print JSON")
+	inPlace := fs.Bool("in-place", false, "check a run that would edit the checkout itself")
 	var repos repeated
 	fs.Var(&repos, "repo", "repository name; repeat for several")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -49,7 +50,7 @@ func startMain(args []string, out, errw io.Writer) int {
 	case "precheck":
 		ref, err := start.Precheck(context.Background(), start.CheckInput{
 			Workspace: *workspace, Story: *story, Kind: *kind,
-			Issue: *issue, Base: *base, Repos: repos,
+			Issue: *issue, Base: *base, Repos: repos, InPlace: *inPlace,
 		})
 		if err != nil {
 			fmt.Fprintln(errw, err)

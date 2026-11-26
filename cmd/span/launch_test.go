@@ -51,12 +51,13 @@ func waitFor(t *testing.T, what string, ok func() bool) {
 	}
 }
 
-func TestALaunchHoldsTheCheckoutForAsLongAsItsRunFlies(t *testing.T) {
+func TestAnInPlaceLaunchHoldsTheCheckoutForAsLongAsItsRunFlies(t *testing.T) {
 	dir := gitRepo(t)
 	started := stubRun(t)
 	hub := live.New()
 	req := story("AET-1 Charge once")
 	req.Workspace = dir
+	req.InPlace = true
 	id, stage, err := beginOne(req, "", hub)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +81,7 @@ func TestALaunchHoldsTheCheckoutForAsLongAsItsRunFlies(t *testing.T) {
 	})
 }
 
-func TestASecondLaunchFliesInItsOwnWorktreeBesideTheFirst(t *testing.T) {
+func TestEveryLaunchFliesInItsOwnWorktree(t *testing.T) {
 	dir := gitRepo(t)
 	started := stubRun(t)
 	hub := live.New()
@@ -93,7 +94,7 @@ func TestASecondLaunchFliesInItsOwnWorktreeBesideTheFirst(t *testing.T) {
 	second := setup.Request{Workspace: dir, Story: "AET-2 Refund twice", Kind: "fix", Base: "dev"}
 	two, _, err := beginOne(second, "", hub)
 	if err != nil {
-		t.Fatalf("a busy checkout must not stop a second story: %v", err)
+		t.Fatalf("a running story must not stop a second one: %v", err)
 	}
 	for range 2 {
 		waitStarted(t, started)
@@ -110,13 +111,14 @@ func TestASecondLaunchFliesInItsOwnWorktreeBesideTheFirst(t *testing.T) {
 	if a.Cursor.Workspace == b.Cursor.Workspace {
 		t.Fatalf("two runs share %s", a.Cursor.Workspace)
 	}
-	if b.Cursor.Project != dir || !strings.HasPrefix(b.Cursor.Workspace, filepath.Join(dir, ".span", "worktrees")) {
-		t.Fatalf("the second run is not isolated: project=%s workspace=%s", b.Cursor.Project, b.Cursor.Workspace)
+	for _, cur := range []engine.Cursor{a.Cursor, b.Cursor} {
+		if cur.Project != dir || !strings.HasPrefix(cur.Workspace, filepath.Join(dir, ".span", "worktrees")) {
+			t.Fatalf("run %s is not isolated: project=%s workspace=%s", cur.ID, cur.Project, cur.Workspace)
+		}
 	}
-	// The launcher leaves the isolated tree to its run, which takes the lock inside the
-	// engine; what it must not do is let go of the checkout the first run is editing.
-	if holder, busy := engine.WorkspaceBusy(dir); !busy || !strings.Contains(holder, one) {
-		t.Fatalf("the first run lost its checkout: busy=%v holder=%q", busy, holder)
+	// Each run locks its own tree inside the engine, so the checkout stays free.
+	if holder, busy := engine.WorkspaceBusy(dir); busy {
+		t.Fatalf("the checkout is held by %q", holder)
 	}
 }
 

@@ -363,3 +363,10 @@ func TestManyRunsCanCreateTheirTreesAtTheSameTime(t *testing.T) {
 		t.Fatalf("%d trees, want %d", len(entries), runs+1)
 	}
 }
+
+// A folder that is not a repository has no tree to make, so the run edits it.
+func TestAFolderThatIsNotARepositoryIsNotSeparated(t *testing.T) {
+	if Separate(context.Background(), shell{}, t.TempDir(), "feat/x") {
+		t.Fatal("a plain folder cannot have a worktree")
+	}
+}

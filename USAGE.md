@@ -371,7 +371,7 @@ resume the run.
 branch. Now it uses `--base`, else `base:` in `span.yaml` for feat and fix, else `dev`, or
 `master` for a hotfix. The kind comes from `--branch`, or, without it, from the branch that is
 checked out: a run on `hotfix/h` opens into `master`, not `dev`. `--branch` is the branch the
-run works on with or without `--worktree`: it must be `feat/`, `fix/` or `hotfix/`, and a new
+run works on, in its own worktree or with `--in-place`: it must be `feat/`, `fix/` or `hotfix/`, and a new
 one is cut from the base. Before, `--branch` without `--worktree` was ignored. This is a deliberate change: on a repository without that base, or
 on a checkout that is on the base itself, the run holds before the first stage. The base is
 also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
@@ -410,7 +410,7 @@ verbs read the project folder with the same code the routes use.
 
 `precheck` exits `0` when nothing blocks. A refusal exits with its number, in text and with `--json` alike
 (`--json` prints the route's `{number, code, message}`): `6` a run for that story exists, `8` Jira is signed
-out, `14` the folder is not a git repository, `15` the base branch is missing, `16` the checkout is busy,
+out, `14` the folder is not a git repository, `15` the base branch is missing, `16` the checkout is busy (only for a run that would edit it; see `--in-place`),
 `17` no agent is ready, `18` the token was refused. Usage errors exit `2` and any other failure `1`.
 
 `POST /quickstart` remains for the older desk path; new UI prefers precheck and `POST /spans`.
@@ -526,8 +526,7 @@ one. Two runs on two branches therefore never write the same file, so they can r
 parallel without conflicting. The feature is recorded in the run, so a resume keeps it; a
 run recorded before this reads it from its branch.
 
-Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree when the
-checkout is busy: it gets the policy
+Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree: it gets the policy
 `./span quickstart` would write (`agent: any`, `rules: harness`, open `auto`, merge
 `hold`, the detected check such as `go test ./...` for a `go.mod`, the harness skills).
 Nothing is written to disk for that. A `span.yaml` that exists but does not load is still
@@ -1106,8 +1105,9 @@ checked out in its own **git worktree**, so the checkout you are using is never 
 two runs never see each other's files.
 
 ```bash
-./span run --workspace /path/to/repo --brief notes.md --branch feat/sal-3 --worktree
-./span quickstart --workspace /path/to/repo --issue SAL-3   # isolates when it derives a branch
+./span run --workspace /path/to/repo --brief notes.md --branch feat/sal-3   # its own worktree
+./span quickstart --workspace /path/to/repo --issue SAL-3                  # its own worktree
+./span quickstart --workspace /path/to/repo --issue SAL-3 --in-place       # edits your checkout
 ```
 
 The tree lives at `<repo>/.span/worktrees/<branch>`, with `/` in the branch name turned into
@@ -1129,22 +1129,27 @@ A run in a worktree tells the agent so, in the prompt, with the rules spelled ou
 is already checked out; do not run `git checkout`, `git switch`, `git worktree add`, or
 `git stash`; read `git worktree list` if you need to see the other trees; Span commits.
 
-**What the lock protects.** A run holds the tree it edits, not the repository. From the page,
-the first story in a free checkout edits it in place and holds it. A second story launched
-while that checkout is held is not queued: it gets its own worktree and starts at once, and
-nothing is written into the busy checkout (no `span.yaml`, no brief). Stories in separate
-worktrees never wait for each other; only two runs that share one tree are serialized. A busy
-checkout that was never configured, or a launch with no story, still refuses, because there
-is nothing safe to isolate with. So does launching a story whose branch already belongs to
-another run or exists in git: two runs on one branch would fight over its checkout. Resuming,
-answering, or reloading an isolated run always lands on its own worktree and reads the policy
-from the project.
+**Every run with a branch gets one**, from the page and from the terminal, whether or not
+another run is working at that moment: a run that waits for your answer still owns its
+changes. Your uncommitted files stay in your checkout and are not carried into the run,
+which starts from its base. `span run` says where it goes (`running feat/x in its own
+worktree at <path>`). A run edits your checkout only when:
 
-**`span run` on a busy checkout.** From the terminal, `span run --branch feat/x` does the same
-when another run holds the checkout: it prints `this checkout is busy (...): running feat/x in
-its own worktree at <path>` and goes on there, instead of holding. A free checkout is edited in
-place as before, and `--worktree` still forces a tree. Without `--branch` there is no name for
-a tree, so it refuses and tells you to pass one.
+- you ask for it: `--in-place` on `span run` and `span quickstart`, `inPlace=true` in the
+  form of `POST /spans` and `POST /quickstart`;
+- the checkout is already on the run's branch, because git cannot check a branch out twice;
+- there is no tree to make: `span run` without `--branch`, or a folder that is not a git
+  repository.
+
+`--worktree` still works and is the default with `--branch`; it cannot be combined with
+`--in-place`.
+
+**What the lock protects.** A run holds the tree it edits, not the repository, so runs in
+separate worktrees never wait for each other. A busy checkout only refuses a run that would
+edit it (`checkout_busy`, exit `16`; check it with `span start precheck --in-place` or
+`GET /start/precheck?inPlace=true`). A launch whose branch already belongs to an unfinished
+run is refused: resume that run or delete it. Resuming, answering, or reloading a run always
+lands on its own tree and reads the policy from the project.
 
 **Capping parallel runs.** Many agents at once can exhaust the quota of their CLI.
 `span serve --max-parallel 4` drives at most four runs in that process; a launch or a wake past

@@ -28,7 +28,7 @@ func TestRunOnABusyCheckoutGetsItsOwnWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	flags, note, err := isolateWhenBusy(runFlags{workspace: dir, brief: brief, branch: "feat/second"})
+	flags, note, err := placeRunFlags(runFlags{workspace: dir, brief: brief, branch: "feat/second"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,10 +58,10 @@ func TestRunOnABusyCheckoutGetsItsOwnWorktree(t *testing.T) {
 	}
 }
 
-// A free checkout is still edited in place: nothing changes for the one-story case.
-func TestRunOnAFreeCheckoutStaysInPlace(t *testing.T) {
+// Without a branch the run stays on the checked-out branch: nothing changes.
+func TestRunWithoutABranchStaysInPlace(t *testing.T) {
 	dir, brief := runRepo(t)
-	flags, note, err := isolateWhenBusy(runFlags{workspace: dir, brief: brief, branch: "feat/x"})
+	flags, note, err := placeRunFlags(runFlags{workspace: dir, brief: brief})
 	if err != nil || flags.isolate || note != "" {
 		t.Fatalf("isolate %v note %q err %v", flags.isolate, note, err)
 	}
@@ -76,7 +76,7 @@ func TestRunOnAFreeCheckoutStaysInPlace(t *testing.T) {
 func TestRunOnABusyCheckoutWithoutABranchSaysWhatToDo(t *testing.T) {
 	dir, brief := runRepo(t)
 	holdCheckout(t, dir)
-	_, _, err := isolateWhenBusy(runFlags{workspace: dir, brief: brief})
+	_, _, err := placeRunFlags(runFlags{workspace: dir, brief: brief})
 	if err == nil || !strings.Contains(err.Error(), "pass --branch <name> to run in its own worktree") {
 		t.Fatalf("%v", err)
 	}
@@ -89,7 +89,7 @@ func TestRunOnABusyCheckoutWithoutABranchSaysWhatToDo(t *testing.T) {
 func TestRunWithWorktreeOnABusyCheckoutIsUnchanged(t *testing.T) {
 	dir, brief := runRepo(t)
 	holdCheckout(t, dir)
-	flags, note, err := isolateWhenBusy(runFlags{workspace: dir, brief: brief, branch: "feat/w", isolate: true})
+	flags, note, err := placeRunFlags(runFlags{workspace: dir, brief: brief, branch: "feat/w", isolate: true})
 	if err != nil || !flags.isolate || note != "" {
 		t.Fatalf("isolate %v note %q err %v", flags.isolate, note, err)
 	}

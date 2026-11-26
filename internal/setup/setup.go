@@ -5,6 +5,7 @@ package setup
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,6 +26,8 @@ type Request struct {
 	Repos     []string
 	Files     []handoff.File
 	Force     bool
+	// InPlace asks for the run to edit the checkout itself instead of its own worktree.
+	InPlace bool
 	// Folder is the folder the launch started from when Workspace is a repository inside it.
 	// It is not read here; the run carries it so the folder's agent and models apply.
 	Folder string
@@ -104,7 +107,8 @@ func LoadOrDefault(path, workspace string) (policy.File, error) {
 func Defaults(root string, checks []string) string {
 	skills, err := harness.Skills(root)
 	if err != nil {
-		// Without a readable catalog the policy simply names no skills, as before.
+		// Without a readable catalog the policy names no skills, as before.
+		log.Printf("harness skills of %s: %v", root, err)
 		skills = nil
 	}
 	return render(root, checks, skills)
@@ -147,13 +151,12 @@ func render(root string, checks []string, skills []harness.Skill) string {
 		b.WriteString("# No test command detected. Add prove.fast before trusting this gate.\n")
 	}
 	if len(skills) > 0 {
-		b.WriteString("manifest:\n  build:\n    skills:\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "      - %s\n", skill.Name)
-		}
-		b.WriteString("  inspect:\n    skills:\n")
-		for _, skill := range skills {
-			fmt.Fprintf(&b, "      - %s\n", skill.Name)
+		b.WriteString("manifest:\n")
+		for _, stage := range []string{"build", "inspect"} {
+			fmt.Fprintf(&b, "  %s:\n    skills:\n", stage)
+			for _, skill := range skills {
+				fmt.Fprintf(&b, "      - %s\n", skill.Name)
+			}
 		}
 	}
 	return b.String()

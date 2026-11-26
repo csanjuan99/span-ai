@@ -1,6 +1,7 @@
 // Package worktree keeps parallel runs apart. Every run that walks a branch does it in
 // its own git worktree, so two stories in one repository never share a working tree and
-// the checkout the person is using is never switched.
+// the checkout the person is using is never switched. Separate says when a launch edits the
+// checkout instead.
 //
 // The commands here are the whole surface Span uses. Nothing is inferred:
 //
@@ -220,6 +221,24 @@ func Remove(ctx context.Context, run Runner, repo, path string) error {
 func Prune(ctx context.Context, run Runner, repo string) error {
 	_, err := run.Git(ctx, repo, "worktree", "prune")
 	return err
+}
+
+// Separate says whether a run of branch should get its own tree beside the checkout in
+// dir. It should not without a branch, outside a git repository, or when the checkout is
+// already on that branch: git cannot check one branch out twice.
+func Separate(ctx context.Context, run Runner, dir, branch string) bool {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false
+	}
+	if _, err := run.Git(ctx, dir, "rev-parse", "--git-dir"); err != nil {
+		// Only a folder that is not a repository is edited directly. Any other failure keeps
+		// the run apart, so that making the tree reports it instead of editing the checkout.
+		return !strings.Contains(err.Error(), "not a git repository")
+	}
+	// symbolic-ref fails on a detached HEAD, which is on no branch.
+	current, err := run.Git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	return err != nil || strings.TrimSpace(current) != branch
 }
 
 // Path is where a run of this branch is checked out. The branch name becomes a directory

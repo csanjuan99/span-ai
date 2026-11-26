@@ -138,6 +138,10 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /jira", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("path")
 		account, err := jira.Load(project)
+		var coded *jira.Error
+		if err != nil && !(errors.As(err, &coded) && coded.SpanCode() == "not_configured") {
+			log.Printf("jira account of %q: %v", project, err)
+		}
 		writeJSON(w, http.StatusOK, jira.View(account, err == nil))
 	})
 	mux.HandleFunc("POST /jira/account", func(w http.ResponseWriter, r *http.Request) {
@@ -896,6 +900,7 @@ func storyRequest(r *http.Request) (setup.Request, error) {
 		Base:      r.Form.Get("base"),
 		Repos:     r.Form["repo"],
 		Files:     files,
+		InPlace:   r.Form.Get("inPlace") == "true",
 	}, nil
 }
 

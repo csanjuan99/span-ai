@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"span/internal/engine"
 )
 
 func git(t *testing.T, dir string, args ...string) {
@@ -99,5 +101,30 @@ func TestPrecheckWritesNothingToTheProject(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s exists after a precheck: %v", name, err)
 		}
+	}
+}
+
+// A story gets its own worktree, so a busy checkout only blocks a run that would edit it.
+func TestPrecheckRefusesABusyCheckoutOnlyForAnInPlaceStart(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-b", "dev")
+	git(t, dir, "commit", "--allow-empty", "-m", "init")
+	claim, err := engine.ClaimWorkspace(dir, "run span-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer claim.Release()
+	in := CheckInput{Workspace: dir, Story: "Add a health check"}
+	ref, err := Precheck(context.Background(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref != nil && ref.Number == NumberCheckoutBusy {
+		t.Fatalf("a worktree run was refused: %+v", ref)
+	}
+	in.InPlace = true
+	ref, err = Precheck(context.Background(), in)
+	if err != nil || ref == nil || ref.Number != NumberCheckoutBusy {
+		t.Fatalf("ref %+v err %v", ref, err)
 	}
 }
