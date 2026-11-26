@@ -4,3 +4,5 @@
 bin/
 # Local AI runtime state
 .atl/
+# Handoffs  
+handoffs/
