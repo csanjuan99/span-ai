@@ -13,6 +13,7 @@ The coding agent is whichever CLI you already have with Gentle AI: Cursor (`curs
 ## Commands
 
 ```bash
+cd web && npm install && npm run build && cd ..
 go build -o span ./cmd/span
 ./span serve --addr 127.0.0.1:8787
 ./span repos --path /path/to/project
@@ -25,7 +26,7 @@ go build -o span ./cmd/span
 
 ### Working on the page
 
-The binary embeds the built page, so a change to `web/` normally needs a rebuild. To see edits as you type, leave `./span serve` running and start the dev server beside it:
+The binary embeds the built page from `web/dist`, and `go build` does not rebuild it. After a change to `web/` (including one you pulled), run `npm run build` in `web/`, then `go build -o span ./cmd/span`, restart `./span serve`, and reload the page. With only `go build`, the binary keeps serving the old page. To see edits as you type, leave `./span serve` running and start the dev server beside it:
 
 ```bash
 cd web
