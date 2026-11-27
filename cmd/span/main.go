@@ -124,18 +124,58 @@ func run(args []string) int {
 		}
 		return 1
 	}
-	if note != "" {
-		fmt.Fprintln(os.Stderr, note)
-	}
-	opt, err := runOptions(f)
+	opt, id, err := openRun(f)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	if note != "" {
+		fmt.Fprintln(os.Stderr, note)
+	}
 	ctx, stop := interruptContext()
 	defer stop()
-	result, err := engine.Start(ctx, opt)
+	result, err := engine.Resume(ctx, opt, id)
 	return printResult(result, err)
+}
+
+// openRun records the run of span run. When it cannot start, the tree and the branch made
+// for it are removed.
+func openRun(f runFlags) (engine.Options, string, error) {
+	// A brief that cannot be read refuses before any tree or branch is made.
+	if _, err := os.ReadFile(f.brief); err != nil {
+		return engine.Options{}, "", err
+	}
+	opt, made, err := prepareRun(f)
+	if err == nil {
+		var id string
+		if id, err = openOwned(opt); err == nil {
+			return opt, id, nil
+		}
+	}
+	made.discard()
+	return engine.Options{}, "", err
+}
+
+// prepareRun makes the options of span run and says what was created for them, under the
+// launch lock when the run gets its own tree.
+func prepareRun(f runFlags) (engine.Options, site, error) {
+	var made site
+	if f.isolate && strings.TrimSpace(f.branch) != "" {
+		project, err := filepath.Abs(f.workspace)
+		if err != nil {
+			return engine.Options{}, made, err
+		}
+		made.Result.Branch = f.branch
+		made.Code = prepared{Project: project, Workspace: worktree.Path(project, f.branch), Spans: f.spans}
+		var opt engine.Options
+		made.newTree, made.newBranch, err = createLocked(project, f.branch, func() error {
+			opt, err = runOptions(f)
+			return err
+		})
+		return opt, made, err
+	}
+	opt, err := runOptions(f)
+	return opt, made, err
 }
 
 // runOptions turns span run's flags into the run. --branch is the branch the run works on,
@@ -672,6 +712,9 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		account, err := jira.Load(project)
 		view := jira.View(account, err == nil)
 		if asJSON {
+			if jira.Unreadable(err) {
+				fmt.Fprintln(errw, err)
+			}
 			if emit(out, errw, view) != 0 {
 				return 1
 			}
@@ -1027,6 +1070,10 @@ func prepare(workspace, spans, policyPath, name, base string, isolate bool) (pre
 	// refuses a base that is nowhere.
 	if err := worktree.Add(context.Background(), adapt.Git{Dir: project}, project, dir, name, start); err != nil {
 		return prepared{}, err
+	}
+	if err := worktree.CopyLocalFiles(context.Background(), adapt.Git{Dir: project}, project, dir); err != nil {
+		// The run can still work without them; the log says which one is missing.
+		log.Printf("local files of %s: %v", dir, err)
 	}
 	out.Workspace = dir
 	return out, nil

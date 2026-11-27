@@ -373,7 +373,8 @@ branch. Now it uses `--base`, else `base:` in `span.yaml` for feat and fix, else
 checked out: a run on `hotfix/h` opens into `master`, not `dev`. `--branch` is the branch the
 run works on, in its own worktree or with `--in-place`: it must be `feat/`, `fix/` or `hotfix/`, and a new
 one is cut from the base. Before, `--branch` without `--worktree` was ignored. This is a deliberate change: on a repository without that base, or
-on a checkout that is on the base itself, the run holds before the first stage. The base is
+on a checkout that is on the base itself, the run holds before the first stage, or, when it
+would need its own worktree and the base does not exist, no run is created. The base is
 also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
 diffs against it.
 
@@ -977,8 +978,10 @@ the same policy. A folder with no `span.yaml` changes nothing.
 ### Deleting a run
 
 Each run in the desk's `spans` list has a **Delete** button. It asks once more, then removes that
-run's record (its journal, evidence and brief) from the spans folder. The branch, the pull request
-and any worktree the run made stay, because they may hold work you still want. A run that is being
+run's record (its journal, evidence and brief) from the spans folder. The branch and the pull request
+stay. The run's own worktree is removed when nothing in it would be lost: installed
+dependencies, tool caches and env files identical to your checkout's go with it. Any other
+modified, untracked or ignored file, such as a `.env` you edited there, keeps it. A run that is being
 driven, by this server or by `span resume`, is refused: stop it first.
 
 ### Metrics
@@ -1138,8 +1141,8 @@ worktree at <path>`). A run edits your checkout only when:
 - you ask for it: `--in-place` on `span run` and `span quickstart`, `inPlace=true` in the
   form of `POST /spans` and `POST /quickstart`;
 - the checkout is already on the run's branch, because git cannot check a branch out twice;
-- there is no tree to make: `span run` without `--branch`, or a folder that is not a git
-  repository.
+- there is no tree to make: `span run` without `--branch`, a folder that is not a git
+  repository, or a folder inside one.
 
 `--worktree` still works and is the default with `--branch`; it cannot be combined with
 `--in-place`.
@@ -1148,7 +1151,9 @@ worktree at <path>`). A run edits your checkout only when:
 separate worktrees never wait for each other. A busy checkout only refuses a run that would
 edit it (`checkout_busy`, exit `16`; check it with `span start precheck --in-place` or
 `GET /start/precheck?inPlace=true`). A launch whose branch already belongs to an unfinished
-run is refused: resume that run or delete it. Resuming, answering, or reloading a run always
+run is refused: resume that run or delete it. A run that edits the checkout holds,
+instead of switching branches, while the checkout has uncommitted changes of another
+unfinished run. Resuming, answering, or reloading a run always
 lands on its own tree and reads the policy from the project.
 
 **Capping parallel runs.** Many agents at once can exhaust the quota of their CLI.
@@ -1160,9 +1165,18 @@ runs of one `span serve` process; `span run` and `span resume` from other termin
 counted. Two launches that arrive in the same instant at the edge of the cap can both pass the
 early check; the second is then refused later and leaves a run in hold, which you resume.
 
-**Dependencies in a fresh worktree.** A new worktree has the code but not `node_modules`.
-Set a command in `span.yaml` and Span runs it once in the run's own worktree, before the
-baseline and the first build; it never runs in your own checkout:
+**A worktree prepares itself.** A new worktree has the code but not what lives beside it, so
+Span adds it, with nothing to configure:
+
+- the `.env` and `.env.*` files git ignores are copied from your checkout when they are
+  missing, and never written back. A file the run's branch does not ignore is not copied;
+- dependencies are installed from the lockfiles, at the root and in its immediate folders,
+  before the baseline and the first build: `pnpm`, `yarn`, `bun` or `npm ci` (`npm install
+  --no-package-lock` without a lockfile, or the tool `packageManager` names), `uv sync`,
+  `poetry install`, `composer install`. An install that did not finish runs again.
+
+The install tool must be on the machine that runs Span. For a project that installs another
+way, `prove.prepare` replaces what is detected; it never runs in your own checkout:
 
 ```yaml
 prove:
@@ -1170,8 +1184,7 @@ prove:
     - pnpm install --frozen-lockfile
 ```
 
-If `prepare` fails, or the tree has a `package.json` and no `node_modules` and no `prepare`,
-no baseline is recorded and the transcript says why. Recording one there would mark the
+If preparing fails, no baseline is recorded and the transcript says why. Recording one there would mark the
 environment as broken on the base commit and then excuse the same failures after the build.
 
 ### Restarting from a stage

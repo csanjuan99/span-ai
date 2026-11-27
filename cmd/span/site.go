@@ -50,8 +50,28 @@ func (s site) open(req setup.Request, watch *live.Hub) (engine.Options, string, 
 	if s.inPlace() {
 		opt.HeldWorkspace = s.Claim
 	}
-	id, err := engine.Open(opt)
+	id, err := openOwned(opt)
 	return opt, id, err
+}
+
+// openOwned records a run. The branch is checked again and the run written while no other
+// launch of the project can do the same, so one branch never gets two runs.
+func openOwned(opt engine.Options) (string, error) {
+	unlock, err := engine.LockLaunches(opt.Project)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if _, err := os.Stat(opt.Workspace); err != nil {
+		// A launch that failed removed the tree it had made while this one was reusing it.
+		return "", fmt.Errorf("the tree of this run is gone, try again: %w", err)
+	}
+	if opt.Branch != "" {
+		if err := branchFree(opt.Project, opt.Root, opt.Branch); err != nil {
+			return "", err
+		}
+	}
+	return engine.Open(opt)
 }
 
 // claimSite decides where a run works, for every launch that configures a project. A run
@@ -91,15 +111,42 @@ func placeSite(req setup.Request, spans, label string, res setup.Result, claim *
 	}
 	separate := !req.InPlace && worktree.Separate(context.Background(), adapt.Git{Dir: project}, project, res.Branch)
 	st := site{Result: res, Claim: claim}
-	if separate {
-		st.newTree, st.newBranch = missing(project, res.Branch)
-	}
-	st.Code, err = prepare(req.Workspace, spans, "", res.Branch, res.Base, separate)
+	st.Code, st.newTree, st.newBranch, err = prepareOwn(req.Workspace, spans, res.Branch, res.Base, separate)
 	if err != nil {
 		return site{}, err
 	}
 	st.Code.Folder = req.Folder
 	return st, nil
+}
+
+// prepareOwn is prepare, and says what it created. Looking and creating happen under the
+// launch lock, so only one of two launches of a branch can believe the tree is its own.
+func prepareOwn(workspace, spans, name, base string, separate bool) (code prepared, newTree, newBranch bool, err error) {
+	if !separate {
+		code, err = prepare(workspace, spans, "", name, base, false)
+		return code, false, false, err
+	}
+	project, err := filepath.Abs(workspace)
+	if err != nil {
+		return prepared{}, false, false, err
+	}
+	newTree, newBranch, err = createLocked(project, name, func() error {
+		code, err = prepare(workspace, spans, "", name, base, true)
+		return err
+	})
+	return code, newTree, newBranch, err
+}
+
+// createLocked says what a launch of the branch is about to create and runs create, both
+// while no other launch of the project can do the same.
+func createLocked(project, name string, create func() error) (newTree, newBranch bool, err error) {
+	unlock, err := engine.LockLaunches(project)
+	if err != nil {
+		return false, false, err
+	}
+	defer unlock()
+	newTree, newBranch = missing(project, name)
+	return newTree, newBranch, create()
 }
 
 // missing says whether the worktree and the branch of a launch do not exist yet.
@@ -109,16 +156,15 @@ func missing(project, name string) (tree, branchMissing bool) {
 }
 
 func hasLocalBranch(project, name string) bool {
-	_, err := adapt.Git{Dir: project}.Git(context.Background(), project, "rev-parse", "--verify", "--quiet", "refs/heads/"+name)
-	return err == nil
+	return worktree.HasBranch(context.Background(), adapt.Git{Dir: project}, project, name)
 }
 
 // branchFree refuses a branch that an unfinished run of this project works on: two runs on
 // one branch would share one tree and commit each other's files.
 func branchFree(project, spans, name string) error {
-	for _, snap := range runsOn(stateRoot(project, spans), name) {
-		if !snap.Cursor.Done && sameProject(snap.Cursor.Project, project) {
-			return fmt.Errorf("branch %s already belongs to another run (%s); resume or delete it", name, snap.Cursor.ID)
+	for _, cur := range engine.RunsOnBranch(project, stateRoot(project, spans), name) {
+		if !cur.Done {
+			return fmt.Errorf("branch %s already belongs to another run (%s); resume or delete it", name, cur.ID)
 		}
 	}
 	return nil
@@ -130,37 +176,6 @@ func stateRoot(project, spans string) string {
 		return spans
 	}
 	return defaultSpans(project)
-}
-
-// sameProject is true for a run of this project, or one recorded without a project.
-func sameProject(recorded, project string) bool {
-	return recorded == "" || filepath.Clean(recorded) == filepath.Clean(project)
-}
-
-// runsOn lists the runs under root that work on the branch.
-func runsOn(root, name string) []engine.Snapshot {
-	entries, err := os.ReadDir(root)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		// The runs cannot be listed, so only git can still say the branch is taken.
-		log.Printf("read runs %s: %v", root, err)
-	}
-	var out []engine.Snapshot
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		snap, err := engine.Load(root, entry.Name())
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				log.Printf("read run %s: %v", entry.Name(), err)
-			}
-			continue
-		}
-		if snap.Cursor.Branch == name {
-			out = append(out, snap)
-		}
-	}
-	return out
 }
 
 // placeRunFlags decides where span run works, with the same rule as claimSite: a branch
@@ -188,7 +203,7 @@ func placeRunFlags(f runFlags) (runFlags, string, error) {
 	if busy && name == "" {
 		return f, "", fmt.Errorf("this checkout is busy (%s); pass --branch <name> to run in its own worktree", holder)
 	}
-	if !busy && !worktree.Separate(context.Background(), adapt.Git{Dir: project}, project, name) {
+	if !busy && !wantsOwnTree(project, f.base, name) {
 		return f, "", nil
 	}
 	f.isolate = true
@@ -197,6 +212,16 @@ func placeRunFlags(f runFlags) (runFlags, string, error) {
 		note = fmt.Sprintf("this checkout is busy (%s): %s", holder, note)
 	}
 	return f, note, nil
+}
+
+// wantsOwnTree says whether span run isolates by itself. A name the run would refuse gets
+// no tree: the run holds on it and nothing is left behind.
+func wantsOwnTree(project, explicitBase, name string) bool {
+	base, err := runBase(explicitBase, project, name)
+	if err != nil || !branch.Valid(name, base) {
+		return false
+	}
+	return worktree.Separate(context.Background(), adapt.Git{Dir: project}, project, name)
 }
 
 // errUsage is a flag combination that cannot be honored.
@@ -223,8 +248,7 @@ func isolatedSite(req setup.Request, spans string, busy error) (site, error) {
 	if branchTaken(project, spans, plan.Name, busy) {
 		return site{}, fmt.Errorf("%w; branch %s already belongs to another run", busy, plan.Name)
 	}
-	newTree, newBranch := missing(project, plan.Name)
-	code, err := prepare(project, spans, "", plan.Name, plan.Base, true)
+	code, newTree, newBranch, err := prepareOwn(project, spans, plan.Name, plan.Base, true)
 	if err != nil {
 		return site{}, fmt.Errorf("%w; its own worktree could not be made: %v", busy, err)
 	}
@@ -242,7 +266,7 @@ func branchTaken(project, spans, name string, busy error) bool {
 		// Launching now: its run has no id yet, so only the label it holds names its branch.
 		return true
 	}
-	return len(runsOn(stateRoot(project, spans), name)) > 0 || hasLocalBranch(project, name)
+	return len(engine.RunsOnBranch(project, stateRoot(project, spans), name)) > 0 || hasLocalBranch(project, name)
 }
 
 // inheritFolder fills the agent and models a repository's policy leaves unset from the
@@ -319,6 +343,16 @@ func resolvePolicy(spans, workspace, project string) string {
 // work, and git refuses if it somehow does. A site edited in place has nothing to undo.
 func (s site) discard() {
 	if s.inPlace() || s.Code.Workspace == "" {
+		return
+	}
+	unlock, err := engine.LockLaunches(s.Code.Project)
+	if err != nil {
+		log.Printf("discard %s: %v", s.Code.Workspace, err)
+		return
+	}
+	defer unlock()
+	if branchFree(s.Code.Project, s.Code.Spans, s.Result.Branch) != nil {
+		// Another launch recorded a run on this branch meanwhile: the tree is its own.
 		return
 	}
 	ctx := context.Background()

@@ -450,8 +450,13 @@ func answerMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	done := outcome{ID: id, Action: "answer", Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
-	return reportOutcome(out, errw, v.asJSON, done)
+	return reportContinued(out, errw, v.asJSON, id, "answer", res)
+}
+
+// reportContinued reports a run that a verb woke and drove again.
+func reportContinued(out, errw io.Writer, asJSON bool, id, action string, res engine.Result) int {
+	done := outcome{ID: id, Action: action, Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
+	return reportOutcome(out, errw, asJSON, done)
 }
 
 // readStory reads the story the run came from out of Jira again, with the login saved for the
@@ -523,8 +528,7 @@ func storyMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	done := outcome{ID: id, Action: "story", Stage: res.Stage, Outcome: outcomeContinued, Resumed: true, Verdict: res.Verdict, Reason: res.Reason}
-	return reportOutcome(out, errw, v.asJSON, done)
+	return reportContinued(out, errw, v.asJSON, id, "story", res)
 }
 
 // readAnswers builds the answers of a call from its flags. An answer without words is refused,
@@ -547,13 +551,8 @@ func readAnswers(given []string, file string) ([]engine.Answer, error) {
 		}
 		answers = append(answers, engine.Answer{Question: question, Body: body})
 	}
-	if len(answers) == 0 {
-		return nil, errors.New("an answer is empty")
-	}
-	for _, answer := range answers {
-		if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Body) == "" {
-			return nil, errors.New("an answer is empty")
-		}
+	if err := engine.CheckAnswers(answers); err != nil {
+		return nil, err
 	}
 	return answers, nil
 }
@@ -571,7 +570,7 @@ func deleteMain(args []string, out, errw io.Writer) int {
 	if _, found := loadRun(errw, v, id); !found {
 		return 1
 	}
-	if err := engine.Delete(v.spans, id); err != nil {
+	if err := adapt.DeleteRun(context.Background(), v.spans, id); err != nil {
 		fmt.Fprintln(errw, err)
 		return 1
 	}

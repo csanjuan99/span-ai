@@ -368,7 +368,7 @@ func Open(opt Options) (string, error) {
 		return "", err
 	}
 	r.cur.StoryHash = storyHash(opt.Brief)
-	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(opt.Brief), 0o644); err != nil {
+	if err := r.writeBrief(opt.Brief); err != nil {
 		return "", err
 	}
 	if err := handoff.Write(filepath.Join(r.spanDir(), "handoffs"), opt.Files); err != nil {
@@ -376,6 +376,9 @@ func Open(opt Options) (string, error) {
 	}
 	if err := r.save(); err != nil {
 		return "", err
+	}
+	if cur.Branch != "" && opt.Project != "" {
+		recordOwner(opt.Project, opt.Root, id)
 	}
 	return id, nil
 }
@@ -402,6 +405,11 @@ func Resume(ctx context.Context, opt Options, id string) (Result, error) {
 		return Result{}, err
 	}
 	return r.run(ctx)
+}
+
+// writeBrief stores the story the run works from.
+func (r *runner) writeBrief(text string) error {
+	return os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(text), 0o644)
 }
 
 // storyHash identifies a story's text.
@@ -448,7 +456,7 @@ func Continue(ctx context.Context, opt Options, id string, answers []Answer) (Re
 		}
 		r.opt.Brief = qa.Install(r.opt.Brief, splitAnswer(answer.Body))
 	}
-	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(r.opt.Brief), 0o644); err != nil {
+	if err := r.writeBrief(r.opt.Brief); err != nil {
 		return Result{}, err
 	}
 	r.clearWait()
@@ -481,7 +489,7 @@ func Reload(ctx context.Context, opt Options, id, brief string) (Result, error) 
 		r.cur.StoryHash = next
 	}
 	r.opt.Brief = brief
-	if err := os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(brief), 0o644); err != nil {
+	if err := r.writeBrief(brief); err != nil {
 		return Result{}, err
 	}
 	if key := IssueKey(brief); key != "" {
@@ -626,7 +634,9 @@ func (r *runner) stamp(stage string, commands []statement.Command) []statement.C
 	out := make([]statement.Command, len(commands))
 	for i, item := range commands {
 		if item.Output != "" {
-			if path, err := r.writeLog(stage, i, item.Output); err == nil {
+			if path, err := r.writeLog(stage, i, item.Output); err != nil {
+				log.Printf("run %s: the full %s output is not kept: %v", r.cur.ID, stage, err)
+			} else {
 				item.LogPath = path
 			}
 			item.Lines = statement.CountLines(item.Output)
@@ -686,14 +696,19 @@ func (r *runner) run(ctx context.Context) (Result, error) {
 
 func (r *runner) loop(ctx context.Context) (Result, error) {
 	ctx = agent.WithSpan(ctx, r.cur.ID)
-	log, err := OpenTranscript(filepath.Join(r.spanDir(), "transcript.log"), r.opt.Secrets, r.publish)
+	transcript, err := OpenTranscript(filepath.Join(r.spanDir(), "transcript.log"), r.opt.Secrets, r.publish)
 	if err != nil {
 		return Result{}, err
 	}
-	defer log.Close()
-	r.log = log
+	// Close reports the first write that failed, so it is the only place a lost line shows.
+	defer func() {
+		if closeErr := transcript.Close(); closeErr != nil {
+			log.Printf("transcript %s: %v", r.cur.ID, closeErr)
+		}
+	}()
+	r.log = transcript
 	if binder, ok := r.opt.Agents.(interface{ Bind(io.Writer) }); ok {
-		binder.Bind(log)
+		binder.Bind(transcript)
 	}
 	err = r.startBase(ctx)
 	if err == nil {
@@ -856,6 +871,9 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 	prev := ""
 	if r.cur.Iteration > 1 {
 		raw, err := os.ReadFile(filepath.Join(r.spanDir(), "iter", strconv.Itoa(r.cur.Iteration-1), "prove.md"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			log.Printf("run %s: frame goes without the earlier prove report: %v", r.cur.ID, err)
+		}
 		if err == nil {
 			prev = string(raw)
 		}
@@ -934,10 +952,14 @@ func (r *runner) saveFramePlan(doc FrameDoc) error {
 func (r *runner) readFramePlan() (FrameDoc, bool) {
 	raw, err := os.ReadFile(r.framePlanPath())
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("run %s frames again, its plan cannot be read: %v", r.cur.ID, err)
+		}
 		return FrameDoc{}, false
 	}
 	var doc FrameDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
+		log.Printf("run %s frames again, its plan is not readable JSON: %v", r.cur.ID, err)
 		return FrameDoc{}, false
 	}
 	return doc, true
@@ -981,6 +1003,9 @@ func (r *runner) askClashes(clashes []decision.Clash) (verdict, reason string, a
 func (r *runner) rulesText() string {
 	raw, err := os.ReadFile(filepath.Join(r.opt.Workspace, "AGENTS.md"))
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("run %s goes on without the repository rules: %v", r.cur.ID, err)
+		}
 		return ""
 	}
 	const limit = 8000
@@ -1225,6 +1250,9 @@ func (r *runner) provePlan() prove.Plan {
 		plan.Fast = nil
 	}
 	files, err := qa.Scope(r.opt.Workspace, qa.Lines(r.opt.Brief))
+	if err != nil {
+		log.Printf("run %s proves without a focus: %v", r.cur.ID, err)
+	}
 	if err != nil || len(files) == 0 {
 		// Nothing to focus on. A prove pass must never be left with no command at all:
 		// the wide band decides again, whatever the weight said.
@@ -1337,7 +1365,7 @@ func (r *runner) adopt(found []string) error {
 		return nil
 	}
 	r.opt.Brief = next
-	return os.WriteFile(filepath.Join(r.spanDir(), "brief.md"), []byte(next), 0o644)
+	return r.writeBrief(next)
 }
 
 func (r *runner) doQA(ctx context.Context) (string, string, error) {
@@ -1453,6 +1481,9 @@ func (r *runner) reusableQA(prev statement.Statement, command string, ctx contex
 		return false
 	}
 	dirty, err := r.opt.Source.Dirty(ctx)
+	if err != nil {
+		log.Printf("run %s checks again, the tree cannot be read: %v", r.cur.ID, err)
+	}
 	return err == nil && !dirty
 }
 
@@ -1702,6 +1733,9 @@ func (r *runner) otherBase(ctx context.Context, merged bool) (string, string) {
 	}
 	got, err := reporter.ChangeBase(ctx, r.cur.ChangeURL)
 	got = strings.TrimSpace(got)
+	if err != nil {
+		log.Printf("run %s: the base of %s was not checked: %v", r.cur.ID, r.cur.ChangeURL, err)
+	}
 	if err != nil || got == "" || got == expected {
 		return "", ""
 	}
@@ -1867,7 +1901,36 @@ func (r *runner) ensureBranch(ctx context.Context) error {
 	}
 	r.cur.Branch = r.opt.Branch
 	r.cur.Base = r.opt.Base
+	if err := r.guardCheckout(ctx); err != nil {
+		return err
+	}
 	return r.opt.Source.EnsureBranch(ctx, r.opt.Base, r.opt.Branch)
+}
+
+// guardCheckout stops a run that edits the checkout from switching branches over the
+// uncommitted work of another unfinished run: git would carry those files to this branch
+// and this run would commit them. A run in its own worktree shares nothing.
+func (r *runner) guardCheckout(ctx context.Context) error {
+	if r.isolated() {
+		return nil
+	}
+	current, err := r.opt.Source.Branch(ctx)
+	if err != nil {
+		return err
+	}
+	if current == r.opt.Branch {
+		return nil
+	}
+	dirty, err := r.opt.Source.Dirty(ctx)
+	if err != nil || !dirty {
+		return err
+	}
+	for _, other := range RunsOnBranch(r.projectDir(), r.opt.Root, current) {
+		if other.ID != r.cur.ID && !other.Done && fsutil.SamePath(other.Workspace, r.opt.Workspace) {
+			return fmt.Errorf("the checkout holds uncommitted work of run %s on %s: commit it there or delete that run, then resume this one", other.ID, current)
+		}
+	}
+	return nil
 }
 
 // baseExists fails with branch.MissingBase when the source can tell the base is gone.
@@ -1982,6 +2045,9 @@ func (r *runner) failurePacket() string {
 	dir := filepath.Join(r.spanDir(), "iter", strconv.Itoa(r.cur.Iteration-1))
 	for _, stage := range []string{proveSt, qaSt} {
 		prev, ok, err := statement.Read(dir, stage)
+		if err != nil {
+			log.Printf("run %s: the %s result is left out of the prompt: %v", r.cur.ID, stage, err)
+		}
 		if err != nil || !ok || prev.Verdict == statement.Advance {
 			continue
 		}
@@ -2076,6 +2142,7 @@ func (r *runner) lessonBook() *learn.Book {
 	r.bookPath = r.lessonPath()
 	book, err := learn.Load(r.bookPath)
 	if err != nil {
+		log.Printf("run %s goes on without lessons: %v", r.cur.ID, err)
 		r.book = &learn.Book{}
 		r.bookPath = ""
 		return r.book
@@ -2087,11 +2154,16 @@ func (r *runner) lessonBook() *learn.Book {
 // lessonPath is the project's book. Runs in their own worktrees share it, so it lives in
 // the project and not in a tree that goes away with its run.
 func (r *runner) lessonPath() string {
-	home := r.opt.Project
-	if home == "" {
-		home = r.opt.Workspace
+	return filepath.Join(r.projectDir(), ".span", "lessons.json")
+}
+
+// projectDir is the project the run belongs to: where it was launched from, or the tree
+// itself for a run recorded without one.
+func (r *runner) projectDir() string {
+	if r.opt.Project != "" {
+		return r.opt.Project
 	}
-	return filepath.Join(home, ".span", "lessons.json")
+	return r.opt.Workspace
 }
 
 // noteLesson updates the ledger after the statement is sealed.
@@ -2118,22 +2190,16 @@ func (r *runner) noteLesson(stage, verdict, reason string) {
 // fresh read under a short lock keeps what they added. When the lock or the read fails the
 // lesson is dropped: it is a hint, and a verdict never waits on it.
 func (r *runner) saveLesson(own *learn.Book, stage, verdict, reason string, shown []string) {
-	lock, err := runlock.Acquire(runlock.Lessons, r.bookPath+".lock", "lessons "+r.cur.ID)
-	for attempt := 0; err != nil && attempt < 200; attempt++ {
-		var busy *runlock.BusyError
-		if !errors.As(err, &busy) {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-		lock, err = runlock.Acquire(runlock.Lessons, r.bookPath+".lock", "lessons "+r.cur.ID)
-	}
+	lock, err := runlock.AcquireWithin(runlock.Lessons, r.bookPath+".lock", "lessons "+r.cur.ID, time.Second, 5*time.Millisecond)
 	if err != nil {
+		log.Printf("run %s: the %s lesson is not saved: %v", r.cur.ID, stage, err)
 		own.Observe(stage, verdict, reason, shown)
 		return
 	}
 	defer lock.Release()
 	fresh, err := learn.Load(r.bookPath)
 	if err != nil {
+		log.Printf("lessons %s: the lesson is dropped: %v", r.cur.ID, err)
 		return
 	}
 	if fresh.Observe(stage, verdict, reason, shown) {
@@ -2160,9 +2226,33 @@ func (r *runner) already(stage string) (bool, error) {
 	return s.Verdict == statement.Advance, nil
 }
 
+var errAnswerEmpty = errors.New("an answer is empty")
+
+// empty is true for an answer without its question or its text.
+func (a Answer) empty() bool {
+	return strings.TrimSpace(a.Question) == "" || strings.TrimSpace(a.Body) == ""
+}
+
+// CheckAnswers refuses a list of answers a run could not take: none, or one without its
+// question or its text.
+func CheckAnswers(answers []Answer) error {
+	if len(answers) == 0 {
+		return errAnswerEmpty
+	}
+	for _, answer := range answers {
+		if answer.empty() {
+			return errAnswerEmpty
+		}
+	}
+	return nil
+}
+
 func readAnswers(dir string) string {
 	raw, err := os.ReadFile(filepath.Join(dir, "answers.md"))
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("the answers of %s are left out of the prompt: %v", dir, err)
+		}
 		return ""
 	}
 	return string(raw)
@@ -2170,7 +2260,12 @@ func readAnswers(dir string) string {
 
 func writeAnswers(dir string, answers []Answer) error {
 	var b strings.Builder
-	if raw, err := os.ReadFile(filepath.Join(dir, "answers.md")); err == nil {
+	raw, err := os.ReadFile(filepath.Join(dir, "answers.md"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		// Writing now would replace what the person already answered.
+		return fmt.Errorf("read the earlier answers: %w", err)
+	}
+	if err == nil {
 		b.Write(raw)
 		if len(raw) > 0 && raw[len(raw)-1] != '\n' {
 			b.WriteByte('\n')
@@ -2179,8 +2274,8 @@ func writeAnswers(dir string, answers []Answer) error {
 	for _, answer := range answers {
 		question := strings.TrimSpace(answer.Question)
 		body := strings.TrimSpace(answer.Body)
-		if question == "" || body == "" {
-			return errors.New("an answer is empty")
+		if answer.empty() {
+			return errAnswerEmpty
 		}
 		fmt.Fprintf(&b, "%s\n%s\n\n", question, body)
 	}
@@ -2424,7 +2519,11 @@ func handoffNames(spanDir string) ([]string, error) {
 
 func manifestDigest(p policy.File, stage string) string {
 	raw, err := json.Marshal(p.Manifest[stage])
-	if err != nil || string(raw) == "null" {
+	if err != nil {
+		log.Printf("manifest of %s has no digest: %v", stage, err)
+		return ""
+	}
+	if string(raw) == "null" {
 		return ""
 	}
 	sum := sha256.Sum256(raw)

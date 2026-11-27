@@ -136,6 +136,13 @@ func Load(project string) (Account, error) {
 	return stored, nil
 }
 
+// Unreadable reports whether a Load error means more than "no account yet", so a
+// caller that answers "not configured" still says why.
+func Unreadable(err error) bool {
+	var coded *Error
+	return err != nil && !(errors.As(err, &coded) && coded.SpanCode() == "not_configured")
+}
+
 // Logout removes the saved account for this project.
 func Logout(project string) Public {
 	if path, err := Path(project); err == nil {

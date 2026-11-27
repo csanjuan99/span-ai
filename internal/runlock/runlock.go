@@ -5,10 +5,14 @@
 package runlock
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Scope says what a lock protects.
@@ -41,6 +45,7 @@ func IsWorkspaceBusy(reason string) bool {
 	return strings.HasPrefix(reason, workspaceBusy)
 }
 
+// Error says what is held and by whom.
 func (e *BusyError) Error() string {
 	who := e.Holder
 	if who == "" {
@@ -75,17 +80,30 @@ func Acquire(scope Scope, path, label string) (*Lock, error) {
 	if err := lockFn(file); err != nil {
 		if isBusy(err) {
 			holder := readHolder(file)
-			_ = file.Close()
+			closeFile(file)
 			return nil, &BusyError{Scope: scope, Path: path, Holder: holder}
 		}
 		// The filesystem cannot lock (some network mounts return ENOLCK or ENOTSUP). Refusing
 		// to run would make every run undrivable there, so run unlocked and let the
 		// in-process claim keep serve from driving a run twice.
+		log.Printf("running without a lock at %s: %v", path, err)
 		return &Lock{file: file}, nil
 	}
-	_ = file.Truncate(0)
-	_, _ = file.WriteAt([]byte(fmt.Sprintf("pid %d %s\n", os.Getpid(), label)), 0)
+	writeHolder(file, label)
 	return &Lock{file: file}, nil
+}
+
+// AcquireWithin is Acquire that retries a busy lock every pause until wait has passed.
+func AcquireWithin(scope Scope, path, label string, wait, pause time.Duration) (*Lock, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		lock, err := Acquire(scope, path, label)
+		var busy *BusyError
+		if err == nil || !errors.As(err, &busy) || time.Now().After(deadline) {
+			return lock, err
+		}
+		time.Sleep(pause)
+	}
 }
 
 // Relabel changes who the lock says holds it, for a claim taken before the run has an id.
@@ -93,8 +111,7 @@ func (l *Lock) Relabel(label string) {
 	if l == nil || l.file == nil {
 		return
 	}
-	_ = l.file.Truncate(0)
-	_, _ = l.file.WriteAt([]byte(fmt.Sprintf("pid %d %s\n", os.Getpid(), label)), 0)
+	writeHolder(l.file, label)
 }
 
 // Release frees the lock. Releasing twice does nothing.
@@ -103,8 +120,29 @@ func (l *Lock) Release() {
 		return
 	}
 	unlockFile(l.file)
-	_ = l.file.Close()
+	closeFile(l.file)
 	l.file = nil
+}
+
+// writeHolder replaces the text that says who holds the lock. The text is only for the
+// person who finds it busy, so a failure is logged and the lock stays held.
+func writeHolder(file *os.File, label string) {
+	clearHolder(file)
+	if _, err := file.WriteAt([]byte(fmt.Sprintf("pid %d %s\n", os.Getpid(), label)), 0); err != nil {
+		log.Printf("name the holder of %s: %v", file.Name(), err)
+	}
+}
+
+func clearHolder(file *os.File) {
+	if err := file.Truncate(0); err != nil {
+		log.Printf("clear the holder of %s: %v", file.Name(), err)
+	}
+}
+
+func closeFile(file *os.File) {
+	if err := file.Close(); err != nil {
+		log.Printf("close %s: %v", file.Name(), err)
+	}
 }
 
 // Probe reports whether the lock at path is held now, and by whom. It never keeps it.
@@ -113,7 +151,7 @@ func Probe(path string) (string, bool) {
 	if err == nil {
 		// A probe overwrote the holder text; clear it so a later Probe of a free lock
 		// does not show a name.
-		_ = lock.file.Truncate(0)
+		clearHolder(lock.file)
 		lock.Release()
 		return "", false
 	}
@@ -121,12 +159,17 @@ func Probe(path string) (string, bool) {
 	if asBusy(err, &busy) {
 		return busy.Holder, true
 	}
+	log.Printf("the lock at %s could not be asked, taken as free: %v", path, err)
 	return "", false
 }
 
 func readHolder(file *os.File) string {
 	buf := make([]byte, 256)
-	n, _ := file.ReadAt(buf, 0)
+	n, err := file.ReadAt(buf, 0)
+	// A text shorter than the buffer ends in EOF; that is the normal read.
+	if err != nil && !errors.Is(err, io.EOF) {
+		log.Printf("read the holder of %s: %v", file.Name(), err)
+	}
 	return strings.TrimSpace(string(buf[:n]))
 }
 

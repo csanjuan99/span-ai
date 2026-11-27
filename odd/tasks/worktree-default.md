@@ -12,8 +12,9 @@ S5. A launch does not share a branch with an unfinished run: it is refused as be
 S6. An in-place run does not switch branches over uncommitted work that belongs to another unfinished in-place run; it holds and says which run.
 S7. Deleting a run removes its own worktree only when it has no uncommitted changes. The branch always stays.
 S8. Help text, README and UI copy describe the new default.
+S9. A new worktree prepares itself with nothing configured: installs detected from lockfiles, ignored `.env` files copied; `prove.prepare` replaces detection; delete discards only what loses nothing.
 
-Assumptions (not requested): no span.yaml `workspace` setting, no `.env` copying, no UI toggle for in-place, no automatic cleanup on merge.
+Assumptions (not requested): no span.yaml `workspace` setting, no UI toggle for in-place, no automatic cleanup on merge.
 
 ## Contract
 
@@ -21,12 +22,19 @@ Consumer: web desk and CLI/script users. Auth: unchanged. New optional input onl
 
 ## Tasks
 
-- T1 S1-S5, S8 (launch) · inline · done (feat(start) commit on this branch) · RED: build failed on placement_test; GREEN: go vet + go test ./... pass
-- T2 S6 · inline · pending
-- T3 S7, S8 (delete) · inline · pending
-- T4 independent verification · delegated (high risk items 3, 4) · pending
+- T1 S1-S5, S8 (launch) · inline · done (d16151b) · RED: build failed on placement_test; GREEN: go vet + go test ./... pass
+- T2 S6 · inline · done · RED/GREEN checkout_test
+- T3 S7, S8 (delete) · inline · done · delete_test
+- T4 independent verification · delegated (high risk items 3, 4) · done: S1-S8 after two corrections; B1 rechecked with 520 races
+- T5 S9 · inline · done · RED/GREEN autoprepare_test, localfiles_test, delete_test; verified (five defects fixed and rechecked)
 
 ## Log
 
 L1. "Usa opus 5.5 como Adivsor. Span no esta usando worktrees por defecto. Me paso que al iniciar dos historias en un mismo proyecto detecto que otro estaba toqueteando el repo, valide y no tenia worktree solo rama y entonces la sesion me dijo esperar hasta que el otro run termine"
 L2. 2026-11-26 "Si. Lo ideal es que hagas o sea compatible con lo que ya hay en la UI y en el CLI." (answer to: worktree always by default, `--in-place` as exception)
+L3. T2/T3 commit blocked: the pre-commit review reviews whole files and fails on code in engine.go that the change did not touch.
+L4. 2026-11-26 verification found S5, S6, S7 failing and regressions R1-R3; one correction batch applied (launch lock, owner records, SamePath, strict delete, repo-root-only trees, cleanup on failed run). Recheck pending.
+L5. Recheck: B2-B4 and R1-R3 pass; B1 still failed (the losing launch removed the winner tree). Second correction: look-and-create under the launch lock; RED then GREEN (TestALostLaunchKeepsTheTreeOfTheWinner, 10x stable).
+L6. B1 recheck passed. go vet and go test ./... pass.
+L7. 2026-11-26 user: "Arregla esta deuda ahora." and "Importante que la funcionalidad de worktree funcione sin mi. Es decir por que tengo que configurar algun prove.prepare y no se hace solo todo lo necesario?" -> S9: a new worktree prepares itself (detected installs, ignored .env copied); delete discards what is rebuildable.
+L8. Verification of S9 found: committable .env, write through symlinked folder, write-back through symlinked .env, commits lost on delete with detached HEAD, half-installed tree trusted on resume. All fixed; recheck passed.
