@@ -99,7 +99,7 @@ func main() {
 // runFlags are the flags of span run.
 type runFlags struct {
 	workspace, brief, spans, policy, branch, base string
-	isolate                                       bool
+	isolate, inPlace                              bool
 }
 
 func run(args []string) int {
@@ -109,13 +109,22 @@ func run(args []string) int {
 	fs.StringVar(&f.brief, "brief", "", "path to the brief")
 	fs.StringVar(&f.spans, "spans", "", "state directory (default <workspace>/.span/runs)")
 	fs.StringVar(&f.policy, "policy", "", "policy file (default <workspace>/span.yaml)")
-	fs.StringVar(&f.branch, "branch", "", "feat/, fix/ or hotfix/ branch to work on, cut from the base when new; with --worktree it gets its own tree")
+	fs.StringVar(&f.branch, "branch", "", "feat/, fix/ or hotfix/ branch to work on, cut from the base when new; it gets its own worktree unless --in-place")
 	fs.StringVar(&f.base, "base", "", "branch to start from and open the change into (default: base in span.yaml for feat/fix, else dev; master for hotfix/)")
-	fs.BoolVar(&f.isolate, "worktree", false, "isolate the run in its own git worktree")
+	fs.BoolVar(&f.isolate, "worktree", false, "isolate the run in its own git worktree (the default with --branch)")
+	fs.BoolVar(&f.inPlace, "in-place", false, "edit the checkout itself instead of a worktree")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	f, note, err := isolateWhenBusy(f)
+	f, note, err := placeRunFlags(f)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if errors.Is(err, errUsage) {
+			return 2
+		}
+		return 1
+	}
+	opt, id, err := openRun(f)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -123,15 +132,50 @@ func run(args []string) int {
 	if note != "" {
 		fmt.Fprintln(os.Stderr, note)
 	}
-	opt, err := runOptions(f)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
 	ctx, stop := interruptContext()
 	defer stop()
-	result, err := engine.Start(ctx, opt)
+	result, err := engine.Resume(ctx, opt, id)
 	return printResult(result, err)
+}
+
+// openRun records the run of span run. When it cannot start, the tree and the branch made
+// for it are removed.
+func openRun(f runFlags) (engine.Options, string, error) {
+	// A brief that cannot be read refuses before any tree or branch is made.
+	if _, err := os.ReadFile(f.brief); err != nil {
+		return engine.Options{}, "", err
+	}
+	opt, made, err := prepareRun(f)
+	if err == nil {
+		var id string
+		if id, err = openOwned(opt); err == nil {
+			return opt, id, nil
+		}
+	}
+	made.discard()
+	return engine.Options{}, "", err
+}
+
+// prepareRun makes the options of span run and says what was created for them, under the
+// launch lock when the run gets its own tree.
+func prepareRun(f runFlags) (engine.Options, site, error) {
+	var made site
+	if f.isolate && strings.TrimSpace(f.branch) != "" {
+		project, err := filepath.Abs(f.workspace)
+		if err != nil {
+			return engine.Options{}, made, err
+		}
+		made.Result.Branch = f.branch
+		made.Code = prepared{Project: project, Workspace: worktree.Path(project, f.branch), Spans: f.spans}
+		var opt engine.Options
+		made.newTree, made.newBranch, err = createLocked(project, f.branch, func() error {
+			opt, err = runOptions(f)
+			return err
+		})
+		return opt, made, err
+	}
+	opt, err := runOptions(f)
+	return opt, made, err
 }
 
 // runOptions turns span run's flags into the run. --branch is the branch the run works on,
@@ -184,10 +228,7 @@ func resume(args []string) int {
 	tree, policyFile := *workspace, *policyPath
 	// Without --spans the runs are in the workspace, as options() reads them. Looking in ""
 	// found nothing, so an isolated run resumed in the project instead of its own worktree.
-	root := *spans
-	if root == "" {
-		root = defaultSpans(*workspace)
-	}
+	root := stateRoot(*workspace, *spans)
 	if snap, err := engine.Load(root, fs.Arg(0)); err == nil && snap.Cursor.Project != "" {
 		project, folder = snap.Cursor.Project, snap.Cursor.Folder
 		// An isolated run is resumed in its own worktree, not in the project.
@@ -349,6 +390,7 @@ func quickstartCmd(args []string) int {
 	workspace := fs.String("workspace", ".", "project to configure")
 	story := fs.String("story", "", "user story")
 	storyFile := fs.String("story-file", "", "file that holds the user story")
+	inPlace := fs.Bool("in-place", false, "edit the checkout itself instead of a worktree")
 	kind := fs.String("kind", "", "feat, fix, or hotfix")
 	issue := fs.String("issue", "", "linked story key, such as AET-1234")
 	base := fs.String("base", "", "branch to start from and open the change into (default: base in span.yaml, else dev for feat/fix, master for hotfix)")
@@ -383,6 +425,7 @@ func quickstartCmd(args []string) int {
 		Repos:     repos,
 		Files:     attached,
 		Force:     *force,
+		InPlace:   *inPlace,
 	})
 	if code == 0 {
 		fmt.Print(out)
@@ -528,9 +571,8 @@ var resumeRun = engine.Resume
 func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, error) {
 	// Take the checkout before anything is written into it. Checking first and writing
 	// after leaves a window in which two launches both pass the check and the second
-	// rewrites span.yaml and the brief under the run that is starting. A second story in a
-	// checkout another run is editing would also swap its branch and commit its files, so
-	// that run gets its own worktree instead and the two go side by side.
+	// rewrites span.yaml and the brief under the run that is starting. claimSite then
+	// gives the run its own worktree, so two stories never share a tree.
 	// A process at its --max-parallel limit refuses first, before anything is claimed,
 	// written or created. Admit below is the atomic check; this one only keeps a refused
 	// launch from leaving a run behind.
@@ -541,7 +583,7 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 	if err != nil {
 		return "", "", err
 	}
-	res, claim := st.Result, st.Claim
+	claim := st.Claim
 	handedOver, opened := false, false
 	defer func() {
 		if !handedOver {
@@ -552,19 +594,18 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 			st.discard()
 		}
 	}()
-	opt, err := options(st.Code.Workspace, st.Code.Spans, st.Code.Policy, st.Code.Project, st.Code.Folder, st.Code.Explicit)
-	if err != nil {
-		return "", "", err
-	}
-	fromRequest(&opt, req, res)
-	opt.Watch = hub
-	opt.HeldWorkspace = claim
-	id, err := engine.Open(opt)
+	opt, id, err := st.open(req, hub)
 	if err != nil {
 		return "", "", err
 	}
 	opened = true
-	claim.Relabel("run " + id)
+	if st.inPlace() {
+		claim.Relabel("run " + id)
+	} else {
+		// The run record names the branch now, and the engine locks the worktree itself.
+		claim.Release()
+		claim = nil
+	}
 	if err := hub.Admit(id, "intake"); err != nil {
 		return "", "", err
 	}
@@ -580,10 +621,11 @@ func beginOne(req setup.Request, spans string, hub *live.Hub) (string, string, e
 }
 
 func runOne(ctx context.Context, req setup.Request) (string, int) {
-	res, claim, err := claimAndConfigure(req, "span run")
+	st, err := claimSite(req, "", "span run")
 	if err != nil {
 		return err.Error() + "\n", 1
 	}
+	res, claim := st.Result, st.Claim
 	defer claim.Release()
 	var b strings.Builder
 	fmt.Fprintf(&b, "policy %s\n", res.PolicyPath)
@@ -595,29 +637,19 @@ func runOne(ctx context.Context, req setup.Request) (string, int) {
 		return b.String(), 0
 	}
 	fmt.Fprintf(&b, "branch %s from %s\n", res.Branch, res.Base)
-	// The run works on its branch in its own tree; the checkout the person pointed at is
-	// never switched, so a second story can run beside this one.
-	code, err := prepare(req.Workspace, "", "", res.Branch, res.Base, res.Branch != "")
+	if !st.inPlace() {
+		fmt.Fprintf(&b, "worktree %s\n", st.Code.Workspace)
+	}
+	opt, id, err := st.open(req, nil)
 	if err != nil {
+		st.discard()
 		return b.String() + err.Error() + "\n", 1
 	}
-	code.Folder = req.Folder
-	isolated := code.Workspace != code.Project
-	if isolated {
-		fmt.Fprintf(&b, "worktree %s\n", code.Workspace)
-		// The claim only protected the configuration just written. The run edits its own
-		// tree, so the checkout is free for the next story at once.
+	if !st.inPlace() {
+		// The run record names the branch now, so the checkout is free for the next story.
 		claim.Release()
 	}
-	opt, err := options(code.Workspace, code.Spans, code.Policy, code.Project, code.Folder, code.Explicit)
-	if err != nil {
-		return b.String() + err.Error() + "\n", 1
-	}
-	fromRequest(&opt, req, res)
-	if !isolated {
-		opt.HeldWorkspace = claim
-	}
-	result, err := engine.Start(ctx, opt)
+	result, err := engine.Resume(ctx, opt, id)
 	if err != nil {
 		return b.String() + err.Error() + "\n", 1
 	}
@@ -680,6 +712,9 @@ func jiraMain(args []string, out, errw io.Writer) int {
 		account, err := jira.Load(project)
 		view := jira.View(account, err == nil)
 		if asJSON {
+			if jira.Unreadable(err) {
+				fmt.Fprintln(errw, err)
+			}
 			if emit(out, errw, view) != 0 {
 				return 1
 			}
@@ -862,9 +897,7 @@ func options(workspace, spans, policyPath, project, folder string, explicit bool
 	if err != nil {
 		return engine.Options{}, err
 	}
-	if spans == "" {
-		spans = defaultSpans(workspace)
-	}
+	spans = stateRoot(workspace, spans)
 	if policyPath == "" {
 		policyPath = policyIn(workspace)
 	}
@@ -983,9 +1016,9 @@ const usageText = `./span repos [--path .]
 ./span runs list|show|implementation|feature|acceptance|events <run>; ./span log|pause|stop|rewind|note|stage-agent|approve|answer|story|delete <run> ...   (./span runs for each verb's flags)
 ./span settings show|set|agent|model|folder ...   (./span settings for each verb's flags)
 ./span metrics [--json] [--spans .span/runs]
-./span start precheck|branches|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--json]
-./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch]
-./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree]
+./span start precheck|branches|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--in-place] [--json]
+./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch] [--in-place]
+./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree|--in-place]
 ./span resume <id> [--workspace .]
 ./span serve [--addr 127.0.0.1:8787] [--spans .span/runs] [--max-parallel N]`
 
@@ -1016,11 +1049,7 @@ func prepare(workspace, spans, policyPath, name, base string, isolate bool) (pre
 		return prepared{}, err
 	}
 	out := prepared{Workspace: project, Project: project}
-	if spans == "" {
-		out.Spans = defaultSpans(project)
-	} else {
-		out.Spans = spans
-	}
+	out.Spans = stateRoot(project, spans)
 	if policyPath == "" {
 		out.Policy = policyIn(project)
 	} else {
@@ -1041,6 +1070,10 @@ func prepare(workspace, spans, policyPath, name, base string, isolate bool) (pre
 	// refuses a base that is nowhere.
 	if err := worktree.Add(context.Background(), adapt.Git{Dir: project}, project, dir, name, start); err != nil {
 		return prepared{}, err
+	}
+	if err := worktree.CopyLocalFiles(context.Background(), adapt.Git{Dir: project}, project, dir); err != nil {
+		// The run can still work without them; the log says which one is missing.
+		log.Printf("local files of %s: %v", dir, err)
 	}
 	out.Workspace = dir
 	return out, nil

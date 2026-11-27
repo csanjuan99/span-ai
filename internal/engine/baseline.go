@@ -3,11 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"span/internal/fsutil"
 	"span/internal/prove"
 	"span/internal/qa"
 	"span/internal/statement"
@@ -29,12 +32,20 @@ func (r *runner) recordBaseline(ctx context.Context) error {
 	if r.cur.Iteration > 1 || r.cur.GitSHA != "" {
 		return nil
 	}
-	if _, built, err := statement.Read(r.iterDir(), build); err != nil || built {
+	_, built, err := statement.Read(r.iterDir(), build)
+	if err != nil {
+		r.logLine("baseline: not recorded: the earlier build result cannot be read: " + err.Error())
+		return nil
+	}
+	if built {
 		// A build already started on this tree once; it may have left changes behind.
 		return nil
 	}
-	if _, err := os.Stat(r.baselinePath()); !os.IsNotExist(err) {
+	if _, err := os.Stat(r.baselinePath()); !errors.Is(err, os.ErrNotExist) {
 		// Already recorded, so the tree was prepared before it.
+		if err != nil {
+			r.logLine("baseline: not recorded: " + err.Error())
+		}
 		return nil
 	}
 	ready, err := r.prepareTree(ctx)
@@ -47,11 +58,19 @@ func (r *runner) recordBaseline(ctx context.Context) error {
 	sha := ""
 	if r.opt.Source != nil {
 		// Uncommitted changes are not the base commit: their failures would be excused.
-		if dirty, err := r.opt.Source.Dirty(ctx); err != nil || dirty {
+		dirty, err := r.opt.Source.Dirty(ctx)
+		if err != nil {
+			r.logLine("baseline: not recorded: cannot tell whether the checkout is clean: " + err.Error())
+			return ctx.Err()
+		}
+		if dirty {
 			r.logLine("baseline: not recorded: the checkout has uncommitted changes")
 			return ctx.Err()
 		}
-		sha, _ = r.opt.Source.Head(ctx)
+		if sha, err = r.opt.Source.Head(ctx); err != nil {
+			r.logLine("baseline: not recorded: cannot read HEAD: " + err.Error())
+			return ctx.Err()
+		}
 	}
 	base, notes, err := prove.Record(ctx, r.opt.Check, r.opt.Workspace, sha, r.baselineCommands())
 	for _, line := range notes {
@@ -62,7 +81,12 @@ func (r *runner) recordBaseline(ctx context.Context) error {
 		return ctx.Err()
 	}
 	if r.opt.Source != nil {
-		if now, _ := r.opt.Source.Head(ctx); now != sha {
+		now, err := r.opt.Source.Head(ctx)
+		if err != nil {
+			r.logLine("baseline: not recorded: cannot read HEAD again: " + err.Error())
+			return ctx.Err()
+		}
+		if now != sha {
 			r.logLine("baseline: not recorded: HEAD moved from " + sha + " to " + now + " while it ran")
 			return nil
 		}
@@ -92,10 +116,14 @@ func (r *runner) excuse() prove.Excuse {
 	}
 	raw, err := os.ReadFile(r.baselinePath())
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			r.logLine("baseline: ignored, it cannot be read: " + err.Error())
+		}
 		return nil
 	}
 	var base prove.Baseline
 	if err := json.Unmarshal(raw, &base); err != nil {
+		r.logLine("baseline: ignored, it is not readable JSON: " + err.Error())
 		return nil
 	}
 	return func(command string, out prove.Output) bool {
@@ -111,7 +139,9 @@ func (r *runner) logLine(line string) {
 	if r.log == nil {
 		return
 	}
-	_, _ = r.log.Write([]byte(strings.TrimRight(line, "\n") + "\n"))
+	if _, err := r.log.Write([]byte(strings.TrimRight(line, "\n") + "\n")); err != nil {
+		log.Printf("run %s: transcript line lost: %v: %s", r.cur.ID, err, line)
+	}
 }
 
 // excusedQA judges a failing QA run whose every failure line was already on the base
@@ -155,41 +185,50 @@ func (r *runner) prepareTree(ctx context.Context) (bool, error) {
 	if !r.isolated() {
 		return true, nil
 	}
-	commands := r.opt.Policy.Prove.Prepare
-	for _, command := range commands {
-		out, err := r.opt.Check.Run(ctx, command, r.opt.Workspace)
+	var steps []prepareStep
+	for _, command := range r.opt.Policy.Prove.Prepare {
+		steps = append(steps, prepareStep{dir: r.opt.Workspace, command: command})
+	}
+	// The marker outlives a run that was stopped mid-install, whose half-filled folders
+	// would otherwise pass for installed ones.
+	marker := filepath.Join(r.opt.Workspace, ".span", "preparing")
+	if len(steps) == 0 {
+		steps = detectPrepare(r.opt.Workspace, present(marker))
+	}
+	if len(steps) == 0 {
+		return true, nil
+	}
+	ignoreWorkspaceState(r.opt.Workspace)
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		r.logLine("prepare: an interrupted install will not be noticed: " + err.Error())
+	}
+	ready := true
+	for _, step := range steps {
+		out, err := r.opt.Check.Run(ctx, step.command, step.dir)
 		if ctx.Err() != nil {
 			return false, ctx.Err()
 		}
-		if err != nil {
-			r.logLine(fmt.Sprintf("baseline: not recorded: prepare %q could not run: %v", command, err))
-			return false, nil
+		switch {
+		case err != nil:
+			r.logLine(fmt.Sprintf("baseline: not recorded: prepare %q could not run: %v; set prove.prepare in span.yaml if this project installs another way", step.command, err))
+			ready = false
+		case out.ExitCode != 0:
+			r.logLine(fmt.Sprintf("baseline: not recorded: prepare %q exited %d; set prove.prepare in span.yaml if this project installs another way", step.command, out.ExitCode))
+			ready = false
+		default:
+			r.logLine("prepare: " + step.command + " ok")
 		}
-		if out.ExitCode != 0 {
-			r.logLine(fmt.Sprintf("baseline: not recorded: prepare %q exited %d", command, out.ExitCode))
-			return false, nil
+	}
+	if ready {
+		if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+			r.logLine("prepare: " + err.Error())
 		}
-		r.logLine("prepare: " + command + " ok")
 	}
-	if len(commands) == 0 && missingDependencies(r.opt.Workspace) {
-		r.logLine("baseline: not recorded: this worktree has a package.json but no node_modules; set prove.prepare in span.yaml to install them")
-		return false, nil
-	}
-	return true, nil
-}
-
-// missingDependencies is the one environment gap Span can see without running anything: a
-// JavaScript project whose packages were never installed in this tree.
-func missingDependencies(workspace string) bool {
-	if _, err := os.Stat(filepath.Join(workspace, "package.json")); err != nil {
-		return false
-	}
-	_, err := os.Stat(filepath.Join(workspace, "node_modules"))
-	return os.IsNotExist(err)
+	return ready, nil
 }
 
 // isolated is true when the run edits a tree that is not the project it belongs to: its own
 // worktree. A person's checkout, even one that is itself a linked worktree, is not.
 func (r *runner) isolated() bool {
-	return r.opt.Project != "" && filepath.Clean(r.opt.Project) != filepath.Clean(r.opt.Workspace)
+	return r.opt.Project != "" && !fsutil.SamePath(r.opt.Project, r.opt.Workspace)
 }

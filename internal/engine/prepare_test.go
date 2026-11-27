@@ -73,8 +73,8 @@ func TestAFailedPrepareRecordsNoBaseline(t *testing.T) {
 	if agents.builds == 0 {
 		t.Fatal("a failed prepare must not stop the run before the agent can fix the tree")
 	}
-	raw, _ := os.ReadFile(filepath.Join(opt.Root, got.ID, "transcript.log"))
-	if !strings.Contains(string(raw), "prepare") {
+	raw, err := os.ReadFile(filepath.Join(opt.Root, got.ID, "transcript.log"))
+	if err != nil || !strings.Contains(string(raw), "prepare") {
 		t.Fatalf("the transcript does not say why: %s", raw)
 	}
 }
@@ -109,25 +109,28 @@ func TestACheckoutRunNeverRunsPrepare(t *testing.T) {
 	}
 }
 
-func TestAWorktreeWithoutInstalledDependenciesGetsNoBaseline(t *testing.T) {
+func TestAWorktreeWhoseDependenciesCannotBeInstalledGetsNoBaseline(t *testing.T) {
 	opt, _, check := baselineOpt(t)
 	opt.Worktree = true
 	opt.Project = t.TempDir()
 	if err := os.WriteFile(filepath.Join(opt.Workspace, "package.json"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	check.respond = func(string, int) (prove.Output, error) {
+		return prove.Output{ExitCode: 1, Text: legacyFailure}, nil
+	}
 	got, err := Start(context.Background(), opt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := readBaseline(t, opt, got.ID); ok {
-		t.Fatal("a baseline was recorded with no node_modules; the base would look broken by the environment, not by its tests")
+		t.Fatal("a baseline was recorded with no dependencies; the base would look broken by the environment, not by its tests")
 	}
-	raw, _ := os.ReadFile(filepath.Join(opt.Root, got.ID, "transcript.log"))
-	if !strings.Contains(string(raw), "prove.prepare") {
-		t.Fatalf("the transcript must tell the person what to configure: %s", raw)
+	raw, err := os.ReadFile(filepath.Join(opt.Root, got.ID, "transcript.log"))
+	if err != nil || !strings.Contains(string(raw), "prove.prepare") {
+		t.Fatalf("the transcript must tell the person what to configure: %s %v", raw, err)
 	}
-	if len(check.calls) == 0 {
+	if len(check.calls) < 2 {
 		t.Fatal("prove itself still has to run")
 	}
 }
@@ -178,6 +181,24 @@ func TestAPersonsOwnLinkedWorktreeIsNotPrepared(t *testing.T) {
 	for _, c := range check.calls {
 		if strings.HasPrefix(c, "pnpm install") {
 			t.Fatalf("prepare ran in a tree that is the project itself: %v", check.calls)
+		}
+	}
+}
+
+// The project reached through a symlink is still the person's checkout.
+func TestACheckoutSpelledThroughASymlinkIsNotPrepared(t *testing.T) {
+	opt, _, check := preparedOpt(t)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(opt.Workspace, link); err != nil {
+		t.Skipf("no symlinks here: %v", err)
+	}
+	opt.Project = link
+	if _, err := Start(context.Background(), opt); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range check.calls {
+		if strings.HasPrefix(c, "pnpm install") {
+			t.Fatalf("prepare ran in the person's checkout: %v", check.calls)
 		}
 	}
 }

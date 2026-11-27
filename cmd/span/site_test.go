@@ -43,9 +43,10 @@ func story(text string) setup.Request {
 	return setup.Request{Story: text, Kind: "fix", Base: "dev"}
 }
 
-func TestAFreeCheckoutIsEditedInPlaceAndStaysHeld(t *testing.T) {
+func TestAnInPlaceRunIsEditedInTheCheckoutAndStaysHeld(t *testing.T) {
 	dir := gitRepo(t)
 	req := story("AET-1 Charge once")
+	req.InPlace = true
 	req.Workspace = dir
 	st, err := claimSite(req, "", "starting a run")
 	if err != nil {
@@ -53,7 +54,7 @@ func TestAFreeCheckoutIsEditedInPlaceAndStaysHeld(t *testing.T) {
 	}
 	defer st.Claim.Release()
 	if st.Code.Workspace != st.Code.Project {
-		t.Fatalf("a free checkout must be edited in place, got %s", st.Code.Workspace)
+		t.Fatalf("an in-place run must edit the checkout, got %s", st.Code.Workspace)
 	}
 	if st.Claim == nil {
 		t.Fatal("the run must hold the checkout it edits")
@@ -105,11 +106,17 @@ func TestABusyCheckoutSendsTheNextRunToItsOwnWorktree(t *testing.T) {
 	if two.Code.Spans != filepath.Join(dir, ".span", "runs") {
 		t.Fatalf("state must stay in the project so the desk lists every run: %s", two.Code.Spans)
 	}
-	after, _ := os.ReadFile(filepath.Join(dir, "span.yaml"))
+	after, err := os.ReadFile(filepath.Join(dir, "span.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(after) != string(configured) {
 		t.Fatal("the busy checkout's span.yaml was rewritten")
 	}
-	afterBrief, _ := os.ReadFile(filepath.Join(dir, ".span", "brief.md"))
+	afterBrief, err := os.ReadFile(filepath.Join(dir, ".span", "brief.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(afterBrief) != string(brief) {
 		t.Fatal("the busy checkout's brief was overwritten under the running story")
 	}
@@ -232,14 +239,7 @@ func TestAnIdleRunOfTheSameBranchBlocksIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer one.Claim.Release()
-	runDir := filepath.Join(dir, ".span", "runs", "r1")
-	if err := os.MkdirAll(runDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	cursor := `{"id":"r1","branch":"` + one.Result.Branch + `"}`
-	if err := os.WriteFile(filepath.Join(runDir, "cursor.json"), []byte(cursor), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	ownRun(t, dir, "r1", one.Result.Branch, false)
 	one.Claim.Relabel("run r1")
 	same := story("AET-1 Charge once")
 	same.Workspace = dir
@@ -267,8 +267,7 @@ func TestDiscardingAnIsolatedSiteLeavesNoWorktreeAndNoBranch(t *testing.T) {
 	if _, err := os.Stat(two.Code.Workspace); !os.IsNotExist(err) {
 		t.Fatalf("the worktree of a launch that never started a run is still there: %v", err)
 	}
-	out, _ := exec.Command("git", "-C", dir, "branch", "--list", two.Result.Branch).Output()
-	if strings.TrimSpace(string(out)) != "" {
+	if out := gitOut(t, dir, "branch", "--list", two.Result.Branch); out != "" {
 		t.Fatalf("the branch was left behind: %s", out)
 	}
 	// The same story can now be launched again.
@@ -280,6 +279,7 @@ func TestDiscardingAnIsolatedSiteLeavesNoWorktreeAndNoBranch(t *testing.T) {
 func TestDiscardingAnInPlaceSiteTouchesNothing(t *testing.T) {
 	dir := gitRepo(t)
 	req := story("AET-1 Charge once")
+	req.InPlace = true
 	req.Workspace = dir
 	st, err := claimSite(req, "", "starting a run")
 	if err != nil {

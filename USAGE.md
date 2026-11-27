@@ -371,9 +371,10 @@ resume the run.
 branch. Now it uses `--base`, else `base:` in `span.yaml` for feat and fix, else `dev`, or
 `master` for a hotfix. The kind comes from `--branch`, or, without it, from the branch that is
 checked out: a run on `hotfix/h` opens into `master`, not `dev`. `--branch` is the branch the
-run works on with or without `--worktree`: it must be `feat/`, `fix/` or `hotfix/`, and a new
+run works on, in its own worktree or with `--in-place`: it must be `feat/`, `fix/` or `hotfix/`, and a new
 one is cut from the base. Before, `--branch` without `--worktree` was ignored. This is a deliberate change: on a repository without that base, or
-on a checkout that is on the base itself, the run holds before the first stage. The base is
+on a checkout that is on the base itself, the run holds before the first stage, or, when it
+would need its own worktree and the base does not exist, no run is created. The base is
 also recorded on the run, so [Prove only what the change can affect](#prove-only-what-the-change-can-affect)
 diffs against it.
 
@@ -410,7 +411,7 @@ verbs read the project folder with the same code the routes use.
 
 `precheck` exits `0` when nothing blocks. A refusal exits with its number, in text and with `--json` alike
 (`--json` prints the route's `{number, code, message}`): `6` a run for that story exists, `8` Jira is signed
-out, `14` the folder is not a git repository, `15` the base branch is missing, `16` the checkout is busy,
+out, `14` the folder is not a git repository, `15` the base branch is missing, `16` the checkout is busy (only for a run that would edit it; see `--in-place`),
 `17` no agent is ready, `18` the token was refused. Usage errors exit `2` and any other failure `1`.
 
 `POST /quickstart` remains for the older desk path; new UI prefers precheck and `POST /spans`.
@@ -431,8 +432,10 @@ the conflict check reads it. This is what a stacked change needs when its base b
 merged and deleted and the host moved the change. If the
 change was already merged into another branch, the run holds with that branch named, so a
 merge into the wrong place is not closed as if it were right; check that branch, then
-approve the stage to close the run. A host that cannot report the target, such as the local
-review used without `gh`, is not checked.
+approve the stage to close the run. If asking the host for the target fails (no network, a
+rate limit), the run holds too: resume to ask again, or approve the merge stage to go on
+without the check. A host that has no targets to report, such as the local review used
+without `gh`, is not checked.
 
 ## House style
 
@@ -526,8 +529,7 @@ one. Two runs on two branches therefore never write the same file, so they can r
 parallel without conflicting. The feature is recorded in the run, so a resume keeps it; a
 run recorded before this reads it from its branch.
 
-Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree when the
-checkout is busy: it gets the policy
+Without `span.yaml` a run still starts, resumes, wakes, and gets its own worktree: it gets the policy
 `./span quickstart` would write (`agent: any`, `rules: harness`, open `auto`, merge
 `hold`, the detected check such as `go test ./...` for a `go.mod`, the harness skills).
 Nothing is written to disk for that. A `span.yaml` that exists but does not load is still
@@ -978,8 +980,10 @@ the same policy. A folder with no `span.yaml` changes nothing.
 ### Deleting a run
 
 Each run in the desk's `spans` list has a **Delete** button. It asks once more, then removes that
-run's record (its journal, evidence and brief) from the spans folder. The branch, the pull request
-and any worktree the run made stay, because they may hold work you still want. A run that is being
+run's record (its journal, evidence and brief) from the spans folder. The branch and the pull request
+stay. The run's own worktree is removed when nothing in it would be lost: installed
+dependencies, tool caches and env files identical to your checkout's go with it. Any other
+modified, untracked or ignored file, such as a `.env` you edited there, keeps it. A run that is being
 driven, by this server or by `span resume`, is refused: stop it first.
 
 ### Metrics
@@ -1106,8 +1110,9 @@ checked out in its own **git worktree**, so the checkout you are using is never 
 two runs never see each other's files.
 
 ```bash
-./span run --workspace /path/to/repo --brief notes.md --branch feat/sal-3 --worktree
-./span quickstart --workspace /path/to/repo --issue SAL-3   # isolates when it derives a branch
+./span run --workspace /path/to/repo --brief notes.md --branch feat/sal-3   # its own worktree
+./span quickstart --workspace /path/to/repo --issue SAL-3                  # its own worktree
+./span quickstart --workspace /path/to/repo --issue SAL-3 --in-place       # edits your checkout
 ```
 
 The tree lives at `<repo>/.span/worktrees/<branch>`, with `/` in the branch name turned into
@@ -1129,22 +1134,29 @@ A run in a worktree tells the agent so, in the prompt, with the rules spelled ou
 is already checked out; do not run `git checkout`, `git switch`, `git worktree add`, or
 `git stash`; read `git worktree list` if you need to see the other trees; Span commits.
 
-**What the lock protects.** A run holds the tree it edits, not the repository. From the page,
-the first story in a free checkout edits it in place and holds it. A second story launched
-while that checkout is held is not queued: it gets its own worktree and starts at once, and
-nothing is written into the busy checkout (no `span.yaml`, no brief). Stories in separate
-worktrees never wait for each other; only two runs that share one tree are serialized. A busy
-checkout that was never configured, or a launch with no story, still refuses, because there
-is nothing safe to isolate with. So does launching a story whose branch already belongs to
-another run or exists in git: two runs on one branch would fight over its checkout. Resuming,
-answering, or reloading an isolated run always lands on its own worktree and reads the policy
-from the project.
+**Every run with a branch gets one**, from the page and from the terminal, whether or not
+another run is working at that moment: a run that waits for your answer still owns its
+changes. Your uncommitted files stay in your checkout and are not carried into the run,
+which starts from its base. `span run` says where it goes (`running feat/x in its own
+worktree at <path>`). A run edits your checkout only when:
 
-**`span run` on a busy checkout.** From the terminal, `span run --branch feat/x` does the same
-when another run holds the checkout: it prints `this checkout is busy (...): running feat/x in
-its own worktree at <path>` and goes on there, instead of holding. A free checkout is edited in
-place as before, and `--worktree` still forces a tree. Without `--branch` there is no name for
-a tree, so it refuses and tells you to pass one.
+- you ask for it: `--in-place` on `span run` and `span quickstart`, `inPlace=true` in the
+  form of `POST /spans` and `POST /quickstart`;
+- the checkout is already on the run's branch, because git cannot check a branch out twice;
+- there is no tree to make: `span run` without `--branch`, a folder that is not a git
+  repository, or a folder inside one.
+
+`--worktree` still works and is the default with `--branch`; it cannot be combined with
+`--in-place`.
+
+**What the lock protects.** A run holds the tree it edits, not the repository, so runs in
+separate worktrees never wait for each other. A busy checkout only refuses a run that would
+edit it (`checkout_busy`, exit `16`; check it with `span start precheck --in-place` or
+`GET /start/precheck?inPlace=true`). A launch whose branch already belongs to an unfinished
+run is refused: resume that run or delete it. A run that edits the checkout holds,
+instead of switching branches, while the checkout has uncommitted changes of another
+unfinished run. Resuming, answering, or reloading a run always
+lands on its own tree and reads the policy from the project.
 
 **Capping parallel runs.** Many agents at once can exhaust the quota of their CLI.
 `span serve --max-parallel 4` drives at most four runs in that process; a launch or a wake past
@@ -1155,9 +1167,18 @@ runs of one `span serve` process; `span run` and `span resume` from other termin
 counted. Two launches that arrive in the same instant at the edge of the cap can both pass the
 early check; the second is then refused later and leaves a run in hold, which you resume.
 
-**Dependencies in a fresh worktree.** A new worktree has the code but not `node_modules`.
-Set a command in `span.yaml` and Span runs it once in the run's own worktree, before the
-baseline and the first build; it never runs in your own checkout:
+**A worktree prepares itself.** A new worktree has the code but not what lives beside it, so
+Span adds it, with nothing to configure:
+
+- the `.env` and `.env.*` files git ignores are copied from your checkout when they are
+  missing, and never written back. A file the run's branch does not ignore is not copied;
+- dependencies are installed from the lockfiles, at the root and in its immediate folders,
+  before the baseline and the first build: `pnpm`, `yarn`, `bun` or `npm ci` (`npm install
+  --no-package-lock` without a lockfile, or the tool `packageManager` names), `uv sync`,
+  `poetry install`, `composer install`. An install that did not finish runs again.
+
+The install tool must be on the machine that runs Span. For a project that installs another
+way, `prove.prepare` replaces what is detected; it never runs in your own checkout:
 
 ```yaml
 prove:
@@ -1165,8 +1186,7 @@ prove:
     - pnpm install --frozen-lockfile
 ```
 
-If `prepare` fails, or the tree has a `package.json` and no `node_modules` and no `prepare`,
-no baseline is recorded and the transcript says why. Recording one there would mark the
+If preparing fails, no baseline is recorded and the transcript says why. Recording one there would mark the
 environment as broken on the base commit and then excuse the same failures after the build.
 
 ### Restarting from a stage

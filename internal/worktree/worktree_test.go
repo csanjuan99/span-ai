@@ -363,3 +363,25 @@ func TestManyRunsCanCreateTheirTreesAtTheSameTime(t *testing.T) {
 		t.Fatalf("%d trees, want %d", len(entries), runs+1)
 	}
 }
+
+// A folder that is not a repository has no tree to make, so the run edits it.
+func TestAFolderThatIsNotARepositoryIsNotSeparated(t *testing.T) {
+	if Separate(context.Background(), shell{}, t.TempDir(), "feat/x") {
+		t.Fatal("a plain folder cannot have a worktree")
+	}
+}
+
+// A project that is a folder inside a repository keeps running in that folder: a tree holds
+// the whole repository, so the agent and the checks would start at the wrong place.
+func TestAFolderInsideARepositoryIsNotSeparated(t *testing.T) {
+	repo := t.TempDir()
+	run := shell{t}
+	run.must(repo, "init", "-q", "-b", "dev")
+	sub := filepath.Join(repo, "svc")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if Separate(context.Background(), run, sub, "feat/x") || !Separate(context.Background(), run, repo, "feat/x") {
+		t.Fatal("only the repository root gets a tree")
+	}
+}

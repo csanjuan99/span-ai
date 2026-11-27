@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"span/internal/engine"
 	"span/internal/start"
 )
 
@@ -162,6 +163,7 @@ func checkInput(r *http.Request, defaultSpans string) start.CheckInput {
 		Issue:     q.Get("issue"),
 		Base:      q.Get("base"),
 		Repos:     repos,
+		InPlace:   q.Get("inPlace") == "true",
 		SpansRoot: spansRoot(path, defaultSpans),
 	}
 }
@@ -177,7 +179,7 @@ func spansRoot(path, serveRoot string) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(abs, ".span", "runs")
+	return engine.DefaultSpans(abs)
 }
 
 func writeRefusal(w http.ResponseWriter, ref *start.Refusal) {

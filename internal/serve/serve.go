@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"span/internal/adapt"
 	"span/internal/agent"
 	"span/internal/decision"
 	"span/internal/engine"
@@ -138,6 +139,9 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("GET /jira", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("path")
 		account, err := jira.Load(project)
+		if jira.Unreadable(err) {
+			log.Printf("jira account of %q: %v", project, err)
+		}
 		writeJSON(w, http.StatusOK, jira.View(account, err == nil))
 	})
 	mux.HandleFunc("POST /jira/account", func(w http.ResponseWriter, r *http.Request) {
@@ -318,7 +322,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, &runlock.BusyError{Scope: runlock.Run, Holder: "this server"})
 			return
 		}
-		if err := engine.Delete(root, id); err != nil {
+		if err := adapt.DeleteRun(r.Context(), root, id); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -536,15 +540,9 @@ func continueRun(wake Wake, root, id string, w http.ResponseWriter, r *http.Requ
 			writeErr(w, err)
 			return
 		}
-		if len(body.Answers) == 0 {
-			writeErr(w, errors.New("an answer is empty"))
+		if err := engine.CheckAnswers(body.Answers); err != nil {
+			writeErr(w, err)
 			return
-		}
-		for _, answer := range body.Answers {
-			if strings.TrimSpace(answer.Question) == "" || strings.TrimSpace(answer.Body) == "" {
-				writeErr(w, errors.New("an answer is empty"))
-				return
-			}
 		}
 		signal.Answers = body.Answers
 	}
@@ -718,7 +716,9 @@ func agentList(hub *live.Hub, root string) []agentBody {
 	out := make([]agentBody, 0, len(flights))
 	for id, flight := range flights {
 		cur := engine.Cursor{ID: id, Stage: flight.Stage}
-		if snap, err := engine.Load(root, id); err == nil {
+		if snap, err := engine.Load(root, id); err != nil {
+			log.Printf("agents: run %s is listed from its flight only: %v", id, err)
+		} else {
 			cur = snap.Cursor
 		}
 		body := review(hub, id, cur)
@@ -896,6 +896,7 @@ func storyRequest(r *http.Request) (setup.Request, error) {
 		Base:      r.Form.Get("base"),
 		Repos:     r.Form["repo"],
 		Files:     files,
+		InPlace:   r.Form.Get("inPlace") == "true",
 	}, nil
 }
 

@@ -26,6 +26,11 @@ func WorkspaceLockPath(workspace string) string {
 	return filepath.Join(workspace, ".span", "workspace.lock")
 }
 
+// DefaultSpans is the state directory of a project that names none.
+func DefaultSpans(project string) string {
+	return filepath.Join(project, ".span", "runs")
+}
+
 // WorkspaceBusy reports whether a run is editing the checkout now, and which one.
 func WorkspaceBusy(workspace string) (string, bool) {
 	if workspace == "" {
@@ -99,6 +104,7 @@ func ClaimWorkspace(workspace, label string) (*runlock.Lock, error) {
 		// Span cannot write a lock file here (a read-only tree). lockWorkspace already runs
 		// unlocked in that case, and the launcher must not be stricter than the run: a nil
 		// claim is valid, and Release and Relabel on it do nothing.
+		log.Printf("launch without a checkout lock in %s: %v", workspace, err)
 		return nil, nil
 	}
 	return lock, nil
@@ -110,6 +116,7 @@ func ClaimWorkspace(workspace, label string) (*runlock.Lock, error) {
 func ignoreWorkspaceState(workspace string) {
 	dir := filepath.Join(workspace, ".span")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		log.Printf("create %s: %v", dir, err)
 		return
 	}
 	writeIgnoreOnce(dir)
@@ -120,6 +127,9 @@ func ignoreWorkspaceState(workspace string) {
 func writeIgnoreOnce(dir string) {
 	file, err := os.OpenFile(filepath.Join(dir, ".gitignore"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			log.Printf("write the .gitignore of %s: %v", dir, err)
+		}
 		return
 	}
 	if _, err := file.WriteString("*\n"); err != nil {
@@ -163,6 +173,7 @@ func (r *runner) lockWorkspace() (func(), *runlock.BusyError) {
 		if errors.As(err, &busy) {
 			return nil, busy
 		}
+		log.Printf("run %s without a checkout lock: %v", r.cur.ID, err)
 		return func() {}, nil
 	}
 	return lock.Release, nil

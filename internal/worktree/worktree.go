@@ -1,6 +1,7 @@
 // Package worktree keeps parallel runs apart. Every run that walks a branch does it in
 // its own git worktree, so two stories in one repository never share a working tree and
-// the checkout the person is using is never switched.
+// the checkout the person is using is never switched. Separate says when a launch edits the
+// checkout instead.
 //
 // The commands here are the whole surface Span uses. Nothing is inferred:
 //
@@ -21,6 +22,7 @@ import (
 	"strings"
 
 	branchpkg "span/internal/branch"
+	"span/internal/fsutil"
 )
 
 // Runner runs one git command in a repository. adapt.Git implements it.
@@ -116,6 +118,11 @@ func hasRef(ctx context.Context, run Runner, repo, ref string) bool {
 	return err == nil
 }
 
+// HasBranch reports whether the repository has a local branch of this name.
+func HasBranch(ctx context.Context, run Runner, repo, branch string) bool {
+	return hasRef(ctx, run, repo, "refs/heads/"+branch)
+}
+
 // Add checks out branch at path. A branch that does not exist yet is created from base;
 // one that does is reused, so resuming a run lands on the same tree instead of a second
 // copy of the same branch.
@@ -140,12 +147,7 @@ func Add(ctx context.Context, run Runner, repo, path, branch, base string) error
 		}
 		return fmt.Errorf("%s already holds branch %s, not %s", path, entry.Branch, branch)
 	}
-	exists, err := hasBranch(ctx, run, repo, branch)
-	if err != nil {
-		return err
-	}
-	// The last argument is what gets checked out: the branch when it already exists, the
-	// base ref when the branch is being created. "--" keeps both from being read as options.
+	exists := HasBranch(ctx, run, repo, branch)
 	if exists {
 		_, err = run.Git(ctx, repo, "worktree", "add", "--", path, branch)
 		return err
@@ -160,10 +162,6 @@ func Add(ctx context.Context, run Runner, repo, path, branch, base string) error
 	// --no-track: the new branch pushes to its own name and is not tied to its base.
 	_, err = run.Git(ctx, repo, "worktree", "add", "--no-track", "-b", branch, "--", path, start)
 	return err
-}
-
-func hasBranch(ctx context.Context, run Runner, repo, branch string) (bool, error) {
-	return hasRef(ctx, run, repo, "refs/heads/"+branch), nil
 }
 
 // List reads what git has checked out for this repository.
@@ -201,9 +199,8 @@ func List(ctx context.Context, run Runner, repo string) ([]Entry, error) {
 
 // At reports whether a path is already a worktree of this repository.
 func At(entries []Entry, path string) (Entry, bool) {
-	clean := filepath.Clean(path)
 	for _, entry := range entries {
-		if filepath.Clean(entry.Path) == clean {
+		if fsutil.SamePath(entry.Path, path) {
 			return entry, true
 		}
 	}
@@ -220,6 +217,31 @@ func Remove(ctx context.Context, run Runner, repo, path string) error {
 func Prune(ctx context.Context, run Runner, repo string) error {
 	_, err := run.Git(ctx, repo, "worktree", "prune")
 	return err
+}
+
+// Separate says whether a run of branch should get its own tree beside the checkout in
+// dir. It should not without a branch, outside a git repository, or when the checkout is
+// already on that branch (git cannot check one branch out twice) or dir is a folder inside
+// a repository.
+func Separate(ctx context.Context, run Runner, dir, branch string) bool {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false
+	}
+	prefix, err := run.Git(ctx, dir, "rev-parse", "--show-prefix")
+	if err != nil {
+		// Only a folder that is not a repository is edited directly. Any other failure keeps
+		// the run apart, so that making the tree reports it instead of editing the checkout.
+		return !strings.Contains(err.Error(), "not a git repository")
+	}
+	if strings.TrimSpace(prefix) != "" {
+		// A tree holds the whole repository, so a project that is a folder inside one would
+		// start at the wrong place. It keeps running where it is.
+		return false
+	}
+	// symbolic-ref fails on a detached HEAD, which is on no branch.
+	current, err := run.Git(ctx, dir, "symbolic-ref", "--quiet", "--short", "HEAD")
+	return err != nil || strings.TrimSpace(current) != branch
 }
 
 // Path is where a run of this branch is checked out. The branch name becomes a directory

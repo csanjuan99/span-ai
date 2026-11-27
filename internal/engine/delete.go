@@ -11,7 +11,7 @@ import (
 
 // Delete removes one run's record: its journal, cursor, brief and evidence under root.
 // Nothing outside that folder is touched: the branch, the pull request and any worktree the
-// run made stay where they are, because they may hold work the person still wants.
+// run made stay where they are. adapt.DeleteRun also removes a worktree with nothing to lose.
 //
 // A run that another process is driving is refused with a BusyError, so a stage in flight is
 // never left writing into a folder that no longer exists. The run lock is held while the

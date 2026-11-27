@@ -2,6 +2,8 @@ package engine
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,28 +35,47 @@ func Load(root, id string) (Snapshot, error) {
 	}
 	if !snap.Cursor.Hold && !snap.Cursor.Stop && !snap.Cursor.Done {
 		_, err := os.Stat(filepath.Join(dir, pauseFile))
+		logUnread(pauseFile, err)
 		snap.PauseRequested = err == nil
 	}
 	snap.Label = Label(snap.Cursor)
 	snap.Title = titleOf(dir, snap.Cursor.Issue)
-	snap.Repo = RepoName(snap.Cursor.Workspace)
+	snap.Repo = RepoName(snap.Cursor.Home())
 	snap.Statements = readStatements(dir)
 	if choices := ReadStageAgents(dir); len(choices) > 0 {
 		snap.StageAgents = choices
 	}
-	if body, err := os.ReadFile(filepath.Join(dir, "acceptance.json")); err == nil {
-		_ = json.Unmarshal(body, &snap.Acceptance)
+	var lines []qa.Line
+	if readOptionalJSON(filepath.Join(dir, "acceptance.json"), &lines) && lines != nil {
+		snap.Acceptance = lines
 	}
-	if snap.Acceptance == nil {
-		snap.Acceptance = []qa.Line{}
-	}
-	if body, err := os.ReadFile(filepath.Join(dir, "qa-gate.json")); err == nil {
-		var gate qa.Gate
-		if json.Unmarshal(body, &gate) == nil {
-			snap.Gate = &gate
-		}
+	var gate qa.Gate
+	if readOptionalJSON(filepath.Join(dir, "qa-gate.json"), &gate) {
+		snap.Gate = &gate
 	}
 	return snap, nil
+}
+
+// readOptionalJSON decodes a file a run may not have. A file that cannot be read or
+// decoded leaves the run visible without it, and says so.
+func readOptionalJSON(path string, into any) bool {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		logUnread(path, err)
+		return false
+	}
+	if err := json.Unmarshal(body, into); err != nil {
+		logUnread(path, err)
+		return false
+	}
+	return true
+}
+
+// logUnread reports a read that failed for any reason other than the file not being there.
+func logUnread(what string, err error) {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("%s is left out of the run: %v", what, err)
+	}
 }
 
 // interruptedReason is what a person reads when the process that drove a run ended without
@@ -73,6 +94,7 @@ func interrupted(dir string, cur Cursor, cursorFile string) bool {
 		return false
 	}
 	info, err := os.Stat(cursorFile)
+	logUnread(cursorFile, err)
 	if err != nil || time.Since(info.ModTime()) < interruptedAfter {
 		return false
 	}
@@ -87,6 +109,7 @@ func validID(id string) bool {
 func readStatements(dir string) []statement.Statement {
 	entries, err := os.ReadDir(filepath.Join(dir, "iter"))
 	if err != nil {
+		logUnread(filepath.Join(dir, "iter"), err)
 		return []statement.Statement{}
 	}
 	var out []statement.Statement
@@ -97,6 +120,7 @@ func readStatements(dir string) []statement.Statement {
 		iter := filepath.Join(dir, "iter", entry.Name())
 		files, err := os.ReadDir(iter)
 		if err != nil {
+			logUnread(iter, err)
 			continue
 		}
 		for _, file := range files {
@@ -105,6 +129,7 @@ func readStatements(dir string) []statement.Statement {
 				continue
 			}
 			item, ok, err := statement.Read(iter, strings.TrimSuffix(name, ".json"))
+			logUnread(filepath.Join(iter, name), err)
 			if err != nil || !ok {
 				continue
 			}
@@ -130,14 +155,23 @@ func Label(cur Cursor) string {
 	if cur.ID != "" {
 		parts = append(parts, cur.ID)
 	}
-	if repo := RepoName(cur.Workspace); repo != "" {
+	if repo := RepoName(cur.Home()); repo != "" {
 		parts = append(parts, repo)
 	}
 	return strings.Join(parts, "-")
 }
 
-// RepoName is the folder a run writes in, which is what tells two runs of the same story
-// apart.
+// Home is the checkout a run belongs to, where its login and name come from. The code of
+// an isolated run lives in a worktree of it; older runs only recorded the workspace.
+func (c Cursor) Home() string {
+	if c.Project != "" {
+		return c.Project
+	}
+	return c.Workspace
+}
+
+// RepoName is the name of a run's repository folder, which is what tells two runs of the
+// same story apart.
 func RepoName(workspace string) string {
 	clean := strings.TrimSpace(workspace)
 	if clean == "" {
@@ -181,6 +215,7 @@ type Head struct {
 func Heads(root string) []Head {
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		logUnread(root, err)
 		return []Head{}
 	}
 	heads := make([]Head, 0, len(entries))
@@ -190,12 +225,13 @@ func Heads(root string) []Head {
 		}
 		cur, err := readCursorFile(filepath.Join(root, entry.Name()))
 		if err != nil {
+			logUnread(filepath.Join(root, entry.Name()), err)
 			continue
 		}
 		dir := filepath.Join(root, entry.Name())
 		heads = append(heads, Head{
 			ID: cur.ID, Label: Label(cur), Issue: cur.Issue,
-			Repo: RepoName(cur.Workspace), Stage: cur.Stage, Verdict: verdictOf(cur),
+			Repo: RepoName(cur.Home()), Stage: cur.Stage, Verdict: verdictOf(cur),
 			Title: titleOf(dir, cur.Issue), Branch: cur.Branch, Reason: cur.Reason,
 			UpdatedAt: movedAt(dir), StartedAt: startedAt(cur),
 		}.withNeed(cur))
@@ -256,6 +292,7 @@ func startedAt(cur Cursor) string {
 func titleOf(dir, issue string) string {
 	raw, err := os.ReadFile(filepath.Join(dir, "brief.md"))
 	if err != nil {
+		logUnread(filepath.Join(dir, "brief.md"), err)
 		return ""
 	}
 	line, _, _ := strings.Cut(string(raw), "\n")
@@ -270,6 +307,7 @@ func titleOf(dir, issue string) string {
 func movedAt(dir string) string {
 	info, err := os.Stat(filepath.Join(dir, "cursor.json"))
 	if err != nil {
+		logUnread(filepath.Join(dir, "cursor.json"), err)
 		return ""
 	}
 	return info.ModTime().UTC().Format(time.RFC3339)
