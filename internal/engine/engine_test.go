@@ -152,6 +152,8 @@ type fakeReview struct {
 	base   string
 	merged bool
 	lookup error
+	// baseLookup fails the question of which branch a change targets.
+	baseLookup error
 	// openedBase is the base the last Open was given.
 	openedBase string
 	// extra are more open changes for the same head, after the one url names.
@@ -180,6 +182,9 @@ func (r *fakeReview) Open(_ context.Context, _, _, base, title, _ string) (strin
 }
 func (r *fakeReview) Merged(context.Context, string) (bool, error) { return r.merged, nil }
 func (r *fakeReview) ChangeBase(_ context.Context, url string) (string, error) {
+	if r.baseLookup != nil {
+		return "", r.baseLookup
+	}
 	for _, change := range r.extra {
 		if change.URL == url {
 			return change.Base, nil

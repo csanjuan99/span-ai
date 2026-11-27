@@ -1722,9 +1722,10 @@ func (r *runner) mergeSettling(ctx context.Context, pushed bool) error {
 	return err
 }
 
-// otherBase is the hold reason when the change targets a branch other than this run's base,
-// or "" when it matches or the host cannot tell. A merged change cannot be retargeted, so
-// the person is asked to look at the branch it landed on and approve the stage to go on.
+// otherBase is the hold reason when the change targets a branch other than this run's base
+// or when the host fails to say which, and "" when it matches or the host has no targets to
+// report. A merged change cannot be retargeted, so the person is asked to look at the branch
+// it landed on and approve the stage to go on.
 func (r *runner) otherBase(ctx context.Context, merged bool) (string, string) {
 	reporter, ok := r.opt.Review.(baseReporter)
 	expected := r.runBase()
@@ -1734,9 +1735,10 @@ func (r *runner) otherBase(ctx context.Context, merged bool) (string, string) {
 	got, err := reporter.ChangeBase(ctx, r.cur.ChangeURL)
 	got = strings.TrimSpace(got)
 	if err != nil {
-		log.Printf("run %s: the base of %s was not checked: %v", r.cur.ID, r.cur.ChangeURL, err)
+		// Merging without knowing the target could put the story on the wrong branch.
+		return fmt.Sprintf("the branch %s targets could not be checked: %v. Resume to check again, or approve this stage to go on without the check", strings.TrimSpace(r.cur.ChangeURL), err), ""
 	}
-	if err != nil || got == "" || got == expected {
+	if got == "" || got == expected {
 		return "", ""
 	}
 	if merged {

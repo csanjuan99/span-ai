@@ -432,8 +432,10 @@ the conflict check reads it. This is what a stacked change needs when its base b
 merged and deleted and the host moved the change. If the
 change was already merged into another branch, the run holds with that branch named, so a
 merge into the wrong place is not closed as if it were right; check that branch, then
-approve the stage to close the run. A host that cannot report the target, such as the local
-review used without `gh`, is not checked.
+approve the stage to close the run. If asking the host for the target fails (no network, a
+rate limit), the run holds too: resume to ask again, or approve the merge stage to go on
+without the check. A host that has no targets to report, such as the local review used
+without `gh`, is not checked.
 
 ## House style
 

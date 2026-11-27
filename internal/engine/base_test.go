@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -199,5 +200,38 @@ func TestAnOpenChangeOnTheRightBaseContinues(t *testing.T) {
 	}
 	if got.Verdict != statement.Advance || review.opens != 0 {
 		t.Fatalf("%+v opens %d", got, review.opens)
+	}
+}
+
+// A target that cannot be asked is not taken as the right one: nothing is merged until it
+// can be read, or a person approves merging without the check.
+func TestAMergeWhoseTargetCannotBeReadHolds(t *testing.T) {
+	for name, merged := range map[string]bool{"open": false, "already merged": true} {
+		t.Run(name, func(t *testing.T) {
+			opt, _, _, review, _, _ := baseOpt(t)
+			review.found = true
+			review.url = "https://github.com/o/r/pull/7"
+			id := writeCursor(t, opt, Cursor{
+				ID: "span-1", Iteration: 1, Stage: merge, GitSHA: "abc123", ChangeURL: review.url, Base: "dev",
+				Hold: true, Reason: "waiting",
+			})
+			review.merged = merged
+			review.baseLookup = errors.New("API rate limit exceeded")
+			got, err := Resume(context.Background(), opt, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Stage != merge || got.Verdict != statement.Hold || !strings.Contains(got.Reason, "API rate limit exceeded") || review.merges != 0 {
+				t.Fatalf("%+v merges %d", got, review.merges)
+			}
+			review.baseLookup = nil
+			got, err = Resume(context.Background(), opt, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Verdict != statement.Advance {
+				t.Fatalf("resuming once the target can be read: %+v", got)
+			}
+		})
 	}
 }
