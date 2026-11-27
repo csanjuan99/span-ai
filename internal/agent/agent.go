@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -64,6 +65,9 @@ func Select(want, home string) (Selection, error) {
 func contains(path, needle string) bool {
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("read %s: %v", path, err)
+		}
 		return false
 	}
 	return strings.Contains(string(raw), needle)
@@ -103,7 +107,14 @@ func RunWriter(ctx context.Context, name, workspace, prompt string, sink io.Writ
 // CLI on the one Gentle AI configured.
 func RunModel(ctx context.Context, name, model, workspace, prompt string, sink io.Writer) (string, error) {
 	cmd := exec.CommandContext(ctx, name, commandArgsModel(name, model)...)
-	proc.Tame(cmd)
+	by := supervisor(ctx)
+	// The tree is written down in the state folder of the checkout and in the run, so a Span
+	// that is killed without a chance to stop the agent finds it again.
+	dirs := []string{filepath.Join(workspace, ".span")}
+	if by.RunDir != "" {
+		dirs = append(dirs, by.RunDir)
+	}
+	tree := proc.Supervise(cmd, filepath.Base(name), by.Stage, dirs...)
 	cmd.Dir = workspace
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr strings.Builder
@@ -116,17 +127,23 @@ func RunModel(ctx context.Context, name, model, workspace, prompt string, sink i
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("%s: %w: %s", name, err, stderr.String())
 	}
-	pid := 0
-	if cmd.Process != nil {
-		pid = cmd.Process.Pid
-	}
+	pid := cmd.Process.Pid
+	tree.Started()
 	stop := observe(ctx, name, pid)
 	defer stop()
 	defer proc.Track(pid)()
-	// If Span itself is killed without a chance to stop the agent, the next run of this
-	// tree finds this note and ends the agent before starting another one.
-	defer proc.Leave(filepath.Join(workspace, ".span"), pid, name)()
-	if err := cmd.Wait(); err != nil {
+	err := cmd.Wait()
+	// Even an agent that finished on its own can leave processes behind.
+	for _, end := range tree.Close() {
+		if by.Ended != nil {
+			by.Ended(end)
+		}
+	}
+	// A leftover that held the output open does not turn a finished agent into a failed one.
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState.Success() {
+		err = nil
+	}
+	if err != nil {
 		// A cancelled run is not a blocked one: the output of a killed CLI can mention
 		// quota or login by accident, and Classify must not turn a Stop into a hold.
 		if ctx.Err() != nil {

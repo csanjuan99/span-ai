@@ -41,9 +41,13 @@ func ReadStageAgents(dir string) map[string]string {
 	out := map[string]string{}
 	raw, err := os.ReadFile(filepath.Join(dir, agentsFile))
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("read %s: the policy decides the agents: %v", filepath.Join(dir, agentsFile), err)
+		}
 		return out
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
+		log.Printf("parse %s: the policy decides the agents: %v", filepath.Join(dir, agentsFile), err)
 		return map[string]string{}
 	}
 	clean := make(map[string]string, len(out))
@@ -87,6 +91,17 @@ func SetStageAgent(dir, stage, name string, home string) error {
 	return fsutil.WriteAtomic(filepath.Join(dir, agentsFile), append(raw, '\n'))
 }
 
+// SetRunAgent chooses one CLI for every stage of a run that calls an agent. An empty name
+// or "any" clears the choices.
+func SetRunAgent(dir, name, home string) error {
+	for _, stage := range AgentStages {
+		if err := SetStageAgent(dir, stage, name, home); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ignoreStateRoot makes the state directory ignore itself, the way .git does. Span
 // never commits it, and a workspace whose .gitignore does not name it should not show
 // it as a change either.
@@ -102,7 +117,8 @@ func ignoreStateRoot(root string) error {
 	return nil
 }
 
-// RequestPause asks the run to hold before the next stage starts.
+// RequestPause asks the run to hold. An agent call in flight is stopped at once; any other
+// stage finishes and the run holds before the next one.
 func RequestPause(root, id string) error {
 	if !validID(id) {
 		return os.ErrNotExist

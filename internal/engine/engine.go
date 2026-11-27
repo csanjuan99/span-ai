@@ -666,8 +666,14 @@ func (r *runner) reapOrphan() {
 	if tree == "" {
 		tree = r.opt.Workspace
 	}
-	if tree != "" && proc.Reap(filepath.Join(tree, ".span")) {
+	if tree == "" {
+		return
+	}
+	if ends := proc.Reap(filepath.Join(tree, ".span")); len(ends) > 0 {
 		r.journal("agent.reaped", nil)
+		for _, end := range ends {
+			r.terminated(end)
+		}
 		log.Printf("run %s: ended an agent left running by a Span that was killed", r.cur.ID)
 	}
 }
@@ -879,11 +885,11 @@ func (r *runner) doFrame(ctx context.Context) (string, string, error) {
 		}
 	}
 	in := r.promptInput(frame, prev)
-	call, cancel := r.agentCall(ctx)
+	call, cancel := r.agentCall(ctx, frame)
 	defer cancel()
 	doc, err := r.opt.Agents.Frame(call, target, r.opt.Workspace, prompt.Frame(in))
 	if err != nil {
-		return r.agentBlocked(frame, err)
+		return r.agentBlocked(call, frame, err)
 	}
 	if doc.OutOfScope {
 		return r.record(frame, statement.Stop, "out of scope", nil)
@@ -1036,10 +1042,10 @@ func (r *runner) doBuild(ctx context.Context) (string, string, error) {
 			return "", "", err
 		}
 		in := r.promptInput(build, r.failurePacket())
-		call, cancel := r.agentCall(ctx)
+		call, cancel := r.agentCall(ctx, build)
 		defer cancel()
 		if err := r.opt.Agents.Build(call, target, r.opt.Workspace, prompt.Build(in)); err != nil {
-			return r.agentBlocked(build, err)
+			return r.agentBlocked(call, build, err)
 		}
 		if verdict, reason, asked, err := r.takeDecisionFile(build); asked || err != nil {
 			return verdict, reason, err
@@ -1071,7 +1077,11 @@ func readCapped(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("close %s: %v", path, err)
+		}
+	}()
 	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
@@ -1299,18 +1309,57 @@ func (r *runner) doProve(ctx context.Context) (string, string, error) {
 	})
 }
 
-// agentCall bounds one agent call by limits.stageTimeout. Without a limit the call keeps the
-// run's own context.
-func (r *runner) agentCall(ctx context.Context) (context.Context, context.CancelFunc) {
+// errPaused is why an agent call ends when a person pauses the run.
+var errPaused = errors.New("paused by a person")
+
+// agentCall is the context of one agent call of stage. The processes it starts are recorded
+// and audited for this run, a pause ends them, and limits.stageTimeout bounds the call.
+func (r *runner) agentCall(ctx context.Context, stage string) (context.Context, context.CancelFunc) {
+	ctx = agent.WithSupervisor(ctx, agent.Supervisor{RunDir: r.spanDir(), Stage: stage, Ended: r.terminated})
+	ctx, pause := context.WithCancelCause(ctx)
+	go watchPause(ctx, filepath.Join(r.spanDir(), pauseFile), pause)
+	done := func() { pause(nil) }
 	if limit := r.opt.Policy.StageTimeout(); limit > 0 {
-		return context.WithTimeout(ctx, limit)
+		bounded, cancel := context.WithTimeout(ctx, limit)
+		return bounded, func() { cancel(); done() }
 	}
-	return ctx, func() {}
+	return ctx, done
+}
+
+// watchPause cancels the call when the pause marker appears. The marker is left for the
+// runner to consume once the agent is gone.
+func watchPause(ctx context.Context, path string, pause context.CancelCauseFunc) {
+	tick := time.NewTicker(stopPoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if _, err := os.Stat(path); err == nil {
+				pause(errPaused)
+				return
+			}
+		}
+	}
+}
+
+// paused reports whether a pause ended the call, and consumes the request.
+func (r *runner) paused(call context.Context) bool {
+	if !errors.Is(context.Cause(call), errPaused) {
+		return false
+	}
+	r.takePause()
+	return true
 }
 
 // agentBlocked records an agent that ran out of quota or credentials. The reason
 // names the action a person has to take, because nothing in the project can fix it.
-func (r *runner) agentBlocked(stage string, err error) (string, string, error) {
+func (r *runner) agentBlocked(call context.Context, stage string, err error) (string, string, error) {
+	if r.paused(call) {
+		// Nothing is sealed: the stage did not finish and runs again on resume.
+		return statement.Hold, "paused during " + stage + ": the agent was stopped. Pick the agent for this stage, then resume.", nil
+	}
 	if limit := r.opt.Policy.StageTimeout(); limit > 0 && errors.Is(err, context.DeadlineExceeded) {
 		// Not an account problem and not a failing check: the agent did not finish, so no
 		// repair is spent. A person decides between more time and a smaller story.
@@ -1522,11 +1571,11 @@ func (r *runner) doInspect(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return r.record(inspect, statement.Hold, err.Error(), nil)
 	}
-	call, cancel := r.agentCall(ctx)
+	call, cancel := r.agentCall(ctx, inspect)
 	defer cancel()
 	doc, err := r.opt.Agents.Inspect(call, target, r.opt.Workspace, prompt.Inspect(r.promptInput(inspect, "")))
 	if err != nil {
-		return r.agentBlocked(inspect, err)
+		return r.agentBlocked(call, inspect, err)
 	}
 	if !doc.Blocking {
 		r.cur.InspectFeedback = ""
@@ -1884,6 +1933,15 @@ func (r *runner) record(stage, verdict, reason string, fill func(*statement.Stat
 	r.cur.LastDigest = s.Digest
 	r.noteLesson(stage, stored, reason)
 	return verdict, reason, nil
+}
+
+// terminated records one agent process Span had to end, so a stop can be audited.
+func (r *runner) terminated(end proc.Termination) {
+	r.journal("agent.terminated", terminationDetail(end))
+}
+
+func terminationDetail(end proc.Termination) map[string]string {
+	return map[string]string{"stage": end.Stage, "agent": end.Agent, "pid": strconv.Itoa(end.PID), "signal": end.Signal, "exit": end.Exit}
 }
 
 // journal adds one line to the run's event journal. A journal that cannot be written is

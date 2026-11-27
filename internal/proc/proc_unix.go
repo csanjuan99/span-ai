@@ -4,6 +4,7 @@ package proc
 
 import (
 	"errors"
+	"log"
 	"os"
 	"os/exec"
 	"syscall"
@@ -32,7 +33,7 @@ func terminate(pid int) error {
 	}
 	// A process stopped by SIGTTIN/SIGSTOP (a tool that opens /dev/tty from a background
 	// group) only acts on SIGTERM once it is continued.
-	_ = syscall.Kill(-pid, syscall.SIGCONT)
+	logSignal(-pid, syscall.Kill(-pid, syscall.SIGCONT))
 	deadline := time.Now().Add(Grace)
 	for time.Now().Before(deadline) {
 		time.Sleep(25 * time.Millisecond)
@@ -40,12 +41,22 @@ func terminate(pid int) error {
 			return nil
 		}
 	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	logSignal(-pid, syscall.Kill(-pid, syscall.SIGKILL))
 	return nil
 }
 
-// kill ends the group led by pid at once.
-func kill(pid int) { _ = syscall.Kill(-pid, syscall.SIGKILL) }
+// kill ends the group led by pid at once, and every descendant that left that group.
+func kill(pid int) {
+	rows, err := table()
+	if err != nil {
+		log.Printf("list the processes under %d: %v", pid, err)
+	} else {
+		for member := range members(rows, pid, map[int]string{pid: ""}) {
+			signalPID(member, "SIGKILL")
+		}
+	}
+	logSignal(-pid, syscall.Kill(-pid, syscall.SIGKILL))
+}
 
 // Alive reports whether pid is a process. A permission error still counts: it exists,
 // it is just not ours.
@@ -56,3 +67,5 @@ func Alive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
+
+func processGone(err error) bool { return errors.Is(err, syscall.ESRCH) }

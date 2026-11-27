@@ -18,7 +18,7 @@ export interface RunActions {
 const table: { name: keyof RunActions; command: Omit<RunCommand, "run"> }[] = [
   { name: "resume", command: { id: "resume", title: "Resume the run", hint: "Continue from where it stopped", key: "r" } },
   { name: "note", command: { id: "note", title: "Leave a note", hint: "A stage reads it when it starts", key: "n" } },
-  { name: "pause", command: { id: "pause", title: "Pause after this stage", hint: "The stage that runs finishes first", key: "p" } },
+  { name: "pause", command: { id: "pause", title: "Pause", hint: "Stops the agent; a command stage finishes first", key: "p" } },
   { name: "stop", command: { id: "stop", title: "Stop the run", hint: "Sealed stages and the branch stay", key: "s", shift: true } },
   { name: "rewind", command: { id: "rewind", title: "Restart from a stage…", hint: "The attempt so far stays on disk", key: "w" } },
   { name: "transcript", command: { id: "transcript", title: "Open the agent transcript", hint: "Raw output of the run", key: "t" } },

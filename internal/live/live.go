@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -121,6 +122,21 @@ func (h *Hub) Drain(wait time.Duration) bool {
 	}
 }
 
+// Await waits until id is no longer claimed and reports whether that happened in time. A
+// nil hub claims nothing.
+func (h *Hub) Await(id string, wait time.Duration) bool {
+	deadline := time.Now().Add(wait)
+	for {
+		if _, ok := h.Flight(id); !ok {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // Stop cancels the flight of one run and reports whether something was running.
 func (h *Hub) Stop(id string) bool {
 	if h == nil {
@@ -153,6 +169,8 @@ func (h *Hub) Publish(id string, event engine.Event) {
 	event.Seq = h.seqs[id]
 	raw, err := json.Marshal(event)
 	if err != nil {
+		// The seq stays consumed: the page sees the gap and replays.
+		log.Printf("publish %s frame %d: %v", id, event.Seq, err)
 		return
 	}
 	for ch := range h.subs[id] {

@@ -31,7 +31,7 @@ func TestReapEndsAnAgentItsOwnerLeftBehind(t *testing.T) {
 	cmd, done := start(t)
 	Leave(dir, cmd.Process.Pid, "sleep") // the owner died, so the returned func never ran
 
-	if !Reap(dir) {
+	if len(Reap(dir)) == 0 {
 		t.Fatal("a live orphan was not reaped")
 	}
 	select {
@@ -50,7 +50,7 @@ func TestReapNeverKillsAProcessThatIsNotTheRecordedAgent(t *testing.T) {
 	// The pid was reused by something else: the recorded name is not in its command line.
 	Leave(dir, cmd.Process.Pid, "claude")
 
-	if Reap(dir) {
+	if len(Reap(dir)) != 0 {
 		t.Fatal("reaped a process that is not the agent")
 	}
 	if !Alive(cmd.Process.Pid) {
@@ -65,7 +65,7 @@ func TestReapOfAFinishedAgentOnlyClearsTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	Leave(dir, cmd.Process.Pid, "true")
-	if Reap(dir) {
+	if len(Reap(dir)) != 0 {
 		t.Fatal("nothing was running")
 	}
 	if _, err := os.Stat(filepath.Join(dir, pidFile)); !os.IsNotExist(err) {
@@ -83,7 +83,7 @@ func TestAnAgentThatEndsNormallyLeavesNoPidFile(t *testing.T) {
 }
 
 func TestReapWithoutAFileDoesNothing(t *testing.T) {
-	if Reap(t.TempDir()) {
+	if len(Reap(t.TempDir())) != 0 {
 		t.Fatal("reaped from nothing")
 	}
 }

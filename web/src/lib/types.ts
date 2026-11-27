@@ -283,7 +283,7 @@ export interface Snapshot {
   title?: string
   /** The folder the run writes in. */
   repo?: string
-  /** A pause waits for the next stage boundary: the run still goes on and holds there. */
+  /** A pause was asked for and the run has not held yet. */
   pauseRequested?: boolean
 }
 

@@ -1,3 +1,4 @@
+import { usesAgent } from "@/lib/stage-agents"
 import { stages } from "@/lib/types"
 
 const names: Record<string, string> = {
@@ -26,6 +27,16 @@ function cap(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+/** A pause stops an agent in flight; any other stage finishes before the run holds. */
+function pauseOf(stage: string, following: string | undefined): string {
+  if (usesAgent(stage)) {
+    return `Pausing stops the agent. The run holds at ${stage}, which runs again on resume.`
+  }
+  return following === undefined
+    ? ""
+    : `The run holds after ${stage} seals and before ${following} starts. Nothing is lost.`
+}
+
 /**
  * Reads the running card from what the page already knows. It states only what the engine
  * guarantees: the order of the stages. Which stage asks for an approval depends on the run's
@@ -52,9 +63,6 @@ export function runningOf(input: {
         ? `${cap(input.stage)} seals and the run is done.`
         : `${cap(input.stage)} seals, then ${following} runs on its own.`,
     where: [folder, input.branch].filter((part) => part !== "").join(" · "),
-    pause:
-      following === undefined
-        ? ""
-        : `The run holds after ${input.stage} seals and before ${following} starts. Nothing is lost.`,
+    pause: pauseOf(input.stage, following),
   }
 }

@@ -1215,8 +1215,9 @@ loop fails, and the run comes back **held** with `the run stopped: …` — neve
 page always has something to offer. The working tree may be left mid-edit, which is why the
 next resume runs that stage again from its start.
 
-`Stop now` and **Pause after this stage** are different on purpose: pause waits for a clean
-stage boundary and loses nothing; stop is immediate and assumes the stage will be repeated.
+`Stop now` and **Pause** are different on purpose. Pause stops an agent call in flight (frame,
+build, inspect or a conflict proposal) and holds there; any other stage finishes first and the run
+holds before the next one. Stop cancels whatever is in flight, agent or command.
 `POST /spans/{id}/stop` backs the control and answers `nothing is running this span` when
 there is no flight. `./span stop <run>` does the same from a terminal, and from any machine
 that can reach the run's folder: see "Stop from the CLI" below.
@@ -1558,7 +1559,7 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | QA tab: cases and the gate | `GET /spans/<id>/acceptance` | `./span runs acceptance <run> [--json]` |
 | Audit trail and its chain check (`1` when the chain is broken) | `GET /spans/<id>/events` | `./span runs events <run> [--json]` |
 | "Open full log" | `GET /spans/<id>/log?path=` | `./span log <run> <path> [--json]` |
-| Pause after the stage in flight | `POST /spans/<id>/pause` | `./span pause <run>` |
+| Pause: stop the agent in flight, or hold at the next stage | `POST /spans/<id>/pause` | `./span pause <run>` |
 | Stop now: cancel the stage in flight | `POST /spans/<id>/stop` | `./span stop <run> [--json]` |
 | Restart from a stage, with a note | `POST /spans/<id>/rewind` | `./span rewind <run> <stage> [--note "..."] [--no-resume]` |
 | Leave a note for a stage | `POST /spans/<id>/instructions/<stage>` | `./span note <run> <stage> --text "..." \| --file path` |
@@ -1566,7 +1567,8 @@ Every action of the run page is a route of `./span serve` and a `./span` verb th
 | Approve a stage that holds | `POST /spans/<id>/approve` | `./span approve <run> <stage> [--environment name] [--no-resume]` |
 | Answer the questions of a waiting run | `POST /spans/<id>/answer` | `./span answer <run> --answer "question=text"... \| --file answers.json` |
 | Read the Jira story again (a run that waits) | `POST /spans/<id>/story` | `./span story <run> [--json]` |
-| Continue a paused run, or a relaunch | `POST /spans/<id>/resume`, `/relaunch` | `./span resume <run>` |
+| Continue a paused run | `POST /spans/<id>/resume` | `./span resume <run>` |
+| Relaunch: stop the run and start its stage again, with an agent for every stage | `POST /spans/<id>/relaunch` (`agent=`) | `./span relaunch <run> [--agent name\|any] [--no-resume]` |
 | Delete a run | `POST /spans/<id>/delete` | `./span delete <run> --yes` |
 | Decision panel | `GET /spans/<id>`, `POST /spans/<id>/decide` | `./span decision show\|choose` |
 | Conflict panel | `GET /spans/<id>`, `POST /spans/<id>/conflict/*` | `./span conflict show\|choose\|hint\|abort` |
@@ -1583,8 +1585,13 @@ The log of a command. A statement stores the path of each command's log (`iter/1
 
 The route and the verb answer alike. When nothing drives the run (nobody holds its lock) there is no stage to cancel: the route answers `{"stopped": false, "reason": "nothing is running this span"}` and the verb prints `done: false` with `nothing is running this run`, both exit 0, and neither leaves a marker. A marker left from before a flight started is discarded when the flight starts, so an old request never cancels a later resume. Exit codes: 0 asked or nothing running, 1 error, 2 usage, 3 the run is finished (refused), 4 no such run. `--json` prints `{id, action: "stop", done, reason}`.
 
-`./span pause` writes the pause request the running process reads at its next stage boundary, so it also reaches a run driven by `serve`. The route answers `paused: false` for a run nothing is running; the verb cannot see another process's workers, so it only refuses a finished run, and a request made while nothing runs waits until the next resume discards it.
+`./span pause` writes the pause request the process driving the run reads, so it also reaches a run driven by `serve`. An agent in flight is stopped within about 300 ms and the stage runs again on resume; any other stage finishes and the run holds before the next one. The route answers `paused: false` for a run nothing is running; the verb only refuses a finished run, and a request made while nothing runs waits until the next resume discards it.
 
+`rewind` and `relaunch` stop a run that is being driven before they change it, and wait until it is gone. `relaunch --agent` is used by frame, build and inspect; `stage-agent` changes one stage and says which ones keep the default.
+
+#### Agent processes
+
+Every agent runs in its own process group. Whatever ends the call (stop, pause, rewind, relaunch, a stage timeout, or the agent finishing on its own) sends SIGTERM to the agent and every process it started, waits 5 s, then sends SIGKILL. The run lock is released after that. Each process ended this way is a line `agent.terminated` in the run's `events.jsonl`, with `stage`, `agent`, `pid`, `signal` and `exit`. The tree is recorded in the run's folder while it runs: if Span is killed, `span serve` ends what is left when it starts, and so do `span stop` and the next run of the same checkout. On Windows only the process Span started is ended.
 
 ## The Implementation tab from a terminal
 

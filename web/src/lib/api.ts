@@ -931,7 +931,7 @@ export interface PauseAnswer {
   reason: string
 }
 
-/** Ask the run to hold before the next stage starts. Answers whether it will, and why. */
+/** Ask the run to hold: an agent in flight stops, any other stage finishes first. Answers whether it will, and why. */
 export async function pauseRun(id: string): Promise<PauseAnswer> {
   const body = await postForm(
     `/spans/${encodeURIComponent(id)}/pause`,

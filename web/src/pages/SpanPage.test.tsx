@@ -88,8 +88,8 @@ function held(over: Partial<Cursor>, statements: Statement[] = []): SpanState {
   }
 }
 
-function page() {
-  render(
+function tree() {
+  return (
     <MemoryRouter initialEntries={["/spans/span-1"]}>
       <Routes>
         <Route path="/spans/:id" element={<SpanPage />} />
@@ -97,6 +97,13 @@ function page() {
     </MemoryRouter>
   )
 }
+
+function page() {
+  render(tree())
+}
+
+const patch =
+  "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
 
 beforeEach(() => {
   approveStage.mockReset()
@@ -228,13 +235,13 @@ describe("the side of the page", () => {
     state = held({ hold: false, reason: "" })
     page()
     expect(
-      screen.getByRole("button", { name: "Pause after this stage" })
+      screen.getByRole("button", { name: "Pause" })
     ).toBeTruthy()
     cleanup()
     state = held({})
     page()
     expect(
-      screen.queryByRole("button", { name: "Pause after this stage" })
+      screen.queryByRole("button", { name: "Pause" })
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Stop now" })).toBeNull()
   })
@@ -249,9 +256,6 @@ describe("the side of the page", () => {
 })
 
 describe("the proof at the top of the page", () => {
-  const patch =
-    "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
-
   it("shows the proof once the diff is known", () => {
     state = {
       ...held({ stage: "prove" }),
@@ -343,12 +347,12 @@ describe("the card while the run goes on by itself", () => {
     state = working()
     page()
     expect(
-      screen.getAllByRole("button", { name: "Pause after this stage" })
+      screen.getAllByRole("button", { name: "Pause" })
     ).toHaveLength(1)
     expect(
       screen.getByRole("region", { name: "Running" }).querySelector("button")
         ?.textContent
-    ).toBe("Pause after this stage")
+    ).toBe("Pause")
     expect(screen.getByRole("button", { name: "Stop now" })).toBeTruthy()
     expect(
       screen.getByText(
@@ -367,9 +371,9 @@ describe("the card while the run goes on by itself", () => {
     const spent = within(card).getByRole("button", { name: "Pause requested" })
     expect(spent.hasAttribute("disabled")).toBe(true)
     expect(
-      within(card).queryByRole("button", { name: "Pause after this stage" })
+      within(card).queryByRole("button", { name: "Pause" })
     ).toBeNull()
-    expect(card.textContent).toContain("The run holds after build seals")
+    expect(card.textContent).toContain("Pausing stops the agent. The run holds at build")
   })
 
   it("marks the pause pending as soon as the server accepts it", async () => {
@@ -380,7 +384,7 @@ describe("the card while the run goes on by itself", () => {
     state = working()
     page()
     fireEvent.click(
-      screen.getByRole("button", { name: "Pause after this stage" })
+      screen.getByRole("button", { name: "Pause" })
     )
     expect(
       await screen.findByRole("button", { name: "Pause requested" })
@@ -395,7 +399,7 @@ describe("the card while the run goes on by itself", () => {
     state = working()
     page()
     fireEvent.click(
-      screen.getByRole("button", { name: "Pause after this stage" })
+      screen.getByRole("button", { name: "Pause" })
     )
     await waitFor(() => expect(pauseRun).toHaveBeenCalled())
     expect(
@@ -592,8 +596,6 @@ describe("a note and a resume in one click", () => {
 })
 
 describe("what a finished run shows on the page", () => {
-  const patch =
-    "diff --git a/pay.go b/pay.go\n--- a/pay.go\n+++ b/pay.go\n@@ -1 +1,2 @@\n a\n+b\n"
   const diff = { stat: " pay.go | 1 +\n", patch, truncated: false, commits: 1 }
 
   it("lists the files changed once the run is done", () => {
@@ -708,21 +710,9 @@ describe("a run that cannot be shown yet", () => {
 
   it("says it is reconnecting once the connection has dropped, and keeps the page", () => {
     state = held({})
-    const view = render(
-      <MemoryRouter initialEntries={["/spans/span-1"]}>
-        <Routes>
-          <Route path="/spans/:id" element={<SpanPage />} />
-        </Routes>
-      </MemoryRouter>
-    )
+    const view = render(tree())
     state = { ...held({}), connected: false }
-    view.rerender(
-      <MemoryRouter initialEntries={["/spans/span-1"]}>
-        <Routes>
-          <Route path="/spans/:id" element={<SpanPage />} />
-        </Routes>
-      </MemoryRouter>
-    )
+    view.rerender(tree())
     expect(screen.getByText(/Reconnecting to Span/)).toBeTruthy()
   })
 })

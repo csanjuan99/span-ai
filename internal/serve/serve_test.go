@@ -12,11 +12,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"span/internal/decision"
 	"span/internal/engine"
 	"span/internal/live"
 	"span/internal/overlay"
+	"span/internal/proc"
 	"span/internal/setup"
 )
 
@@ -277,6 +279,10 @@ func TestRelaunchStartsARunThatLostItsAgent(t *testing.T) {
 }
 
 func TestRelaunchRefusesALiveStoppedOrWaitingRun(t *testing.T) {
+	// span-1 is claimed by a flight that never ends, so it cannot be stopped for a relaunch.
+	wait := engine.HaltWait
+	engine.HaltWait = -proc.Grace + 200*time.Millisecond
+	t.Cleanup(func() { engine.HaltWait = wait })
 	root := t.TempDir()
 	hub := live.New()
 	if !hub.Claim("span-1", "frame") {

@@ -5,6 +5,7 @@
 package proc
 
 import (
+	"log"
 	"os/exec"
 	"sync"
 	"time"
@@ -69,4 +70,12 @@ func Run(cmd *exec.Cmd) error {
 	untrack := Track(cmd.Process.Pid)
 	defer untrack()
 	return cmd.Wait()
+}
+
+// logSignal reports a signal that could not be sent. A process that already ended is the
+// expected case and says nothing; anything else, such as a permission refusal, is logged.
+func logSignal(pid int, err error) {
+	if err != nil && !processGone(err) {
+		log.Printf("signal process %d: %v", pid, err)
+	}
 }
