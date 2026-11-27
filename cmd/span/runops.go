@@ -460,7 +460,7 @@ func reportContinued(out, errw io.Writer, asJSON bool, id, action string, res en
 }
 
 // readStory reads the story the run came from out of Jira again, with the login saved for the
-// run's folder. A variable so a test can run the verb without a Jira site.
+// run's project. A variable so a test can run the verb without a Jira site.
 var readStory = func(ctx context.Context, spans, id string) (string, error) {
 	snap, err := engine.Load(spans, id)
 	if err != nil {
@@ -474,7 +474,7 @@ var readStory = func(ctx context.Context, spans, id string) (string, error) {
 		}
 		key = engine.IssueKey(string(raw))
 	}
-	account, err := jira.Load(snap.Cursor.Workspace)
+	account, err := jira.Load(snap.Cursor.Home())
 	if err != nil {
 		return "", err
 	}
