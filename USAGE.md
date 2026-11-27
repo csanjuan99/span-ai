@@ -1061,10 +1061,12 @@ that wrote the change.
 Only frame, build, and inspect call a model. prove, qa, open, merge, and promote run
 commands, so they cannot carry a choice and a request for them is refused.
 
-**Pause** asks the run to hold. An agent call in flight (frame, build, inspect or a conflict
-proposal) is stopped: the run holds at that stage with `paused during <stage>` and the stage
-runs again on resume. Any other stage finishes first and the run holds with `paused before
-<stage>`. Either way the request is consumed, so the order is: pause, pick the agent, resume.
+**Pause** asks the run to hold. A frame, build or inspect agent call in flight is stopped: the
+run holds at that stage with `paused during <stage>` and the stage runs again on resume. A
+conflict proposal in flight is stopped too, but the conflict then offers its mechanical options
+with `the agent was paused`; `span conflict hint` asks the agent again. Any other stage
+finishes first and the run holds with `paused before <stage>`. Either way the request is
+consumed, so the order is: pause, pick the agent, resume.
 
 The page and the runner are different processes, and `cursor.json` belongs to the runner:
 a cursor written by the page is erased by the runner's next save. That is why both

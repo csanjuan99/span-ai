@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"span/internal/fsutil"
 )
 
 // pidFile is where a running agent is written down: inside the state folder of the tree it
@@ -31,7 +33,8 @@ type member struct {
 
 // writeNote records the agent in dir. It never creates the folder, since the state folder
 // of a tree is what keeps the note out of git. A failure is not an error for the run, the
-// note is only a safety net.
+// note is only a safety net. The file is replaced whole: a kill in the middle of a write
+// must leave the previous record, since Reap drops one it cannot read.
 func writeNote(dir string, left note) {
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return
@@ -41,7 +44,7 @@ func writeNote(dir string, left note) {
 		log.Printf("encode the record of agent %d: %v", left.PID, err)
 		return
 	}
-	if err := os.WriteFile(filepath.Join(dir, pidFile), raw, 0o644); err != nil {
+	if err := fsutil.WriteAtomicMode(filepath.Join(dir, pidFile), raw, 0o644); err != nil {
 		log.Printf("record agent %d in %s: %v", left.PID, dir, err)
 	}
 }
