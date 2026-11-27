@@ -23,10 +23,10 @@ Consumer: web desk and CLI/script users. Auth: unchanged. New optional input onl
 ## Tasks
 
 - T1 S1-S5, S8 (launch) · inline · done (d16151b) · RED: build failed on placement_test; GREEN: go vet + go test ./... pass
-- T2 S6 · inline · done · RED/GREEN checkout_test
-- T3 S7, S8 (delete) · inline · done · delete_test
+- T2 S6 · inline · done · RED/GREEN checkout_test · f98ce44
+- T3 S7, S8 (delete) · inline · done · delete_test · f98ce44
 - T4 independent verification · delegated (high risk items 3, 4) · done: S1-S8 after two corrections; B1 rechecked with 520 races
-- T5 S9 · inline · done · RED/GREEN autoprepare_test, localfiles_test, delete_test; verified (five defects fixed and rechecked)
+- T5 S9 · inline · done · RED/GREEN autoprepare_test, localfiles_test, delete_test; verified (five defects fixed and rechecked) · f98ce44
 
 ## Log
 
@@ -38,3 +38,4 @@ L5. Recheck: B2-B4 and R1-R3 pass; B1 still failed (the losing launch removed th
 L6. B1 recheck passed. go vet and go test ./... pass.
 L7. 2026-11-26 user: "Arregla esta deuda ahora." and "Importante que la funcionalidad de worktree funcione sin mi. Es decir por que tengo que configurar algun prove.prepare y no se hace solo todo lo necesario?" -> S9: a new worktree prepares itself (detected installs, ignored .env copied); delete discards what is rebuildable.
 L8. Verification of S9 found: committable .env, write through symlinked folder, write-back through symlinked .env, commits lost on delete with detached HEAD, half-installed tree trusted on resume. All fixed; recheck passed.
+L9. 2026-11-26 user approved ("Si hazla", "Si") further debt rounds. Committed f98ce44 (S5-S7, S9) and 32d21dc (Jira login and repository name read from the project, found by the pre-commit review). go vet and go test ./... pass. Not pushed. Fixes made after the S9 recheck are covered by tests only.
