@@ -35,6 +35,8 @@ func Delete(root, id string) error {
 		}
 		return err
 	}
+	// The folder holds the only record of an agent a killed driver left behind.
+	reapHeld(dir, id)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		held.Release()

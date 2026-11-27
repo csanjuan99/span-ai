@@ -10,6 +10,28 @@ import (
 
 type spanKey struct{}
 
+type supervisorKey struct{}
+
+// Supervisor is the run an agent process answers to.
+type Supervisor struct {
+	// RunDir is where the process tree is recorded while it runs.
+	RunDir string
+	// Stage is the stage that asked for the agent.
+	Stage string
+	// Ended is told about every process of the tree that had to be signalled.
+	Ended func(proc.Termination)
+}
+
+// WithSupervisor marks ctx so the agent it runs is recorded and audited for that run.
+func WithSupervisor(ctx context.Context, by Supervisor) context.Context {
+	return context.WithValue(ctx, supervisorKey{}, by)
+}
+
+func supervisor(ctx context.Context) Supervisor {
+	by, _ := ctx.Value(supervisorKey{}).(Supervisor)
+	return by
+}
+
 // Proc is one CLI agent process tied to a span.
 type Proc struct {
 	Name  string

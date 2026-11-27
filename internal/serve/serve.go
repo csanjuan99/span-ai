@@ -310,6 +310,10 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "the stop was requested; the process driving this span cancels the stage in flight"})
 			return
 		}
+		if engine.ReapRun(root, id) > 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"stopped": true, "reason": "nothing was driving this span; the agent processes it left behind were ended"})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"stopped": false, "reason": "nothing is running this span"})
 	})
 	mux.HandleFunc("POST /spans/{id}/delete", func(w http.ResponseWriter, r *http.Request) {
@@ -339,9 +343,13 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, errors.New("invalid span or stage"))
 			return
 		}
-		if hub != nil {
-			if _, running := hub.Flight(id); running {
-				writeErr(w, errors.New("this span is running; stop it before restarting from a stage"))
+		if err := engine.CanRewind(root, id, stage); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if _, flying := hub.Flight(id); flying {
+			if err := haltFlight(hub, root, id); err != nil {
+				writeErr(w, err)
 				return
 			}
 		}
@@ -365,7 +373,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 	mux.HandleFunc("POST /spans/{id}/pause", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if hub != nil {
-			if _, running := hub.Flight(id); !running {
+			if !driven(hub, root, id) {
 				// A pause is consumed at a stage boundary. With nothing in flight there is
 				// no boundary coming, and the file would wait until a resume discarded it.
 				writeJSON(w, http.StatusOK, map[string]any{
@@ -379,7 +387,7 @@ func New(root, token string, launch Launch, wake Wake, hub *live.Hub, pages fs.F
 			writeErr(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"paused": true, "reason": "the run holds before the next stage"})
+		writeJSON(w, http.StatusOK, map[string]any{"paused": true, "reason": engine.PauseReason})
 	})
 	mux.HandleFunc("POST /spans/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
 		continueRun(wake, root, r.PathValue("id"), w, r, false, true)
@@ -632,34 +640,66 @@ func approveStage(wake Wake, root, id string, w http.ResponseWriter, r *http.Req
 	writeAccepted(w, id, r.PostForm.Get("stage"))
 }
 
+// relaunch stops whatever is driving the run, with its agent's whole tree, and starts the
+// stage again. An agent named in the request is used by every stage that calls one.
 func relaunch(wake Wake, hub *live.Hub, root, id string, w http.ResponseWriter, r *http.Request) {
 	snap, ok := wakeableRun(w, r, wake, root, id)
 	if !ok {
 		return
 	}
-	if snap.Cursor.Stop || snap.Cursor.Done {
-		writeConflict(w, "this run will not continue")
+	// An agent a killed driver left behind ends first; a driven run is left alone here.
+	engine.ReapRun(root, id)
+	running := driven(hub, root, id)
+	if err := engine.Relaunchable(snap.Cursor, running); err != nil {
+		writeConflict(w, err.Error())
 		return
 	}
-	if engine.Waiting(snap.Cursor) {
-		writeConflict(w, "this run is waiting for an answer")
-		return
+	// A flight of this server frees its own slot when it stops. Any other run needs room
+	// before it is stopped, or the refusal would leave it dead.
+	if _, flying := hub.Flight(id); !flying {
+		if err := hub.Room(); err != nil {
+			writeBusy(w, err)
+			return
+		}
 	}
-	// An agent that cannot run is a hold, and the board's Relaunch starts that stage again.
-	// Every other hold stays paused until Resume, so a waiting answer is not skipped.
-	if snap.Cursor.Hold && snap.Cursor.AgentBlock == nil {
-		writeConflict(w, "this run is paused")
-		return
+	if name := r.PostFormValue("agent"); name != "" {
+		if err := engine.SetRunAgent(filepath.Join(root, id), name, agent.Home()); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
-	if _, ok := hub.Flight(id); ok {
-		writeConflict(w, "an agent is already running")
-		return
+	if running {
+		if err := haltFlight(hub, root, id); err != nil {
+			writeConflict(w, err.Error())
+			return
+		}
 	}
 	if err := wake(r.Context(), id, Signal{Resume: true}); err != nil {
 		writeBusy(w, err)
 		return
 	}
 	writeAccepted(w, id, snap.Cursor.Stage)
+}
+
+// haltFlight stops the run and waits for this server to give up its claim on it too.
+func haltFlight(hub *live.Hub, root, id string) error {
+	hub.Stop(id)
+	if err := engine.Halt(root, id); err != nil {
+		return err
+	}
+	if !hub.Await(id, engine.HaltLimit()) {
+		return errors.New("this span did not stop")
+	}
+	return nil
+}
+
+// driven reports whether this server or another process is running the span now.
+func driven(hub *live.Hub, root, id string) bool {
+	if _, flying := hub.Flight(id); flying {
+		return true
+	}
+	_, busy := engine.RunBusy(root, id)
+	return busy
 }
 
 // jiraClient is the client for the account saved in the folder the request names; it answers

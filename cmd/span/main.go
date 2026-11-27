@@ -78,6 +78,8 @@ func main() {
 		os.Exit(stopCmd(os.Args[2:]))
 	case "rewind":
 		os.Exit(rewindCmd(os.Args[2:]))
+	case "relaunch":
+		os.Exit(relaunchCmd(os.Args[2:]))
 	case "note":
 		os.Exit(noteCmd(os.Args[2:]))
 	case "stage-agent":
@@ -279,6 +281,8 @@ func serveCmd(args []string) int {
 	// through the terminal. Cancel every flight first so each one ends its own tree.
 	ctx, stop := interruptContext()
 	defer stop()
+	// No agent of a run nobody drives survives a restart of the server.
+	engine.ReapRuns(*spans)
 	go func() {
 		<-ctx.Done()
 		hub.StopAll()
@@ -1019,6 +1023,7 @@ const usageText = `./span repos [--path .]
 ./span start precheck|branches|what-will-happen|sealed|run-key|health [--workspace .] [--story ...] [--issue ...] [--kind ...] [--base ...] [--repo NAME]... [--shape id] [--in-place] [--json]
 ./span quickstart [--workspace .] [--repo name] [--file path] [--story "..."] [--story-file story.md] [--kind feat|fix|hotfix] [--issue AET-1234] [--base branch] [--in-place]
 ./span run --brief brief.md [--workspace .] [--branch name] [--base branch] [--worktree|--in-place]
+./span relaunch <run> [--agent name] [--no-resume] [--json]
 ./span resume <id> [--workspace .]
 ./span serve [--addr 127.0.0.1:8787] [--spans .span/runs] [--max-parallel N]`
 

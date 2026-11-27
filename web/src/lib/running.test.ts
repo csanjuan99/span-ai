@@ -9,7 +9,13 @@ describe("runningOf", () => {
     const running = runningOf(base)
     expect(running.title).toBe("Claude Code is working in build.")
     expect(running.next).toBe("Build seals, then prove runs on its own.")
-    expect(running.pause).toBe("The run holds after build seals and before prove starts. Nothing is lost.")
+    expect(running.pause).toBe("Pausing stops the agent. The run holds at build, which runs again on resume.")
+  })
+
+  it("says a stage without an agent finishes before the run holds", () => {
+    expect(runningOf({ ...base, stage: "prove" }).pause).toBe(
+      "The run holds after prove seals and before qa starts. Nothing is lost."
+    )
   })
 
   it("says where the run is: the folder name and the branch", () => {

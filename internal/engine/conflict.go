@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -543,7 +544,10 @@ func (r *runner) askAgent(ctx context.Context, src Integrator, plan *conflictPla
 			return nil, nil, "the checkout could not be read before asking the agent (" + err.Error() + "); these are the mechanical options", nil
 		}
 		r.logLine(fmt.Sprintf("merge: asking %s for options on %d conflicted files", target, len(plan.Files)))
-		reply, err := proposer.Propose(ctx, target, r.opt.Workspace, prompt.Conflict(r.promptInput(build, ""), input))
+		call, cancel := r.agentCall(ctx, merge)
+		reply, err := proposer.Propose(call, target, r.opt.Workspace, prompt.Conflict(r.promptInput(build, ""), input))
+		paused := r.paused(call)
+		cancel()
 		restored, restoreErr := src.Restore(ctx, before, nil)
 		var tampered *TamperedError
 		if errors.As(restoreErr, &tampered) {
@@ -551,6 +555,9 @@ func (r *runner) askAgent(ctx context.Context, src Integrator, plan *conflictPla
 		}
 		if restoreErr != nil {
 			return nil, nil, "", fmt.Errorf("what the agent changed in the checkout could not be put back (%s); abort the conflict", restoreErr.Error())
+		}
+		if paused {
+			return nil, nil, "the agent was paused; these are the mechanical options", nil
 		}
 		stray = append(stray, restored.Paths...)
 		ignored = append(ignored, restored.Ignored...)
@@ -1086,7 +1093,11 @@ func (r *runner) abortConflict(ctx context.Context, src Integrator) (string, str
 	if err := src.Abort(ctx); err != nil {
 		return r.failConflict("git merge --abort failed: " + err.Error())
 	}
-	if head, err := r.opt.Source.Head(ctx); err == nil && r.cur.GitSHA != "" && head != r.cur.GitSHA {
+	head, err := r.opt.Source.Head(ctx)
+	if err != nil {
+		return r.failConflict("the merge was aborted but HEAD could not be read, so the branch is not verified: " + err.Error())
+	}
+	if r.cur.GitSHA != "" && head != r.cur.GitSHA {
 		return r.failConflict("the merge was aborted but HEAD is " + short(head) + ", not the branch head " + short(r.cur.GitSHA) + " the conflict started from")
 	}
 	r.cur.Conflict = nil
@@ -1100,9 +1111,11 @@ func (r *runner) abortConflict(ctx context.Context, src Integrator) (string, str
 func (r *runner) mergeMessage(base, suffix string) string {
 	branch := r.cur.Branch
 	if branch == "" {
-		if name, err := r.opt.Source.Branch(context.Background()); err == nil {
-			branch = name
+		name, err := r.opt.Source.Branch(context.Background())
+		if err != nil {
+			log.Printf("run %s: the merge message goes without the branch name: %v", r.cur.ID, err)
 		}
+		branch = name
 	}
 	message := "merge: bring " + base + " into " + branch
 	if suffix != "" {
@@ -1177,6 +1190,9 @@ func (r *runner) takeSide(name string) []byte {
 	path := filepath.Join(r.spanDir(), name)
 	raw, err := os.ReadFile(path)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("run %s: read %s: %v", r.cur.ID, name, err)
+		}
 		return nil
 	}
 	r.drop(path)

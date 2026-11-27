@@ -27,6 +27,7 @@ const runopsUsage = `usage: ./span runs list|show|implementation|feature|accepta
        ./span pause <run> [--json]
        ./span stop <run> [--json]
        ./span rewind <run> <stage> [--note "..."] [--no-resume] [--json]
+       ./span relaunch <run> [--agent name|any] [--no-resume] [--json]
        ./span note <run> <stage> --text "..." | --file path [--json]
        ./span stage-agent <run> <stage> <agent|any> [--json]
        ./span approve <run> <stage> [--environment name] [--no-resume] [--json]
@@ -40,6 +41,7 @@ func logCmd(args []string) int        { return logMain(args, os.Stdout, os.Stder
 func pauseCmd(args []string) int      { return pauseMain(args, os.Stdout, os.Stderr) }
 func stopCmd(args []string) int       { return stopMain(args, os.Stdout, os.Stderr) }
 func rewindCmd(args []string) int     { return rewindMain(args, os.Stdout, os.Stderr) }
+func relaunchCmd(args []string) int   { return relaunchMain(args, os.Stdout, os.Stderr) }
 func noteCmd(args []string) int       { return noteMain(args, os.Stdout, os.Stderr) }
 func stageAgentCmd(args []string) int { return stageAgentMain(args, os.Stdout, os.Stderr) }
 func approveCmd(args []string) int    { return approveMain(args, os.Stdout, os.Stderr) }
@@ -274,7 +276,7 @@ func pauseMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	return report(out, errw, v, result{ID: id, Action: "pause", Done: true, Reason: "the run holds before the next stage"})
+	return report(out, errw, v, result{ID: id, Action: "pause", Done: true, Reason: engine.PauseReason})
 }
 
 // stopMain asks the process driving the run to cancel the stage in flight, as the page's
@@ -303,6 +305,9 @@ func stopMain(args []string, out, errw io.Writer) int {
 		return 3
 	}
 	if _, driven := engine.RunBusy(v.spans, id); !driven {
+		if engine.ReapRun(v.spans, id) > 0 {
+			return report(out, errw, v, result{ID: id, Action: "stop", Done: true, Reason: "nothing was driving this run; the agent processes it left behind were ended"})
+		}
 		return report(out, errw, v, result{ID: id, Action: "stop", Done: false, Reason: "nothing is running this run"})
 	}
 	if err := engine.RequestStop(v.spans, id); err != nil {
@@ -336,6 +341,56 @@ func rewindMain(args []string, out, errw io.Writer) int {
 		return 1
 	}
 	return answered(out, errw, v, id, "rewind to "+stage, nil)
+}
+
+// relaunchMain stops whatever drives the run, with its agent's whole tree, and starts its
+// stage again, as the page's Relaunch does. --agent is used by every stage that calls one.
+func relaunchMain(args []string, out, errw io.Writer) int {
+	fs, v := verbSet("relaunch", errw, true)
+	name := fs.String("agent", "", "the CLI for "+strings.Join(engine.AgentStages, ", ")+`; "any" clears the choices`)
+	pos, ok := parseVerb(fs, args)
+	if !ok || len(pos) != 1 {
+		return usageError(errw)
+	}
+	id := pos[0]
+	snap, found := loadRun(errw, v, id)
+	if !found {
+		return 1
+	}
+	engine.ReapRun(v.spans, id)
+	_, driven := engine.RunBusy(v.spans, id)
+	if err := engine.Relaunchable(snap.Cursor, driven); err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	if *name != "" {
+		if err := engine.SetRunAgent(filepath.Join(v.spans, id), *name, agent.Home()); err != nil {
+			fmt.Fprintln(errw, err)
+			return 1
+		}
+	}
+	if err := engine.Halt(v.spans, id); err != nil {
+		fmt.Fprintln(errw, err)
+		return 1
+	}
+	engine.ReapRun(v.spans, id)
+	return answered(out, errw, v, id, "relaunch", nil)
+}
+
+// stageAgentReason says what the choice leaves alone, so nobody reads one stage's choice as
+// the whole run's.
+func stageAgentReason(dir, name string) string {
+	choices := engine.ReadStageAgents(dir)
+	var keep []string
+	for _, stage := range engine.AgentStages {
+		if choices[stage] == "" {
+			keep = append(keep, stage)
+		}
+	}
+	if len(keep) == 0 {
+		return name
+	}
+	return name + "; " + strings.Join(keep, ", ") + " keep the default (relaunch --agent chooses for every stage)"
 }
 
 // noteMain leaves an instruction for a stage, the page's "Leave a note for <stage>". A note is
@@ -384,7 +439,7 @@ func stageAgentMain(args []string, out, errw io.Writer) int {
 		fmt.Fprintln(errw, err)
 		return 1
 	}
-	return report(out, errw, v, result{ID: id, Action: "agent for " + stage, Done: true, Reason: name})
+	return report(out, errw, v, result{ID: id, Action: "agent for " + stage, Done: true, Reason: stageAgentReason(filepath.Join(v.spans, id), name)})
 }
 
 // approveMain releases a stage that waits for a yes, as the page's Approve does, then lets the

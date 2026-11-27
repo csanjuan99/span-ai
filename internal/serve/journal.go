@@ -19,7 +19,7 @@ var control = regexp.MustCompile(`^/spans/([^/]+)/(answer|decide|story|agent|sto
 
 // keptFields are the form fields whose value is short and fixed in meaning. Anything else a
 // person typed (a note, an answer, an instruction) is journaled as its length only.
-var keptFields = map[string]bool{"stage": true, "environment": true, "cli": true, "model": true, "group": true, "option": true}
+var keptFields = map[string]bool{"stage": true, "environment": true, "cli": true, "agent": true, "model": true, "group": true, "option": true}
 
 // statusWriter remembers the status the handler answered with.
 type statusWriter struct {

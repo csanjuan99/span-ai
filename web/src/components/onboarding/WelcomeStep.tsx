@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils"
 const safe = [
   "Every run works on its own branch. Your main branch changes only at merge.",
   "Each stage ends with advance, hold or stop. Span never skips a hold.",
-  "You can pause after a stage, rewind, or stop now at any time.",
+  "You can pause, rewind, or stop now at any time.",
 ]
 
 // The example row: a run that has framed the work and is now building.

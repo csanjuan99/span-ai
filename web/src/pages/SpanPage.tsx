@@ -1039,7 +1039,7 @@ export function SpanPage() {
                         className={cn(wideButton, quietButton)}
                         onClick={() => void pause()}
                       >
-                        Pause after this stage
+                        Pause
                       </Button>
                     ) : null}
                     <Button

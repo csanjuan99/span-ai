@@ -3,6 +3,8 @@
 package proc
 
 import (
+	"errors"
+	"log"
 	"os"
 	"os/exec"
 	"syscall"
@@ -17,9 +19,12 @@ func Tame(cmd *exec.Cmd) {
 
 // kill ends the process; Windows has no group to signal.
 func kill(pid int) {
-	if p, err := os.FindProcess(pid); err == nil {
-		_ = p.Kill()
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		log.Printf("find process %d: %v", pid, err)
+		return
 	}
+	logSignal(pid, p.Kill())
 }
 
 // Alive reports whether pid is a running process: a handle that opens and whose exit code
@@ -34,10 +39,16 @@ func Alive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	defer syscall.CloseHandle(handle)
+	defer func() {
+		if err := syscall.CloseHandle(handle); err != nil {
+			log.Printf("close the handle of process %d: %v", pid, err)
+		}
+	}()
 	var code uint32
 	if err := syscall.GetExitCodeProcess(handle, &code); err != nil {
 		return false
 	}
 	return code == stillActive
 }
+
+func processGone(err error) bool { return errors.Is(err, os.ErrProcessDone) }

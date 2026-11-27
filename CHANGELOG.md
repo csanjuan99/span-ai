@@ -6,6 +6,10 @@ earlier work is recorded only in `odd/tasks/`, one document per feature:
 
 ## Unreleased
 
+- **Fixed**: stopping, pausing, rewinding or relaunching a run ends every agent process it started, including children that ignore SIGTERM or outlive the agent. Each one is journaled as `agent.terminated`, and `span serve` ends what a killed Span left behind when it starts.
+- **Changed**: pause now stops an agent call in flight instead of waiting for it to finish. Rewind and relaunch stop a running run instead of refusing it.
+- **Added**: `span relaunch <run> [--agent name]` and the `agent` field of `POST /spans/<id>/relaunch`; the agent applies to frame, build and inspect.
+
 - The merge stage holds when the branch a pull request targets cannot be checked, instead of merging without knowing it.
 - **Changed**: every run with a branch now works in its own git worktree, from the page, `POST /spans` and `span run --branch` as `span quickstart` already did. Before, the first run of a free checkout edited it in place, and a second story could take the same checkout while the first one waited for an answer. `--in-place` (`inPlace=true` in the API) keeps the old behaviour; a checkout already on the run's branch is still used in place; `--worktree` still works. A busy checkout no longer refuses a run that gets its own tree. A launch whose branch belongs to an unfinished run is refused. Reading a Jira story again and the repository name in run lists use the project, not the worktree. A new worktree prepares itself: dependencies are installed from the lockfiles and the ignored `.env` files are copied from the checkout; `prove.prepare` still replaces the detected commands.
 

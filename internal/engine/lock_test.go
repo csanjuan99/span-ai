@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"span/internal/proc"
 	"span/internal/runlock"
 	"span/internal/statement"
 )
@@ -94,7 +96,10 @@ func TestTheLocksAreFreeWhenTheRunReturns(t *testing.T) {
 	if holder, busy := WorkspaceBusy(opt.Workspace); busy {
 		t.Fatalf("workspace still locked by %q after the run ended", holder)
 	}
-	ids, _ := filepath.Glob(filepath.Join(opt.Root, "*", "lock"))
+	ids, err := filepath.Glob(filepath.Join(opt.Root, "*", "lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, path := range ids {
 		if holder, busy := runlock.Probe(path); busy {
 			t.Fatalf("%s still locked by %q", path, holder)
@@ -103,6 +108,7 @@ func TestTheLocksAreFreeWhenTheRunReturns(t *testing.T) {
 }
 
 func TestARunningRunCannotBeRewound(t *testing.T) {
+	shortHalt(t)
 	opt, _, _, _, _, _ := baseOpt(t)
 	id, err := Open(opt)
 	if err != nil {
@@ -252,7 +258,10 @@ func TestAPersonsGitignoreInTheWorkspaceStateIsNeverOverwritten(t *testing.T) {
 	if _, err := Start(context.Background(), opt); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := os.ReadFile(mine)
+	raw, err := os.ReadFile(mine)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if string(raw) != "# mine\nkeep-me\n" {
 		t.Fatalf("the person's .gitignore was overwritten: %q", raw)
 	}
@@ -303,4 +312,12 @@ func TestClaimingAReadOnlyCheckoutDoesNotBlockTheWork(t *testing.T) {
 	}
 	lock.Release() // a nil claim is valid and releases nothing
 	lock.Relabel("run x")
+}
+
+// shortHalt keeps a test whose lock holder never ends from waiting the real limit.
+func shortHalt(t *testing.T) {
+	t.Helper()
+	wait, grace := HaltWait, proc.Grace
+	HaltWait, proc.Grace = 300*time.Millisecond, 200*time.Millisecond
+	t.Cleanup(func() { HaltWait, proc.Grace = wait, grace })
 }

@@ -17,7 +17,7 @@ export function RunningCard({
   onPause,
 }: {
   running: Running
-  /** A pause was asked for and waits for the stage boundary: the button is spent. */
+  /** A pause was asked for and has not taken effect yet: the button is spent. */
   pausePending: boolean
   onPause: () => void
 }) {
@@ -67,7 +67,7 @@ export function RunningCard({
                 ) : (
                   <PauseIcon aria-hidden="true" />
                 )}
-                {pausePending ? "Pause requested" : "Pause after this stage"}
+                {pausePending ? "Pause requested" : "Pause"}
               </Button>
               <p className="text-xs text-pretty text-muted-foreground">
                 {running.pause}
