@@ -5,11 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
-
-func itoa(n int) string { return strconv.Itoa(n) }
 
 // pidFile is where a running agent is written down: inside the state folder of the tree it
 // edits and inside the run that started it. A hard kill (SIGKILL, a crash, a power cut)

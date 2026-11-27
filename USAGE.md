@@ -1061,14 +1061,10 @@ that wrote the change.
 Only frame, build, and inspect call a model. prove, qa, open, merge, and promote run
 commands, so they cannot carry a choice and a request for them is refused.
 
-**Pause after this stage** asks the run to hold at the next stage boundary. The stage that
-is already running finishes; the run then holds with `paused before <stage>` and the
-request is consumed. Resume continues from that stage, so the order is: pause, pick the
-agent, resume.
-
-The pause does not kill a stage that is mid-write, because that would leave a half written
-statement. When you need the running stage to stop now, the run tolerates a killed
-process on resume, but Span does not offer a button for it.
+**Pause** asks the run to hold. An agent call in flight (frame, build, inspect or a conflict
+proposal) is stopped: the run holds at that stage with `paused during <stage>` and the stage
+runs again on resume. Any other stage finishes first and the run holds with `paused before
+<stage>`. Either way the request is consumed, so the order is: pause, pick the agent, resume.
 
 The page and the runner are different processes, and `cursor.json` belongs to the runner:
 a cursor written by the page is erased by the runner's next save. That is why both
@@ -1205,8 +1201,9 @@ What a restart does, and why:
 - the note is written to `.span/runs/<id>/instructions/<stage>.md`, which is the file that
   stage reads when it starts. It is the same channel as **Leave a note for a stage**.
 
-A restart refuses to start while a stage is running: stop it first, or the two writers
-would race. `POST /spans/{id}/rewind` with `stage` and an optional `note` backs the control.
+A restart of a running stage stops it first, with its agent's processes, and waits until
+the run is free, so the two never write at once. A request that is refused (an unknown stage,
+an open conflict) stops nothing. `POST /spans/{id}/rewind` with `stage` and an optional `note` backs the control.
 
 ### Stopping what is running
 
@@ -1490,7 +1487,7 @@ A refresh replays the run from disk. The socket's first message is the span obje
 | GET | `/spans/<id>/live` | WebSocket. The first frame replays the run. Later frames wake the page |
 | GET | `/spans/<id>/agent` | Whether this process still has a worker for that run |
 | GET | `/agents` | The workers this process is running |
-| POST | `/spans/<id>/relaunch` | Starts a run again when the cursor is not paused, stopped, or waiting, and no worker is left. `202` |
+| POST | `/spans/<id>/relaunch` | Starts the stage again, stopping a running one first. `agent=` chooses the CLI for frame, build and inspect. Refused when the run is stopped, done, waiting, or paused with nothing running. `202` |
 | POST | `/spans/<id>/answer` | JSON `{"answers":[{"question","body"}]}`. `202` and frame runs again |
 | POST | `/spans/<id>/story` | Reads the Jira issue again. `202` and frame runs again |
 | POST | `/spans/<id>/resume` | Continues a hold that is not waiting for an answer |
